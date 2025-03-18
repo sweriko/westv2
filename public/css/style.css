@@ -1,90 +1,120 @@
 body {
-    margin: 0;
-    overflow: hidden;
-    font-family: 'Courier New', Courier, monospace;
-  }
-  #game-container {
-    position: relative;
-    width: 100vw;
-    height: 100vh;
-  }
-  #ammo-counter {
-    position: absolute;
-    bottom: 20px;
-    right: 20px;
-    color: white;
-    font-size: 24px;
-    background-color: rgba(0,0,0,0.5);
-    padding: 10px;
-    border-radius: 5px;
-  }
-  #reload-message {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    color: white;
-    font-size: 24px;
-    background-color: rgba(0,0,0,0.5);
-    padding: 10px;
-    border-radius: 5px;
-    display: none;
-  }
-  #reload-progress-container {
-    position: absolute;
-    bottom: 60px;
-    right: 20px;
-    width: 200px;
-    height: 20px;
-    background-color: rgba(0,0,0,0.5);
-    border-radius: 10px;
-    overflow: hidden;
-    display: none;
-  }
-  #reload-progress-bar {
-    height: 100%;
-    width: 0%;
-    background-color: #FF6B00;
-    border-radius: 10px;
-    transition: width 0.05s linear;
-  }
-  #crosshair {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 20px;
-    height: 20px;
-    border: 2px solid white;
-    border-radius: 50%;
-    display: none;
-  }
-  #crosshair::before,
-  #crosshair::after {
-    content: '';
-    position: absolute;
-    background-color: white;
-  }
-  #crosshair::before {
-    width: 2px;
-    height: 10px;
-    top: 5px;
-    left: 9px;
-  }
-  #crosshair::after {
-    width: 10px;
-    height: 2px;
-    top: 9px;
-    left: 5px;
-  }
-  #fps-counter {
-    position: absolute;
-    top: 20px;
-    left: 20px;
-    color: white;
-    font-size: 16px;
-    background-color: rgba(0,0,0,0.5);
-    padding: 5px;
-    border-radius: 5px;
-  }
-  
+  margin: 0;
+  overflow: hidden;
+  font-family: 'Courier New', Courier, monospace;
+}
+#game-container {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+#ammo-counter {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  color: white;
+  font-size: 24px;
+  background-color: rgba(0,0,0,0.5);
+  padding: 10px;
+  border-radius: 5px;
+}
+#reload-message {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-size: 24px;
+  background-color: rgba(0,0,0,0.5);
+  padding: 10px;
+  border-radius: 5px;
+  display: none;
+}
+#reload-progress-container {
+  position: absolute;
+  bottom: 60px;
+  right: 20px;
+  width: 200px;
+  height: 20px;
+  background-color: rgba(0,0,0,0.5);
+  border-radius: 10px;
+  overflow: hidden;
+  display: none;
+}
+#reload-progress-bar {
+  height: 100%;
+  width: 0%;
+  background-color: #FF6B00;
+  border-radius: 10px;
+  transition: width 0.05s linear;
+}
+#crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 20px;
+  border: 2px solid white;
+  border-radius: 50%;
+  display: none;
+}
+#crosshair::before,
+#crosshair::after {
+  content: '';
+  position: absolute;
+  background-color: white;
+}
+#crosshair::before {
+  width: 2px;
+  height: 10px;
+  top: 5px;
+  left: 9px;
+}
+#crosshair::after {
+  width: 10px;
+  height: 2px;
+  top: 9px;
+  left: 5px;
+}
+#fps-counter {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  color: white;
+  font-size: 16px;
+  background-color: rgba(0,0,0,0.5);
+  padding: 5px;
+  border-radius: 5px;
+}
+#player-count {
+  position: absolute;
+  top: 50px;
+  left: 20px;
+  color: white;
+  font-size: 16px;
+  background-color: rgba(0,0,0,0.5);
+  padding: 5px;
+  border-radius: 5px;
+}
+#connection-status {
+  position: absolute;
+  top: 80px;
+  left: 20px;
+  color: white;
+  font-size: 16px;
+  background-color: rgba(0,0,0,0.5);
+  padding: 5px;
+  border-radius: 5px;
+}
+#network-status {
+  position: absolute;
+  top: 80px;
+  left: 20px;
+  color: white;
+  font-size: 16px;
+  background-color: rgba(0,0,0,0.5);
+  padding: 5px;
+  border-radius: 5px;
+  transition: opacity 1s;
+}
