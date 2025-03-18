@@ -220,7 +220,8 @@ export class ThirdPersonModel {
     const rightLegMesh = new THREE.Mesh(legGeo, pantsMat);
     rightLegMesh.position.y = -0.3;
     this.rightLeg.add(rightLegMesh);
-    this.rightLeg.position.set(0.1, 0.6, 0);
+    // Adjusted leg group vertical position from 0.6 to 0.8
+    this.rightLeg.position.set(0.1, 0.8, 0);
     this.group.add(this.rightLeg);
 
     // Left leg
@@ -228,7 +229,8 @@ export class ThirdPersonModel {
     const leftLegMesh = new THREE.Mesh(legGeo, pantsMat);
     leftLegMesh.position.y = -0.3;
     this.leftLeg.add(leftLegMesh);
-    this.leftLeg.position.set(-0.1, 0.6, 0);
+    // Adjusted leg group vertical position from 0.6 to 0.8
+    this.leftLeg.position.set(-0.1, 0.8, 0);
     this.group.add(this.leftLeg);
   }
 
@@ -257,8 +259,8 @@ export class ThirdPersonModel {
     // Attach the revolver to the left arm.
     this.leftArm.add(this.revolver.group);
     // Set default positions and rotations for non-aiming state.
-    this.revolverDefaultRotation = new THREE.Euler(-Math.PI/-1.5, Math.PI, 0);
-    this.revolverAimingRotation = new THREE.Euler(-Math.PI/0.7, Math.PI, 0);
+    this.revolverDefaultRotation = new THREE.Euler(-Math.PI / -1.5, Math.PI, 0);
+    this.revolverAimingRotation = new THREE.Euler(-Math.PI / 0.7, Math.PI, 0);
     this.revolver.group.position.set(0.05, -0.8, -0.1);
     this.revolver.group.rotation.copy(this.revolverDefaultRotation);
     this.revolver.group.visible = true;
@@ -330,7 +332,7 @@ export class ThirdPersonModel {
     this.rightArm.position.set(0.3, 1.4, 0);
 
     // Left arm (holding revolver) rotates upward.
-    this.leftArm.rotation.set(-Math.PI/2, 0, 0);
+    this.leftArm.rotation.set(-Math.PI / 2, 0, 0);
     this.leftArm.position.set(-0.3, 1.4, 0);
 
     if (this.revolver) {
@@ -350,7 +352,7 @@ export class ThirdPersonModel {
     this.rightArm.position.set(0.3, 1.4, 0);
 
     // Left arm (holding revolver) is held lower.
-    this.leftArm.rotation.set(-Math.PI/15, 0, 0);
+    this.leftArm.rotation.set(-Math.PI / 15, 0, 0);
     this.leftArm.position.set(-0.3, 1.4, 0);
 
     if (this.revolver) {
@@ -373,9 +375,9 @@ export class ThirdPersonModel {
     // Define keyframes (in ms) for the right arm reload motion.
     const frames = [
       { t: 0,    pos: { x: 0.3,  y: 1.4, z: 0 },        rot: { x: 0,       y: 0, z: 0 } },
-      { t: 250,  pos: { x: 0.2,  y: 1.5, z: 0 },        rot: { x: -Math.PI/4, y: 0, z: -Math.PI/4 } },
+      { t: 250,  pos: { x: 0.2,  y: 1.5, z: 0 },        rot: { x: -Math.PI / 4, y: 0, z: -Math.PI / 4 } },
       { t: 500,  pos: { x: 0.3,  y: 1.4, z: 0 },        rot: { x: 0,       y: 0, z: 0 } },
-      { t: 750,  pos: { x: 0.2,  y: 1.5, z: 0 },        rot: { x: -Math.PI/4, y: 0, z: -Math.PI/4 } },
+      { t: 750,  pos: { x: 0.2,  y: 1.5, z: 0 },        rot: { x: -Math.PI / 4, y: 0, z: -Math.PI / 4 } },
       { t: 1000, pos: { x: 0.3,  y: 1.4, z: 0 },        rot: { x: 0,       y: 0, z: 0 } }
     ];
 
