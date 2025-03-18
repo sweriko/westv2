@@ -13,17 +13,57 @@
     <codebase>
 Directory structure:
 └── /./
+    ├── config.yml
     ├── package.json
     ├── public/
     │   ├── css/
     │   │   └── style.css
     │   ├── index.html
     │   ├── js/
-    │   │   └── main.js
+    │   │   ├── bullet.js
+    │   │   ├── effects.js
+    │   │   ├── input.js
+    │   │   ├── main.js
+    │   │   ├── player.js
+    │   │   ├── revolver.js
+    │   │   ├── scene.js
+    │   │   ├── soundManager.js
+    │   │   └── ui.js
     │   ├── models/
     │   │   └── lowpolygun.glb
     │   └── sounds/
     └── server.js
+
+================================================
+File: /config.yml
+================================================
+version: "3"
+credentials-file: "C:\\Users\\erase\\.cloudflared\\5615d921-4c2e-4d70-affd-8696de48a673.json"
+
+ingress:
+  # This rule forwards all requests from the tunnel hostname to the local Express server.
+  - hostname: tunnel.oneclickwaitlist.com
+    path: /
+    service: http://localhost:8080
+    originRequest:
+      connectTimeout: 10s
+      noTLSVerify: true
+      proxyAddress: ""
+      proxyPort: 0
+      proxyType: ""
+      kernelSocketOptions:
+        - mark: 0
+        - keepalive: true
+      wsTunneling: true
+      http2Origin: false
+      httpHostHeader: "tunnel.oneclickwaitlist.com"
+      disableChunkedEncoding: false
+
+  # Fallback rule: returns 503 if no other rule matches.
+  - service: http_status:503
+
+origincert: "C:\\Users\\erase\\.cloudflared\\cert.pem"
+
 
 ================================================
 File: /package.json
@@ -162,114 +202,901 @@ File: /public/index.html
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <!-- GLTFLoader for loading the GLB gun model -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-  <!-- Main JS -->
-  <script src="js/main.js"></script>
+  <!-- Main JS as ES6 module -->
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>
+
+
+================================================
+File: /public/js/bullet.js
+================================================
+import { createImpactEffect } from './effects.js';
+
+export class Bullet {
+  constructor(position, direction) {
+    this.mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.02, 8, 8),
+      new THREE.MeshStandardMaterial({ color: 0xB8860B })
+    );
+    this.mesh.position.copy(position);
+    this.direction = direction.clone();
+    this.speed = 80; // Speed of the bullet
+    this.distanceTraveled = 0;
+    this.maxDistance = 100;
+  }
+  
+  /**
+   * Updates the bullet's position and checks for collisions.
+   * Calls impact effects when colliding with the NPC or ground.
+   * @param {number} deltaTime - Time elapsed since the last frame.
+   * @param {THREE.Group} npc - The NPC target (if any).
+   * @param {THREE.Scene} scene - The scene to add impact effects.
+   * @returns {boolean} - Whether the bullet should remain active.
+   */
+  update(deltaTime, npc, scene) {
+    const displacement = this.direction.clone().multiplyScalar(this.speed * deltaTime);
+    this.mesh.position.add(displacement);
+    this.distanceTraveled += displacement.length();
+    
+    // Check collision with NPC target
+    if (npc) {
+      const npcCenterPos = new THREE.Vector3(
+        npc.position.x,
+        npc.position.y + 1.0, // Approximate center of the NPC
+        npc.position.z
+      );
+      const distanceToNPC = this.mesh.position.distanceTo(npcCenterPos);
+      if (distanceToNPC < 0.7) { // Collision radius
+        createImpactEffect(this.mesh.position, this.direction, scene);
+        return false; // Bullet should be destroyed on impact
+      }
+    }
+    
+    // Check collision with ground (assuming ground level at y=0)
+    if (this.mesh.position.y <= 0.1) {
+      createImpactEffect(this.mesh.position, this.direction, scene);
+      return false; // Bullet is removed after hitting the ground
+    }
+    
+    return this.distanceTraveled < this.maxDistance;
+  }
+}
+
+
+================================================
+File: /public/js/effects.js
+================================================
+/**
+ * Recursively disposes geometry and material for the given object.
+ * @param {THREE.Object3D} object - The object to dispose.
+ */
+function disposeHierarchy(object) {
+    object.traverse(child => {
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach(mat => mat.dispose());
+        } else {
+          child.material.dispose();
+        }
+      }
+    });
+  }
+  
+  /**
+   * Helper for spring interpolation used in recoil recovery.
+   * @param {number} start - The starting value.
+   * @param {number} end - The target value.
+   * @param {number} t - Normalized time.
+   * @param {number} damping - Damping coefficient.
+   * @param {number} frequency - Oscillation frequency.
+   * @returns {number} - The interpolated value.
+   */
+  function springInterpolation(start, end, t, damping, frequency) {
+    const decay = Math.exp(-damping * t);
+    return end + (start - end) * decay * (1 + (damping / frequency) * Math.sin(frequency * t));
+  }
+  
+  /**
+   * Creates a muzzle flash effect at the given position.
+   * @param {THREE.Vector3} position - Effect position.
+   * @param {THREE.Scene} scene - The scene to add the effect.
+   */
+  export function createMuzzleFlash(position, scene) {
+    const flashGroup = new THREE.Group();
+    flashGroup.position.copy(position);
+    scene.add(flashGroup);
+  
+    const coreGeometry = new THREE.SphereGeometry(0.05, 8, 8);
+    const coreMaterial = new THREE.MeshBasicMaterial({
+      color: 0xFFFFFF,
+      transparent: true,
+      opacity: 1
+    });
+    const core = new THREE.Mesh(coreGeometry, coreMaterial);
+    flashGroup.add(core);
+  
+    const middleGeometry = new THREE.SphereGeometry(0.08, 8, 8);
+    const middleMaterial = new THREE.MeshBasicMaterial({
+      color: 0xFFFF00,
+      transparent: true,
+      opacity: 0.8
+    });
+    const middle = new THREE.Mesh(middleGeometry, middleMaterial);
+    middle.scale.x = 1.5;
+    flashGroup.add(middle);
+  
+    const outerGeometry = new THREE.SphereGeometry(0.12, 8, 8);
+    const outerMaterial = new THREE.MeshBasicMaterial({
+      color: 0xFF6B00,
+      transparent: true,
+      opacity: 0.5
+    });
+    const outer = new THREE.Mesh(outerGeometry, outerMaterial);
+    outer.scale.x = 2;
+    flashGroup.add(outer);
+  
+    const particleCount = 8;
+    for (let i = 0; i < particleCount; i++) {
+      const particleGeometry = new THREE.SphereGeometry(0.02, 4, 4);
+      const particleMaterial = new THREE.MeshBasicMaterial({
+        color: 0xFFFF00,
+        transparent: true,
+        opacity: 0.7
+      });
+      const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 0.05 + Math.random() * 0.1;
+      particle.position.set(
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius,
+        (Math.random() - 0.5) * 0.1
+      );
+      flashGroup.add(particle);
+    }
+  
+    const flashLight = new THREE.PointLight(0xFF9900, 1, 2);
+    flashLight.position.set(0, 0, 0);
+    flashGroup.add(flashLight);
+  
+    const duration = 100;
+    const startTime = performance.now();
+  
+    function animateFlash(timestamp) {
+      const elapsed = timestamp - startTime;
+      const progress = elapsed / duration;
+      if (progress < 1) {
+        core.scale.multiplyScalar(0.95);
+        const fadeOpacity = 1 - progress;
+        coreMaterial.opacity = fadeOpacity;
+        middleMaterial.opacity = fadeOpacity * 0.8;
+        outerMaterial.opacity = fadeOpacity * 0.5;
+        flashLight.intensity = 1 - progress;
+        requestAnimationFrame(animateFlash);
+      } else {
+        scene.remove(flashGroup);
+        disposeHierarchy(flashGroup);
+      }
+    }
+    requestAnimationFrame(animateFlash);
+  }
+  
+  /**
+   * Creates a smoke effect emanating from a given position.
+   * @param {THREE.Vector3} position - Start position.
+   * @param {THREE.Vector3} direction - Direction of smoke.
+   * @param {THREE.Scene} scene - The scene to add the effect.
+   */
+  export function createSmokeEffect(position, direction, scene) {
+    const particleCount = 30;
+    const particles = [];
+    const smokeGroup = new THREE.Group();
+    smokeGroup.position.copy(position);
+    scene.add(smokeGroup);
+  
+    const smokeColors = [
+      new THREE.Color(0.9, 0.9, 0.9),
+      new THREE.Color(0.8, 0.8, 0.8),
+      new THREE.Color(0.7, 0.7, 0.7),
+      new THREE.Color(0.6, 0.6, 0.6)
+    ];
+  
+    for (let i = 0; i < particleCount; i++) {
+      const size = 0.01 + Math.random() * 0.03;
+      const smokeGeometry = new THREE.SphereGeometry(size, 6, 6);
+      const colorIndex = Math.floor(Math.random() * smokeColors.length);
+      const smokeColor = smokeColors[colorIndex];
+      const smokeMaterial = new THREE.MeshBasicMaterial({
+        color: smokeColor,
+        transparent: true,
+        opacity: 0.3 + Math.random() * 0.4
+      });
+      const smokeParticle = new THREE.Mesh(smokeGeometry, smokeMaterial);
+      smokeParticle.position.set(
+        (Math.random() - 0.5) * 0.05,
+        (Math.random() - 0.5) * 0.05,
+        (Math.random() - 0.5) * 0.05
+      );
+      let particleDir = direction.clone();
+      particleDir.x += (Math.random() - 0.5) * 0.6;
+      particleDir.y += (Math.random() - 0.5) * 0.2 + 0.2;
+      particleDir.z += (Math.random() - 0.5) * 0.6;
+      particleDir.normalize();
+      const speed = 0.02 + Math.random() * 0.08;
+      const velocity = particleDir.multiplyScalar(speed);
+      const rotationSpeed = {
+        x: (Math.random() - 0.5) * 0.02,
+        y: (Math.random() - 0.5) * 0.02,
+        z: (Math.random() - 0.5) * 0.02
+      };
+      smokeGroup.add(smokeParticle);
+      particles.push({
+        mesh: smokeParticle,
+        velocity: velocity,
+        rotationSpeed: rotationSpeed,
+        life: 40 + Math.floor(Math.random() * 60),
+        maxLife: 40 + Math.floor(Math.random() * 60),
+        size: size,
+        growth: 0.005 + Math.random() * 0.01
+      });
+    }
+  
+    const interval = setInterval(() => {
+      let allDead = true;
+      particles.forEach(p => {
+        if (p.life > 0) {
+          p.mesh.position.add(p.velocity);
+          p.velocity.multiplyScalar(0.98);
+          p.velocity.x += (Math.random() - 0.5) * 0.001;
+          p.velocity.z += (Math.random() - 0.5) * 0.001;
+          p.velocity.y += 0.0008;
+          p.mesh.rotation.x += p.rotationSpeed.x;
+          p.mesh.rotation.y += p.rotationSpeed.y;
+          p.mesh.rotation.z += p.rotationSpeed.z;
+          const scale = p.size + (p.growth * (p.maxLife - p.life));
+          p.mesh.scale.set(scale, scale, scale);
+          const lifeRatio = p.life / p.maxLife;
+          p.mesh.material.opacity = lifeRatio * 0.5;
+          p.life--;
+          allDead = false;
+        } else {
+          smokeGroup.remove(p.mesh);
+          p.mesh.geometry.dispose();
+          p.mesh.material.dispose();
+        }
+      });
+      if (allDead) {
+        clearInterval(interval);
+        scene.remove(smokeGroup);
+      }
+    }, 16);
+  }
+  
+  /**
+   * Creates a shockwave ring effect in the shooting direction.
+   * @param {THREE.Vector3} position - Effect start position.
+   * @param {THREE.Vector3} direction - Firing direction.
+   * @param {THREE.Scene} scene - The scene to add the effect.
+   */
+  export function createShockwaveRing(position, direction, scene) {
+    const shockwaveGroup = new THREE.Group();
+    shockwaveGroup.position.copy(position);
+    shockwaveGroup.lookAt(position.clone().add(direction));
+    scene.add(shockwaveGroup);
+  
+    const distortionGeometry = new THREE.CircleGeometry(0.08, 32);
+    const distortionMaterial = new THREE.MeshBasicMaterial({
+      color: 0xFFFFFF,
+      transparent: true,
+      opacity: 0.2,
+      blending: THREE.AdditiveBlending
+    });
+    const distortion = new THREE.Mesh(distortionGeometry, distortionMaterial);
+    shockwaveGroup.add(distortion);
+  
+    const lineCount = 18;
+    const speedLines = [];
+    const speedLineColors = [0xFFFFFF, 0xFFFF00, 0xFF9900, 0xFF6600];
+  
+    for (let i = 0; i < lineCount; i++) {
+      const lineLength = 0.2 + Math.random() * 0.6;
+      const lineWidth = 0.003 + Math.random() * 0.005;
+      const lineGeometry = new THREE.BoxGeometry(lineWidth, lineWidth, lineLength);
+      lineGeometry.translate(0, 0, lineLength / 2);
+      const colorIndex = Math.floor(Math.random() * speedLineColors.length);
+      const lineColor = speedLineColors[colorIndex];
+      const lineMaterial = new THREE.MeshBasicMaterial({
+        color: lineColor,
+        transparent: true,
+        opacity: 0.7,
+        blending: THREE.AdditiveBlending
+      });
+      const line = new THREE.Mesh(lineGeometry, lineMaterial);
+      const spreadAngle = 15 * (Math.PI / 180);
+      line.rotation.x = (Math.random() - 0.5) * spreadAngle;
+      line.rotation.y = (Math.random() - 0.5) * spreadAngle;
+      line.scale.z = 0.1;
+      shockwaveGroup.add(line);
+      speedLines.push({
+        mesh: line,
+        material: lineMaterial,
+        maxLength: 1 + Math.random() * 2,
+        speed: 0.8 + Math.random() * 0.4,
+        delay: Math.random() * 50
+      });
+    }
+  
+    const particleCount = 12;
+    const particles = [];
+  
+    for (let i = 0; i < particleCount; i++) {
+      const particleGeometry = new THREE.SphereGeometry(0.01, 4, 4);
+      const particleMaterial = new THREE.MeshBasicMaterial({
+        color: 0xFFFF00,
+        transparent: true,
+        opacity: 0.6
+      });
+      const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+      const angle = Math.random() * Math.PI * 0.25;
+      const radius = 0.02 + Math.random() * 0.06;
+      particle.position.z = Math.cos(angle) * radius;
+      const circleAngle = Math.random() * Math.PI * 2;
+      particle.position.x = Math.sin(angle) * Math.cos(circleAngle) * radius;
+      particle.position.y = Math.sin(angle) * Math.sin(circleAngle) * radius;
+      const velocity = new THREE.Vector3(
+        particle.position.x * (0.5 + Math.random() * 0.5),
+        particle.position.y * (0.5 + Math.random() * 0.5),
+        0.05 + Math.random() * 0.1
+      );
+      shockwaveGroup.add(particle);
+      particles.push({
+        mesh: particle,
+        velocity: velocity,
+        life: 10 + Math.floor(Math.random() * 15)
+      });
+    }
+  
+    const flashLight = new THREE.PointLight(0xFF9900, 1, 2);
+    flashLight.position.set(0, 0, 0);
+    shockwaveGroup.add(flashLight);
+  
+    const duration = 350;
+    const startTime = performance.now();
+  
+    function animateShockwave(timestamp) {
+      const elapsed = timestamp - startTime;
+      const progress = elapsed / duration;
+      if (progress < 1) {
+        speedLines.forEach(line => {
+          if (elapsed > line.delay) {
+            const lineProgress = Math.min((elapsed - line.delay) / (duration - line.delay), 1);
+            if (lineProgress < 0.5) {
+              const scaleProgress = lineProgress * 2;
+              line.mesh.scale.z = line.maxLength * scaleProgress;
+            } else {
+              line.material.opacity = 0.7 * (1 - ((lineProgress - 0.5) * 2));
+            }
+          }
+        });
+        const distortionScale = 1 + progress * 5;
+        distortion.scale.set(distortionScale, distortionScale, 1);
+        distortionMaterial.opacity = 0.2 * (1 - progress);
+  
+        particles.forEach(p => {
+          if (p.life > 0) {
+            p.mesh.position.add(p.velocity);
+            p.mesh.material.opacity = (p.life / 25) * 0.6;
+            p.life--;
+          } else {
+            shockwaveGroup.remove(p.mesh);
+          }
+        });
+  
+        flashLight.intensity = 1 - progress;
+        requestAnimationFrame(animateShockwave);
+      } else {
+        scene.remove(shockwaveGroup);
+        disposeHierarchy(shockwaveGroup);
+      }
+    }
+    requestAnimationFrame(animateShockwave);
+  }
+  
+  /**
+   * Creates an impact effect when a bullet hits a target.
+   * @param {THREE.Vector3} position - Impact position.
+   * @param {THREE.Vector3} direction - Impact direction.
+   * @param {THREE.Scene} scene - The scene to add the effect.
+   */
+  export function createImpactEffect(position, direction, scene) {
+    const impactGroup = new THREE.Group();
+    impactGroup.position.copy(position);
+    scene.add(impactGroup);
+  
+    const flashGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+    const flashMaterial = new THREE.MeshBasicMaterial({
+      color: 0xFFFFFF,
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending
+    });
+    const flash = new THREE.Mesh(flashGeometry, flashMaterial);
+    impactGroup.add(flash);
+  
+    const ringGeometry = new THREE.RingGeometry(0.05, 0.06, 32);
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: 0xFF0000,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.7
+    });
+    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+    ring.lookAt(position.clone().add(direction.clone().negate()));
+    impactGroup.add(ring);
+  
+    const particleCount = 25;
+    const particles = [];
+    const particleTypes = [
+      { color: 0xFF0000, size: 0.03, gravity: 0.02 },
+      { color: 0xA00000, size: 0.02, gravity: 0.015 },
+      { color: 0x800000, size: 0.025, gravity: 0.018 }
+    ];
+  
+    for (let i = 0; i < particleCount; i++) {
+      const type = particleTypes[Math.floor(Math.random() * particleTypes.length)];
+      const particleGeometry = new THREE.SphereGeometry(type.size * (0.7 + Math.random() * 0.6), 4, 4);
+      const particleMaterial = new THREE.MeshBasicMaterial({
+        color: type.color,
+        transparent: true,
+        opacity: 0.8
+      });
+      const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+      const particleDir = direction.clone().negate();
+      particleDir.x += (Math.random() - 0.5) * 1.5;
+      particleDir.y += (Math.random() - 0.5) * 1.5;
+      particleDir.z += (Math.random() - 0.5) * 1.5;
+      particleDir.normalize();
+      const speed = 0.05 + Math.random() * 0.2;
+      const velocity = particleDir.clone().multiplyScalar(speed);
+      impactGroup.add(particle);
+      const rotationSpeed = {
+        x: (Math.random() - 0.5) * 0.2,
+        y: (Math.random() - 0.5) * 0.2,
+        z: (Math.random() - 0.5) * 0.2
+      };
+      particles.push({
+        mesh: particle,
+        velocity: velocity,
+        rotationSpeed: rotationSpeed,
+        gravity: type.gravity,
+        life: 30 + Math.floor(Math.random() * 30)
+      });
+    }
+  
+    const splatterGeometry = new THREE.CircleGeometry(0.2 + Math.random() * 0.2, 16);
+    const splatterMaterial = new THREE.MeshBasicMaterial({
+      color: 0x800000,
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide
+    });
+    const splatter = new THREE.Mesh(splatterGeometry, splatterMaterial);
+    splatter.position.copy(direction.clone().negate().multiplyScalar(0.05));
+    splatter.lookAt(position.clone().add(direction.clone().negate()));
+    splatter.rotation.z = Math.random() * Math.PI * 2;
+    splatter.scale.x = 0.7 + Math.random() * 0.6;
+    splatter.scale.y = 0.7 + Math.random() * 0.6;
+    impactGroup.add(splatter);
+  
+    const duration = 1000;
+    const startTime = performance.now();
+  
+    function animateImpact(timestamp) {
+      const elapsed = timestamp - startTime;
+      const progress = elapsed / duration;
+      if (progress < 1) {
+        flash.scale.multiplyScalar(0.95);
+        flashMaterial.opacity = 0.8 * (1 - progress);
+        const ringScale = 1 + progress * 8;
+        ring.scale.set(ringScale, ringScale, 1);
+        ringMaterial.opacity = 0.7 * (1 - progress);
+        particles.forEach(p => {
+          if (p.life > 0) {
+            p.mesh.position.add(p.velocity);
+            p.velocity.y -= p.gravity;
+            p.velocity.multiplyScalar(0.96);
+            p.mesh.rotation.x += p.rotationSpeed.x;
+            p.mesh.rotation.y += p.rotationSpeed.y;
+            p.mesh.rotation.z += p.rotationSpeed.z;
+            p.mesh.material.opacity = (p.life / 60) * 0.8;
+            p.life--;
+          } else {
+            impactGroup.remove(p.mesh);
+          }
+        });
+        if (splatter.material.opacity > 0.1) {
+          splatter.material.opacity = 0.8 * (1 - progress * 0.5);
+        }
+        requestAnimationFrame(animateImpact);
+      } else {
+        scene.remove(impactGroup);
+        disposeHierarchy(impactGroup);
+      }
+    }
+    requestAnimationFrame(animateImpact);
+  }
+  
+  /**
+   * Applies a realistic recoil effect.
+   * @param {Player} player - The player instance.
+   */
+  export function applyRecoil(player) {
+    const originalAimOffset = player.aimOffset.clone();
+    const originalFOV = player.camera.fov;
+    const originalCameraPos = player.camera.position.clone();
+    const originalRotation = player.camera.rotation.clone();
+  
+    // Initial recoil changes.
+    player.camera.rotation.x -= 0.08;
+    player.camera.rotation.z += 0.01;
+    player.aimOffset.z += 0.4;
+    player.aimOffset.y += 0.15;
+    player.aimOffset.x += 0.05;
+    player.camera.fov -= 5;
+    player.camera.updateProjectionMatrix();
+  
+    const recoilSteps = [
+      { time: 20, cameraX: -0.04, cameraZ: 0.005, offsetZ: 0.2, offsetY: 0.08, offsetX: 0.03 },
+      { time: 40, cameraX: -0.06, cameraZ: 0.008, offsetZ: 0.3, offsetY: 0.12, offsetX: 0.04 },
+      { time: 60, cameraX: -0.03, cameraZ: 0.006, offsetZ: 0.25, offsetY: 0.1, offsetX: 0.02 },
+      { time: 80, cameraX: -0.02, cameraZ: 0.004, offsetZ: 0.18, offsetY: 0.07, offsetX: 0.01 },
+      { time: 100, cameraX: -0.01, cameraZ: 0.002, offsetZ: 0.1, offsetY: 0.05, offsetX: 0.005 }
+    ];
+  
+    recoilSteps.forEach(step => {
+      setTimeout(() => {
+        player.camera.rotation.x = originalRotation.x + step.cameraX;
+        player.camera.rotation.z = originalRotation.z + step.cameraZ;
+        player.aimOffset.z = originalAimOffset.z + step.offsetZ;
+        player.aimOffset.y = originalAimOffset.y + step.offsetY;
+        player.aimOffset.x = originalAimOffset.x + step.offsetX;
+      }, step.time);
+    });
+  
+    let shakeIntensity = 0.03;
+    const shakeDecay = 0.9;
+    const shakeInterval = setInterval(() => {
+      if (shakeIntensity > 0.002) {
+        player.camera.position.x = originalCameraPos.x + (Math.random() - 0.5) * shakeIntensity;
+        player.camera.position.y = originalCameraPos.y + (Math.random() - 0.5) * shakeIntensity;
+        shakeIntensity *= shakeDecay;
+      } else {
+        clearInterval(shakeInterval);
+        player.camera.position.copy(originalCameraPos);
+      }
+    }, 16);
+  
+    let progress = 0;
+    const duration = 400;
+    const startTime = performance.now();
+  
+    function recoverFromRecoil(timestamp) {
+      progress = (timestamp - startTime) / duration;
+      if (progress < 1) {
+        const t = progress * 4;
+        player.camera.rotation.x = springInterpolation(
+          player.camera.rotation.x,
+          originalRotation.x,
+          t,
+          0.4,
+          8
+        );
+        player.camera.rotation.z = springInterpolation(
+          player.camera.rotation.z,
+          originalRotation.z,
+          t,
+          0.4,
+          8
+        );
+        player.aimOffset.x = springInterpolation(
+          player.aimOffset.x,
+          originalAimOffset.x,
+          t,
+          0.4,
+          8
+        );
+        player.aimOffset.y = springInterpolation(
+          player.aimOffset.y,
+          originalAimOffset.y,
+          t,
+          0.4,
+          8
+        );
+        player.aimOffset.z = springInterpolation(
+          player.aimOffset.z,
+          originalAimOffset.z,
+          t,
+          0.4,
+          8
+        );
+        player.camera.fov = THREE.MathUtils.lerp(
+          player.camera.fov,
+          originalFOV,
+          progress * 0.3
+        );
+        player.camera.updateProjectionMatrix();
+        requestAnimationFrame(recoverFromRecoil);
+      } else {
+        player.camera.rotation.copy(originalRotation);
+        player.aimOffset.copy(originalAimOffset);
+        player.camera.fov = originalFOV;
+        player.camera.updateProjectionMatrix();
+        player.camera.position.copy(originalCameraPos);
+      }
+    }
+    requestAnimationFrame(recoverFromRecoil);
+  }
+  
+  /**
+   * Enhanced shell ejection with realistic physics.
+   * @param {Player} player - The player instance.
+   * @param {THREE.Scene} scene - The scene to add the shell.
+   * @param {SoundManager} soundManager - For playing sound effects.
+   */
+  export function ejectShell(player, scene, soundManager) {
+    const shellGroup = new THREE.Group();
+  
+    const shellGeometry = new THREE.CylinderGeometry(0.01, 0.015, 0.04, 8);
+    const shellMaterial = new THREE.MeshStandardMaterial({
+      color: 0xD4AF37,
+      metalness: 0.8,
+      roughness: 0.2
+    });
+    const shell = new THREE.Mesh(shellGeometry, shellMaterial);
+    shellGroup.add(shell);
+  
+    const primerGeometry = new THREE.CircleGeometry(0.006, 8);
+    const primerMaterial = new THREE.MeshStandardMaterial({
+      color: 0xA0A0A0,
+      metalness: 0.7,
+      roughness: 0.3
+    });
+    const primer = new THREE.Mesh(primerGeometry, primerMaterial);
+    primer.position.y = -0.02;
+    primer.rotation.x = Math.PI / 2;
+    shellGroup.add(primer);
+  
+    const shellStart = player.revolver.getBarrelTipWorldPosition();
+    shellGroup.position.copy(shellStart);
+    shellGroup.position.x += 0.05;
+    shellGroup.position.y -= 0.02;
+    scene.add(shellGroup);
+  
+    const physics = {
+      velocity: new THREE.Vector3(
+        0.8 + Math.random() * 0.4,
+        0.5 + Math.random() * 0.3,
+        (Math.random() - 0.5) * 0.2
+      ),
+      rotationSpeed: new THREE.Vector3(
+        Math.random() * 0.2,
+        Math.random() * 0.2,
+        Math.random() * 0.2
+      ),
+      gravity: 0.015,
+      drag: 0.99
+    };
+  
+    const duration = 2000;
+    const startTime = performance.now();
+  
+    function animateShell(timestamp) {
+      const elapsed = timestamp - startTime;
+      if (elapsed < duration) {
+        shellGroup.position.x += physics.velocity.x * 0.016;
+        shellGroup.position.y += physics.velocity.y * 0.016;
+        shellGroup.position.z += physics.velocity.z * 0.016;
+        physics.velocity.y -= physics.gravity;
+        physics.velocity.multiplyScalar(physics.drag);
+        shellGroup.rotation.x += physics.rotationSpeed.x;
+        shellGroup.rotation.y += physics.rotationSpeed.y;
+        shellGroup.rotation.z += physics.rotationSpeed.z;
+  
+        // Bounce logic on ground impact.
+        if (shellGroup.position.y < 0.02 && physics.velocity.y < 0) {
+          physics.velocity.y = -physics.velocity.y * 0.6;
+          physics.velocity.x *= 0.8;
+          physics.velocity.z *= 0.8;
+          shellGroup.position.y = 0.02;
+          physics.rotationSpeed.x = Math.random() * 0.4;
+          physics.rotationSpeed.z = Math.random() * 0.4;
+        }
+        requestAnimationFrame(animateShell);
+      } else {
+        scene.remove(shellGroup);
+        shellGeometry.dispose();
+        shellMaterial.dispose();
+        primerGeometry.dispose();
+        primerMaterial.dispose();
+      }
+    }
+    requestAnimationFrame(animateShell);
+  }
+  
+
+================================================
+File: /public/js/input.js
+================================================
+/**
+ * Initializes game input and pointer lock.
+ * @param {THREE.WebGLRenderer} renderer - The renderer.
+ * @param {Player} player - The player instance.
+ * @param {SoundManager} soundManager - The sound manager.
+ */
+export function initInput(renderer, player, soundManager) {
+    document.body.addEventListener('click', () => {
+      if (document.pointerLockElement !== renderer.domElement) {
+        renderer.domElement.requestPointerLock();
+      }
+    });
+    
+    document.addEventListener('mousemove', (event) => {
+      if (document.pointerLockElement === renderer.domElement) {
+        const movementX = event.movementX || 0;
+        const movementY = event.movementY || 0;
+        let sensitivity = player.isAiming ? 0.001 : 0.002;
+        player.group.rotation.y -= movementX * sensitivity;
+        player.camera.rotation.x -= movementY * sensitivity;
+        player.camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, player.camera.rotation.x));
+      }
+    });
+    
+    document.addEventListener('keydown', (event) => {
+      switch(event.code) {
+        case 'KeyW': player.moveForward = true; break;
+        case 'KeyS': player.moveBackward = true; break;
+        case 'KeyA': player.moveLeft = true; break;
+        case 'KeyD': player.moveRight = true; break;
+        case 'Space': if (player.canJump) { player.velocity.y = 10; player.canJump = false; } break;
+        case 'KeyR': player.startReload(); break;
+      }
+    });
+    
+    document.addEventListener('keyup', (event) => {
+      switch(event.code) {
+        case 'KeyW': player.moveForward = false; break;
+        case 'KeyS': player.moveBackward = false; break;
+        case 'KeyA': player.moveLeft = false; break;
+        case 'KeyD': player.moveRight = false; break;
+      }
+    });
+    
+    document.addEventListener('mousedown', (event) => {
+      if (event.button === 2) {
+        player.isAiming = true;
+        player.revolver.group.visible = true;
+        document.getElementById('crosshair').style.display = 'block';
+        if (soundManager) {
+          soundManager.playSound("aimclick");
+        }
+      } else if (event.button === 0) {
+        if (player.revolver.group.visible) {
+          player.shoot();
+        }
+      }
+    });
+    
+    document.addEventListener('mouseup', (event) => {
+      if (event.button === 2) {
+        player.isAiming = false;
+        player.revolver.group.visible = false;
+        document.getElementById('crosshair').style.display = 'none';
+      }
+    });
+    
+    document.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+    });
+    
+    window.addEventListener('resize', () => {
+      player.camera.aspect = window.innerWidth / window.innerHeight;
+      player.camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  }
+  
 
 ================================================
 File: /public/js/main.js
 ================================================
-/* ===== GLOBAL VARIABLES ===== */
-let scene, renderer;
-let player;    // Our Player instance (holds camera, gun, movement, etc.)
-let npc;       // A simple NPC target
-const bullets = [];  // Active bullets
-let lastTime = 0;    // For deltaTime calculation
-let soundManager;    // Global SoundManager instance
+import { initScene, createNPC, updateNPC, updateFPS, scene } from './scene.js';
+import { initInput } from './input.js';
+import { SoundManager } from './soundManager.js';
+import { Player } from './player.js';
 
-/* ===== SOUND MANAGER ===== */
-/**
- * The SoundManager class preloads and caches sound effects,
- * and provides helper methods to play sounds.
- */
-class SoundManager {
-  constructor() {
-    this.sounds = {};
-  }
-  
-  /**
-   * Loads an audio file from a given URL and caches it.
-   * @param {string} name - The key to reference this sound.
-   * @param {string} url - The URL of the audio file.
-   */
-  loadSound(name, url) {
-    try {
-      const audio = new Audio();
-      audio.src = url;
-      audio.load();
-      this.sounds[name] = audio;
-    } catch (error) {
-      console.error(`Error loading sound "${name}" from ${url}:`, error);
+let renderer, camera;
+let player;
+let npc;
+let lastTime = 0;
+
+function animate(time) {
+  requestAnimationFrame(animate);
+  const deltaTime = (time - lastTime) / 1000;
+  lastTime = time;
+
+  // Update player (movement, recoil, etc.)
+  player.update(deltaTime);
+
+  // Update active bullets.
+  for (let i = player.bulletsArray.length - 1; i >= 0; i--) {
+    const bullet = player.bulletsArray[i];
+    const stillActive = bullet.update(deltaTime, npc, scene);
+    if (!stillActive) {
+      scene.remove(bullet.mesh);
+      player.bulletsArray.splice(i, 1);
     }
   }
-  
-  /**
-   * Plays a cached sound by its name.
-   * Clones the audio node to allow overlapping playback.
-   * @param {string} name - The key of the sound to play.
-   */
-  playSound(name) {
-    if (this.sounds[name]) {
-      const audioClone = this.sounds[name].cloneNode();
-      audioClone.play().catch(error => {
-        console.error(`Error playing sound "${name}":`, error);
-      });
-    } else {
-      console.error(`Sound "${name}" not found in cache.`);
-    }
-  }
-  
-  /**
-   * Plays a sequence of sounds, first playing sound1, then when it ends, plays sound2.
-   * (Note: Not used in this implementation.)
-   * @param {string} sound1 - The first sound to play.
-   * @param {string} sound2 - The sound to play after sound1 ends.
-   */
-  playSoundSequence(sound1, sound2) {
-    if (this.sounds[sound1]) {
-      const audioClone = this.sounds[sound1].cloneNode();
-      audioClone.play().then(() => {
-        audioClone.addEventListener('ended', () => {
-          this.playSound(sound2);
-        });
-      }).catch(error => {
-        console.error(`Error playing sound "${sound1}":`, error);
-      });
-    } else {
-      console.error(`Sound "${sound1}" not found in cache.`);
-    }
+
+  updateNPC(npc, deltaTime);
+  updateFPS(renderer, camera, deltaTime);
+  renderer.render(scene, camera);
+}
+
+function init() {
+  try {
+    const sceneSetup = initScene();
+    camera = sceneSetup.camera;
+    renderer = sceneSetup.renderer;
+
+    const soundManager = new SoundManager();
+    soundManager.loadSound("shot1", "sounds/shot1.mp3");
+    soundManager.loadSound("shot2", "sounds/shot2.mp3");
+    soundManager.loadSound("aimclick", "sounds/aimclick.mp3");
+    soundManager.loadSound("shellejection", "sounds/shellejection.mp3");
+    soundManager.loadSound("reloading", "sounds/reloading.mp3");
+    
+    player = new Player(scene, camera, soundManager);
+    npc = createNPC(scene);
+    initInput(renderer, player, soundManager);
+
+    animate(0);
+  } catch (error) {
+    console.error('Initialization failed:', error);
   }
 }
 
-/* ===== PLAYER, REVOLVER, BULLET CLASSES ===== */
+init();
 
-// The Player class encapsulates camera, movement, shooting, aiming, and reloading.
-class Player {
-  constructor(scene, camera) {
+
+================================================
+File: /public/js/player.js
+================================================
+import { Revolver } from './revolver.js';
+import { Bullet } from './bullet.js';
+import { updateAmmoUI } from './ui.js';
+import { createMuzzleFlash, createSmokeEffect, createShockwaveRing, applyRecoil, ejectShell } from './effects.js';
+
+export class Player {
+  constructor(scene, camera, soundManager) {
     this.scene = scene;
     this.camera = camera;
-    // Create a group for the player's position.
     this.group = new THREE.Group();
     this.group.position.set(0, 0, 0);
     this.scene.add(this.group);
-    // Attach camera at eye level.
     this.camera.position.set(0, 1.6, 0);
     this.group.add(this.camera);
 
-    // Create the revolver that loads the GLB gun model.
     this.revolver = new Revolver();
     this.camera.add(this.revolver.group);
-    // Smoothly interpolate the gun's position from holstered to aimed.
-    this.holsterOffset = new THREE.Vector3(0.6, -0.5, -0.8); // Gun at hip.
-    this.aimOffset = new THREE.Vector3(0.3, -0.3, -0.5);     // Gun in aim.
+    this.holsterOffset = new THREE.Vector3(0.6, -0.5, -0.8);
+    this.aimOffset = new THREE.Vector3(0.3, -0.3, -0.5);
     this.currentGunOffset = this.holsterOffset.clone();
     this.isAiming = false;
-    // Camera FOV targets for zoom.
+
     this.defaultFOV = 75;
     this.aimFOV = 65;
 
-    // Movement & physics.
     this.velocity = new THREE.Vector3();
     this.canJump = false;
     this.moveForward = false;
@@ -277,18 +1104,21 @@ class Player {
     this.moveLeft = false;
     this.moveRight = false;
 
-    // Shooting & reload state.
     this.bullets = 6;
     this.maxBullets = 6;
     this.isReloading = false;
-    this.reloadTime = 2000;  // milliseconds.
+    this.reloadTime = 2000; // milliseconds.
     this.reloadProgress = 0;
     this.canShoot = true;
+    this.soundManager = soundManager;
+
+    // Array to track active bullets.
+    this.bulletsArray = [];
   }
-  
+
   update(deltaTime) {
     // Smoothly interpolate gun offset & camera FOV.
-    let targetOffset = this.isAiming ? this.aimOffset : this.holsterOffset;
+    const targetOffset = this.isAiming ? this.aimOffset : this.holsterOffset;
     this.currentGunOffset.lerp(targetOffset, 0.1);
     this.revolver.group.position.copy(this.currentGunOffset);
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, this.isAiming ? this.aimFOV : this.defaultFOV, 0.1);
@@ -302,488 +1132,180 @@ class Player {
       this.group.position.y = 0;
       this.canJump = true;
     }
+
     // Movement relative to camera.
     const moveSpeed = 5;
-    let forward = new THREE.Vector3();
+    const forward = new THREE.Vector3();
     this.camera.getWorldDirection(forward);
     forward.y = 0;
     forward.normalize();
-    let right = new THREE.Vector3();
+    const right = new THREE.Vector3();
     right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
     if (this.moveForward) this.group.position.add(forward.clone().multiplyScalar(moveSpeed * deltaTime));
     if (this.moveBackward) this.group.position.add(forward.clone().multiplyScalar(-moveSpeed * deltaTime));
     if (this.moveLeft) this.group.position.add(right.clone().multiplyScalar(-moveSpeed * deltaTime));
     if (this.moveRight) this.group.position.add(right.clone().multiplyScalar(moveSpeed * deltaTime));
   }
-  
+
   shoot() {
     if (this.bullets > 0 && this.canShoot && !this.isReloading) {
       this.bullets--;
-      updateAmmoUI();
+      updateAmmoUI(this);
       this.canShoot = false;
       setTimeout(() => { this.canShoot = true; }, 250);
-      
+
       // Get bullet start position from gun barrel tip.
       const bulletStart = this.revolver.getBarrelTipWorldPosition();
-      let shootDir = new THREE.Vector3();
+      const shootDir = new THREE.Vector3();
       this.camera.getWorldDirection(shootDir);
       // Add slight randomness.
-      shootDir.x += (Math.random()-0.5)*0.02;
-      shootDir.y += (Math.random()-0.5)*0.02;
-      shootDir.z += (Math.random()-0.5)*0.02;
+      shootDir.x += (Math.random() - 0.5) * 0.02;
+      shootDir.y += (Math.random() - 0.5) * 0.02;
+      shootDir.z += (Math.random() - 0.5) * 0.02;
       shootDir.normalize();
-      
-      const bullet = new Bullet(bulletStart, shootDir);
-      bullets.push(bullet);
-      this.scene.add(bullet.mesh);
-      
-      // Create muzzle flash and smoke at the barrel tip.
-      createMuzzleFlash(bulletStart);
-      createSmokeEffect(bulletStart, shootDir);
-      createShockwaveRing(bulletStart, shootDir);
-      // Apply recoil (camera shake).
-      applyRecoil();
 
-      // Play a random shot sound.
-      if (soundManager) {
+      const bullet = new Bullet(bulletStart, shootDir);
+      this.bulletsArray.push(bullet);
+      this.scene.add(bullet.mesh);
+
+      // Create muzzle flash and other shooting effects.
+      createMuzzleFlash(bulletStart, this.scene);
+      createSmokeEffect(bulletStart, shootDir, this.scene);
+      createShockwaveRing(bulletStart, shootDir, this.scene);
+      applyRecoil(this);
+
+      // Play a random shot sound (either shot1 or shot2).
+      if (this.soundManager) {
         const shotSound = Math.random() < 0.5 ? "shot1" : "shot2";
-        soundManager.playSound(shotSound);
+        this.soundManager.playSound(shotSound);
       }
     }
     if (this.bullets === 0) {
-      document.getElementById('reload-message').style.display = 'block';
+      const reloadMessage = document.getElementById('reload-message');
+      if (reloadMessage) {
+        reloadMessage.style.display = 'block';
+      }
     }
   }
-  
+
   startReload() {
     if (!this.isReloading && this.bullets < this.maxBullets) {
       this.isReloading = true;
       this.reloadProgress = 0;
-      document.getElementById('reload-message').style.display = 'none';
-      document.getElementById('reload-progress-container').style.display = 'block';
-      // Play shellejection and reloading sounds concurrently.
-      if (soundManager) {
-        soundManager.playSound("shellejection");
-        soundManager.playSound("reloading");
+      const reloadMessage = document.getElementById('reload-message');
+      const reloadProgressContainer = document.getElementById('reload-progress-container');
+      if (reloadMessage) reloadMessage.style.display = 'none';
+      if (reloadProgressContainer) reloadProgressContainer.style.display = 'block';
+      if (this.soundManager) {
+        this.soundManager.playSound("shellejection");
+        this.soundManager.playSound("reloading");
       }
-      // Eject spent shells with staggered delays.
+      // Eject shells sequentially.
       for (let i = 0; i < this.maxBullets; i++) {
-        setTimeout(() => { ejectShell(); }, i * 200);
+        setTimeout(() => { 
+          ejectShell(this, this.scene, this.soundManager); 
+        }, i * 200);
       }
-      const reloadInterval = setInterval(() => {
-        this.reloadProgress += 100 / (this.reloadTime / 50);
-        document.getElementById('reload-progress-bar').style.width = Math.min(this.reloadProgress, 100) + '%';
-        if (this.reloadProgress >= 100) {
-          clearInterval(reloadInterval);
+      const startTime = performance.now();
+      const updateReload = (currentTime) => {
+        const elapsed = currentTime - startTime;
+        this.reloadProgress = Math.min((elapsed / this.reloadTime) * 100, 100);
+        const reloadProgressBar = document.getElementById('reload-progress-bar');
+        if (reloadProgressBar) {
+          reloadProgressBar.style.width = this.reloadProgress + '%';
+        }
+        if (elapsed < this.reloadTime) {
+          requestAnimationFrame(updateReload);
+        } else {
           this.completeReload();
         }
-      }, 50);
+      };
+      requestAnimationFrame(updateReload);
     }
   }
-  
+
   completeReload() {
     this.bullets = this.maxBullets;
-    updateAmmoUI();
-    document.getElementById('reload-progress-container').style.display = 'none';
-    document.getElementById('reload-progress-bar').style.width = '0%';
+    updateAmmoUI(this);
+    const reloadProgressContainer = document.getElementById('reload-progress-container');
+    const reloadProgressBar = document.getElementById('reload-progress-bar');
+    if (reloadProgressContainer) reloadProgressContainer.style.display = 'none';
+    if (reloadProgressBar) reloadProgressBar.style.width = '0%';
     this.isReloading = false;
   }
 }
 
-// The Revolver class loads a low–poly GLB gun model via GLTFLoader.
-class Revolver {
-  constructor() {
-    this.group = new THREE.Group();
-    // Load the GLB model (replace the URL with your model's URL).
-    const loader = new THREE.GLTFLoader();
-    loader.load('models/lowpolygun.glb', (gltf) => {
-      const gunModel = gltf.scene;
-      gunModel.scale.set(0.5, 0.5, 0.5);
-      // Rotate/position the model so the barrel points forward.
-      gunModel.position.set(0, 0, 0);
-      gunModel.rotation.set(0, Math.PI, 0);
-      this.group.add(gunModel);
-      this.gunModel = gunModel;
-    }, undefined, (error) => {
-      console.error('Error loading gun model:', error);
-    });
-  }
-  
-  // Returns the world position of the barrel tip.
-  // Here we invert the local Z offset (from 0.7 to -0.7) so the effects appear at the correct end.
-  getBarrelTipWorldPosition() {
-    const localTip = new THREE.Vector3(0, 0, -0.7);
-    return this.group.localToWorld(localTip);
-  }
-}
 
-// The Bullet class creates a small sphere that travels in a given direction.
-class Bullet {
-  constructor(position, direction) {
-    this.mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.02, 8, 8),
-      new THREE.MeshStandardMaterial({ color: 0xB8860B })
-    );
-    this.mesh.position.copy(position);
-    this.direction = direction.clone();
-    this.speed = 80; // Doubled from 40 to 80
-    this.distanceTraveled = 0;
-    this.maxDistance = 100;
-  }
-  
-  update(deltaTime) {
-    const displacement = this.direction.clone().multiplyScalar(this.speed * deltaTime);
-    this.mesh.position.add(displacement);
-    this.distanceTraveled += displacement.length();
-    
-    // Check for collision with NPC
-    if (npc) {
-      // Calculate distance to NPC center (roughly body position)
-      const npcCenterPos = new THREE.Vector3(
-        npc.position.x,
-        npc.position.y + 1.0, // Middle of body
-        npc.position.z
-      );
-      const distanceToNPC = this.mesh.position.distanceTo(npcCenterPos);
-      
-      // If within reasonable distance (hit box)
-      if (distanceToNPC < 0.7) { // Adjust collision radius as needed
-        createImpactEffect(this.mesh.position, this.direction);
-        return false; // Bullet is destroyed on impact
-      }
+================================================
+File: /public/js/revolver.js
+================================================
+export class Revolver {
+    constructor() {
+      this.group = new THREE.Group();
+      // Load the GLB gun model via GLTFLoader.
+      const loader = new THREE.GLTFLoader();
+      loader.load('models/lowpolygun.glb', (gltf) => {
+        const gunModel = gltf.scene;
+        gunModel.scale.set(0.5, 0.5, 0.5);
+        gunModel.position.set(0, 0, 0);
+        gunModel.rotation.set(0, Math.PI, 0);
+        this.group.add(gunModel);
+        this.gunModel = gunModel;
+      }, undefined, (error) => {
+        console.error('Error loading gun model:', error);
+      });
     }
     
-    return this.distanceTraveled < this.maxDistance;
-  }
-}
-
-/* ===== UTILITY FUNCTIONS ===== */
-
-// Update the ammo counter UI.
-function updateAmmoUI() {
-  document.getElementById('ammo-counter').textContent =
-    `Bullets: ${player.bullets}/${player.maxBullets}`;
-}
-
-// Create a muzzle flash effect at the given position.
-function createMuzzleFlash(position) {
-  const flashGeometry = new THREE.SphereGeometry(0.08, 8, 8);
-  const flashMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFFFF00,
-    transparent: true,
-    opacity: 0.8
-  });
-  const flash = new THREE.Mesh(flashGeometry, flashMaterial);
-  // Position the flash at the barrel tip.
-  flash.position.copy(position);
-  scene.add(flash);
-  setTimeout(() => scene.remove(flash), 100);
-}
-
-// Create a simple smoke effect from the barrel.
-function createSmokeEffect(position, direction) {
-  const particleCount = 10;
-  const particles = [];
-  const pixelSize = 0.025;
-  for (let i = 0; i < particleCount; i++) {
-    const smokeGeometry = new THREE.BoxGeometry(pixelSize, pixelSize, pixelSize);
-    const grayValue = 0.6 + Math.random() * 0.3;
-    const smokeMaterial = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(grayValue, grayValue, grayValue),
-      transparent: true,
-      opacity: 0.7
-    });
-    const smokeParticle = new THREE.Mesh(smokeGeometry, smokeMaterial);
-    // Position the smoke at the barrel tip.
-    smokeParticle.position.copy(position);
-    // Slight random offset.
-    smokeParticle.position.x += (Math.random()-0.5)*0.05;
-    smokeParticle.position.y += (Math.random()-0.5)*0.05;
-    smokeParticle.position.z += (Math.random()-0.5)*0.05;
-    let particleDir = direction.clone();
-    particleDir.x += (Math.random()-0.5)*0.3;
-    particleDir.y += (Math.random()-0.5)*0.3 + 0.1;
-    particleDir.z += (Math.random()-0.5)*0.3;
-    particleDir.normalize();
-    const speed = 0.03 + Math.random() * 0.05;
-    const velocity = particleDir.multiplyScalar(speed);
-    scene.add(smokeParticle);
-    particles.push({
-      mesh: smokeParticle,
-      velocity: velocity,
-      life: 30 + Math.floor(Math.random()*30),
-      maxLife: 30 + Math.floor(Math.random()*30)
-    });
-  }
-  const interval = setInterval(() => {
-    let allDead = true;
-    particles.forEach(p => {
-      if (p.life > 0) {
-        p.mesh.position.add(p.velocity);
-        p.velocity.multiplyScalar(0.97);
-        p.velocity.y += 0.0005;
-        p.mesh.material.opacity = (p.life / p.maxLife) * 0.7;
-        p.life--;
-        allDead = false;
-      } else {
-        scene.remove(p.mesh);
-      }
-    });
-    if (allDead) clearInterval(interval);
-  }, 16);
-}
-
-// Create a shockwave ring effect expanding from the barrel
-function createShockwaveRing(position, direction) {
-  // Create a ring geometry
-  const ringGeometry = new THREE.RingGeometry(0.05, 0.06, 32);
-  const ringMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFFFF00,
-    side: THREE.DoubleSide,
-    transparent: true,
-    opacity: 0.8
-  });
-  
-  const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-  ring.position.copy(position);
-  
-  // Orient the ring to face outward from the barrel
-  ring.lookAt(position.clone().add(direction));
-  
-  scene.add(ring);
-  
-  // Animate the ring expanding outward
-  const duration = 300; // 300ms duration
-  const startTime = performance.now();
-  const startScale = 1;
-  const endScale = 10;
-  
-  function animateShockwave(timestamp) {
-    const elapsed = timestamp - startTime;
-    const progress = elapsed / duration;
-    
-    if (progress < 1) {
-      // Expand the ring
-      const currentScale = startScale + (endScale - startScale) * progress;
-      ring.scale.set(currentScale, currentScale, 1);
-      
-      // Fade out the ring
-      ring.material.opacity = 0.8 * (1 - progress);
-      
-      requestAnimationFrame(animateShockwave);
-    } else {
-      // Remove the ring when animation completes
-      scene.remove(ring);
-      ring.material.dispose();
-      ringGeometry.dispose();
+    /**
+     * Returns the world position of the gun barrel tip.
+     */
+    getBarrelTipWorldPosition() {
+      const localTip = new THREE.Vector3(0, 0, -0.7);
+      return this.group.localToWorld(localTip);
     }
   }
   
-  requestAnimationFrame(animateShockwave);
-}
 
-// Create an impact effect when a bullet hits a target
-function createImpactEffect(position, direction) {
-  // Create debris/blood particles
-  const particleCount = 15;
-  const particles = [];
-  
-  for (let i = 0; i < particleCount; i++) {
-    const particleGeometry = new THREE.SphereGeometry(0.03, 4, 4);
-    const particleMaterial = new THREE.MeshBasicMaterial({
-      color: 0xFF0000, // Red for blood splatter
-      transparent: true,
-      opacity: 0.8
-    });
-    
-    const particle = new THREE.Mesh(particleGeometry, particleMaterial);
-    particle.position.copy(position);
-    
-    // Scatter in roughly opposing direction from bullet
-    const particleDir = direction.clone().negate();
-    particleDir.x += (Math.random() - 0.5) * 2;
-    particleDir.y += (Math.random() - 0.5) * 2;
-    particleDir.z += (Math.random() - 0.5) * 2;
-    particleDir.normalize();
-    
-    const speed = 0.1 + Math.random() * 0.3;
-    const velocity = particleDir.multiplyScalar(speed);
-    
-    scene.add(particle);
-    particles.push({
-      mesh: particle,
-      velocity: velocity,
-      life: 30 + Math.floor(Math.random() * 20)
-    });
-  }
-  
-  // Also create an impact flash
-  const impactGeometry = new THREE.SphereGeometry(0.1, 8, 8);
-  const impactMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFFFFFF,
-    transparent: true,
-    opacity: 0.8
-  });
-  const impactFlash = new THREE.Mesh(impactGeometry, impactMaterial);
-  impactFlash.position.copy(position);
-  scene.add(impactFlash);
-  
-  // Fade out impact flash
-  let flashOpacity = 0.8;
-  const flashInterval = setInterval(() => {
-    flashOpacity -= 0.1;
-    impactFlash.material.opacity = flashOpacity;
-    if (flashOpacity <= 0) {
-      clearInterval(flashInterval);
-      scene.remove(impactFlash);
-      impactFlash.material.dispose();
-      impactGeometry.dispose();
-    }
-  }, 30);
-  
-  // Animate particles
-  const interval = setInterval(() => {
-    let allDead = true;
-    particles.forEach(p => {
-      if (p.life > 0) {
-        p.mesh.position.add(p.velocity);
-        p.velocity.y -= 0.01; // Gravity
-        p.mesh.material.opacity = p.life / 50;
-        p.life--;
-        allDead = false;
-      } else {
-        scene.remove(p.mesh);
-        p.mesh.material.dispose();
-        p.mesh.geometry.dispose();
-      }
-    });
-    
-    if (allDead) clearInterval(interval);
-  }, 16);
-}
+================================================
+File: /public/js/scene.js
+================================================
+export let scene;
 
-// Apply enhanced recoil to both the gun model and viewport
-function applyRecoil() {
-  // Store original values
-  const originalAimOffset = player.aimOffset.clone();
-  const originalFOV = player.camera.fov;
-  const originalCameraPos = player.camera.position.clone();
-  
-  // Apply intense viewport shake
-  const recoilIntensity = 0.2; // Increased from 0.05
-  player.camera.position.x += (Math.random()-0.5) * recoilIntensity;
-  player.camera.position.y += (Math.random()-0.5) * recoilIntensity;
-  
-  // Apply recoil to gun by temporarily modifying the aim offset
-  player.aimOffset.z += 0.3; // Kick the gun back
-  player.aimOffset.y += 0.1; // Kick the gun up
-  
-  // Add a slight camera rotation for more intense effect
-  const originalRotation = player.camera.rotation.clone();
-  player.camera.rotation.x -= 0.05; // Kick upward
-  
-  // Kick the FOV to enhance the effect
-  player.camera.fov -= 5;
-  player.camera.updateProjectionMatrix();
-  
-  // Recover over time with a smooth animation
-  let progress = 0;
-  const duration = 300; // 300ms for recovery
-  const startTime = performance.now();
-  
-  function recoverFromRecoil(timestamp) {
-    progress = (timestamp - startTime) / duration;
-    
-    if (progress < 1) {
-      // Smoothly interpolate back to original values
-      player.camera.rotation.x = THREE.MathUtils.lerp(
-        player.camera.rotation.x,
-        originalRotation.x,
-        progress * 0.2
-      );
-      
-      player.aimOffset.lerp(originalAimOffset, progress * 0.2);
-      player.camera.fov = THREE.MathUtils.lerp(
-        player.camera.fov,
-        originalFOV,
-        progress * 0.2
-      );
-      player.camera.updateProjectionMatrix();
-      
-      // Continue animation
-      requestAnimationFrame(recoverFromRecoil);
-    } else {
-      // Final reset to ensure precision
-      player.camera.rotation.copy(originalRotation);
-      player.aimOffset.copy(originalAimOffset);
-      player.camera.fov = originalFOV;
-      player.camera.updateProjectionMatrix();
-      player.camera.position.copy(originalCameraPos);
-    }
-  }
-  
-  requestAnimationFrame(recoverFromRecoil);
-}
-
-// Eject a bullet shell with an animated fly-away.
-function ejectShell() {
-  const shellGeometry = new THREE.CylinderGeometry(0.01, 0.01, 0.03, 8);
-  const shellMaterial = new THREE.MeshStandardMaterial({ color: 0xD4AF37 });
-  const shell = new THREE.Mesh(shellGeometry, shellMaterial);
-  // Start at the gun's barrel tip.
-  const shellStart = player.revolver.getBarrelTipWorldPosition();
-  shell.position.copy(shellStart);
-  scene.add(shell);
-  
-  // Determine an ejection direction (to the right and upward).
-  const ejectionDir = new THREE.Vector3(1, 1, 0).normalize();
-  const speed = 1 + Math.random()*0.5;
-  const duration = 1000; // 1 second.
-  const startTime = performance.now();
-  
-  function animateShell(time) {
-    const elapsed = time - startTime;
-    const t = elapsed / duration;
-    if (t < 1) {
-      shell.position.add(ejectionDir.clone().multiplyScalar(speed * (time - startTime) / 1000));
-      shell.rotation.x += 0.1;
-      shell.rotation.y += 0.1;
-      requestAnimationFrame(animateShell);
-    } else {
-      scene.remove(shell);
-    }
-  }
-  requestAnimationFrame(animateShell);
-}
-
-/* ===== SCENE, CAMERA, RENDERER SETUP ===== */
-function initScene() {
+/**
+ * Initializes the Three.js scene, camera, and renderer.
+ * @returns {Object} - Contains the camera and renderer.
+ */
+export function initScene() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87CEEB);
   scene.fog = new THREE.Fog(0x87CEEB, 10, 750);
-  
-  renderer = new THREE.WebGLRenderer({ antialias: true });
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
-  document.getElementById('game-container').appendChild(renderer.domElement);
-  
+  const gameContainer = document.getElementById('game-container');
+  if (!gameContainer) {
+    throw new Error("Game container not found in HTML.");
+  }
+  gameContainer.appendChild(renderer.domElement);
+
   const camera = new THREE.PerspectiveCamera(
     75,
-    window.innerWidth/window.innerHeight,
+    window.innerWidth / window.innerHeight,
     0.1,
     1000
   );
-  
+
   const ambientLight = new THREE.AmbientLight(0x404040);
   scene.add(ambientLight);
-  
+
   const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-  directionalLight.position.set(1,1,0.5).normalize();
+  directionalLight.position.set(1, 1, 0.5).normalize();
   directionalLight.castShadow = true;
   directionalLight.shadow.mapSize.width = 2048;
   directionalLight.shadow.mapSize.height = 2048;
   scene.add(directionalLight);
-  
+
   const groundGeometry = new THREE.PlaneGeometry(1000, 1000);
   const groundMaterial = new THREE.MeshStandardMaterial({
     color: 0xCD853F,
@@ -791,15 +1313,19 @@ function initScene() {
     metalness: 0.2
   });
   const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-  ground.rotation.x = -Math.PI/2;
+  ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
-  
-  return camera;
+
+  return { camera, renderer };
 }
 
-/* ===== SIMPLE NPC TARGET ===== */
-function createNPC() {
+/**
+ * Creates a simple NPC target.
+ * @param {THREE.Scene} scene - The scene to add the NPC.
+ * @returns {THREE.Group} - The NPC group.
+ */
+export function createNPC(scene) {
   const npcGroup = new THREE.Group();
   const bodyGeometry = new THREE.CylinderGeometry(0.4, 0.3, 1.5, 8);
   const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0x8B0000 });
@@ -816,164 +1342,144 @@ function createNPC() {
   const hat = new THREE.Mesh(hatGeometry, hatMaterial);
   hat.position.y = 2.0;
   npcGroup.add(hat);
-  
-  npcGroup.position.set(0,0,-10);
+
+  npcGroup.position.set(0, 0, -10);
   scene.add(npcGroup);
   return npcGroup;
 }
 
-let npcDirection = 1;
-function updateNPC(deltaTime) {
+/**
+ * Updates the NPC’s position.
+ * @param {THREE.Group} npc - The NPC group.
+ * @param {number} deltaTime - Time elapsed since last frame.
+ */
+export function updateNPC(npc, deltaTime) {
   if (npc) {
-    npc.position.x += npcDirection * 2 * deltaTime;
+    npc.userData.direction = npc.userData.direction || 1;
+    npc.position.x += npc.userData.direction * 2 * deltaTime;
     if (npc.position.x > 15) {
-      npcDirection = -1;
-      npc.rotation.y = Math.PI/2;
+      npc.userData.direction = -1;
+      npc.rotation.y = Math.PI / 2;
     } else if (npc.position.x < -15) {
-      npcDirection = 1;
-      npc.rotation.y = -Math.PI/2;
+      npc.userData.direction = 1;
+      npc.rotation.y = -Math.PI / 2;
     }
   }
 }
 
-/* ===== INPUT & POINTER LOCK ===== */
-function initInput() {
-  document.body.addEventListener('click', () => {
-    if (document.pointerLockElement !== renderer.domElement) {
-      renderer.domElement.requestPointerLock();
-    }
-  });
-  
-  document.addEventListener('mousemove', (event) => {
-    if (document.pointerLockElement === renderer.domElement) {
-      const movementX = event.movementX || 0;
-      const movementY = event.movementY || 0;
-      // Reduce sensitivity when aiming.
-      let sensitivity = player.isAiming ? 0.001 : 0.002;
-      player.group.rotation.y -= movementX * sensitivity;
-      player.camera.rotation.x -= movementY * sensitivity;
-      player.camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, player.camera.rotation.x));
-    }
-  });
-  
-  document.addEventListener('keydown', (event) => {
-    switch(event.code) {
-      case 'KeyW': player.moveForward = true; break;
-      case 'KeyS': player.moveBackward = true; break;
-      case 'KeyA': player.moveLeft = true; break;
-      case 'KeyD': player.moveRight = true; break;
-      case 'Space': if(player.canJump){ player.velocity.y = 10; player.canJump = false; } break;
-      case 'KeyR': player.startReload(); break;
-    }
-  });
-  
-  document.addEventListener('keyup', (event) => {
-    switch(event.code) {
-      case 'KeyW': player.moveForward = false; break;
-      case 'KeyS': player.moveBackward = false; break;
-      case 'KeyA': player.moveLeft = false; break;
-      case 'KeyD': player.moveRight = false; break;
-    }
-  });
-  
-  // Right mouse button: smooth aim animation.
-  document.addEventListener('mousedown', (event) => {
-    if(event.button === 2) {  // Right-click: begin aiming.
-      player.isAiming = true;
-      player.revolver.group.visible = true;
-      document.getElementById('crosshair').style.display = 'block';
-      // Play the aim-click sound effect.
-      if (soundManager) {
-        soundManager.playSound("aimclick");
-      }
-    } else if(event.button === 0) {  // Left-click: shoot if aiming.
-      if(player.revolver.group.visible) {
-        player.shoot();
-      }
-    }
-  });
-  
-  document.addEventListener('mouseup', (event) => {
-    if(event.button === 2) {  // Right-click released: stop aiming.
-      player.isAiming = false;
-      player.revolver.group.visible = false;
-      document.getElementById('crosshair').style.display = 'none';
-    }
-  });
-  
-  document.addEventListener('contextmenu', (event) => {
-    event.preventDefault();
-  });
-  
-  window.addEventListener('resize', () => {
-    player.camera.aspect = window.innerWidth/window.innerHeight;
-    player.camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-}
-
-/* ===== FPS COUNTER ===== */
-function updateFPS(deltaTime) {
+/**
+ * Updates the FPS counter.
+ * @param {THREE.WebGLRenderer} renderer - The renderer.
+ * @param {THREE.Camera} camera - The camera.
+ * @param {number} deltaTime - Time elapsed since last frame.
+ */
+export function updateFPS(renderer, camera, deltaTime) {
   const fpsCounter = document.getElementById('fps-counter');
-  const currentFPS = Math.round(1/deltaTime);
-  fpsCounter.textContent = `FPS: ${currentFPS}`;
+  if (fpsCounter) {
+    const currentFPS = deltaTime > 0 ? Math.round(1 / deltaTime) : 0;
+    fpsCounter.textContent = `FPS: ${currentFPS}`;
+  }
 }
 
-/* ===== ANIMATION LOOP ===== */
-function animate(time) {
-  requestAnimationFrame(animate);
-  const deltaTime = (time - lastTime) / 1000;
-  lastTime = time;
-  
-  player.update(deltaTime);
-  
-  // Update active bullets.
-  for(let i = bullets.length - 1; i >= 0; i--) {
-    const stillActive = bullets[i].update(deltaTime);
-    if(!stillActive) {
-      scene.remove(bullets[i].mesh);
-      bullets.splice(i,1);
+
+================================================
+File: /public/js/soundManager.js
+================================================
+export class SoundManager {
+    constructor() {
+      this.sounds = {};
+    }
+    
+    /**
+     * Loads an audio file and caches it.
+     * @param {string} name - Sound key.
+     * @param {string} url - Audio file URL.
+     */
+    loadSound(name, url) {
+      try {
+        const audio = new Audio();
+        audio.src = url;
+        audio.load();
+        this.sounds[name] = audio;
+      } catch (error) {
+        console.error(`Error loading sound "${name}" from ${url}:`, error);
+      }
+    }
+    
+    /**
+     * Plays a cached sound by cloning the node.
+     * @param {string} name - Sound key.
+     */
+    playSound(name) {
+      if (this.sounds[name]) {
+        const audioClone = this.sounds[name].cloneNode();
+        audioClone.play().catch(error => {
+          console.error(`Error playing sound "${name}":`, error);
+        });
+      } else {
+        console.error(`Sound "${name}" not found in cache.`);
+      }
+    }
+    
+    /**
+     * Plays a sequence: after sound1 ends, sound2 plays.
+     * @param {string} sound1 - First sound key.
+     * @param {string} sound2 - Second sound key.
+     */
+    playSoundSequence(sound1, sound2) {
+      if (this.sounds[sound1]) {
+        const audioClone = this.sounds[sound1].cloneNode();
+        audioClone.play().then(() => {
+          audioClone.addEventListener('ended', () => {
+            this.playSound(sound2);
+          });
+        }).catch(error => {
+          console.error(`Error playing sound "${sound1}":`, error);
+        });
+      } else {
+        console.error(`Sound "${sound1}" not found in cache.`);
+      }
     }
   }
   
-  updateNPC(deltaTime);
-  updateFPS(deltaTime);
-  renderer.render(scene, player.camera);
-}
 
-/* ===== INITIALIZATION ===== */
-function init() {
-  // Initialize the sound manager and preload sounds.
-  soundManager = new SoundManager();
-  soundManager.loadSound("shot1", "sounds/shot1.mp3");
-  soundManager.loadSound("shot2", "sounds/shot2.mp3");
-  soundManager.loadSound("aimclick", "sounds/aimclick.mp3");
-  soundManager.loadSound("shellejection", "sounds/shellejection.mp3");
-  soundManager.loadSound("reloading", "sounds/reloading.mp3");
-
-  const camera = initScene();
-  player = new Player(scene, camera);
-  npc = createNPC();
-  initInput();
-  updateAmmoUI();
-  animate(0);
-}
-
-init();
-
+================================================
+File: /public/js/ui.js
+================================================
+/**
+ * Updates the ammo counter in the UI.
+ * @param {Player} player - The player instance.
+ */
+export function updateAmmoUI(player) {
+    const ammoCounter = document.getElementById('ammo-counter');
+    if (ammoCounter && player) {
+      ammoCounter.textContent = `Bullets: ${player.bullets}/${player.maxBullets}`;
+    }
+  }
+  
 
 ================================================
 File: /server.js
 ================================================
+// server.js
 const express = require('express');
 const app = express();
-const PORT = process.env.PORT || 3000;
+
+// Set the port to 8080 by default so that it matches the Cloudflare Tunnel configuration.
+// You can override this by setting the PORT environment variable if needed.
+const PORT = process.env.PORT || 8080;
 
 // Serve static files from the "public" directory.
 app.use(express.static('public'));
 
-app.listen(PORT, () => {
+// Start the server and log a confirmation message.
+const server = app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
+});
+
+// Add error handling for the server startup.
+server.on('error', (err) => {
+  console.error('Server failed to start:', err);
 });
     </codebase>
 </context>
