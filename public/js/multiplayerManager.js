@@ -3,7 +3,7 @@ import { networkManager } from './network.js';
 
 /**
  * Manages all remote players (their models, animations, etc.) but NOT bullets.
- * Bullets are now handled in `main.js`.
+ * Bullets are now handled in main.js.
  */
 export class MultiplayerManager {
   constructor(scene, soundManager, remotePlayersMap) {
@@ -63,20 +63,25 @@ export class MultiplayerManager {
 
     // We no longer handle bullets here (onPlayerShoot) – that's handled in main.js
 
-    // Player got hit
+    // Player got hit (local player)
     networkManager.onPlayerHit = (sourceId, hitData) => {
-      // If this client is the one that got hit, show a red flash
       console.log(`I was hit by player ${sourceId}!`);
       this.showHitFeedback();
+      // Reduce local player's health (assumes window.localPlayer is set)
+      if (window.localPlayer && typeof window.localPlayer.takeDamage === 'function') {
+         window.localPlayer.takeDamage(20);
+      }
     };
 
-    // Broadcast that some player was hit (for visual effects)
+    // Broadcast that some player was hit (for visual effects and health updates)
     networkManager.onPlayerHitBroadcast = (targetId, sourceId, hitPos) => {
       console.log(`Player ${targetId} was hit by ${sourceId}`);
-      // If the target is in our remotePlayers map, show them flashing red
       const tPlayer = this.remotePlayers.get(parseInt(targetId));
       if (tPlayer) {
         tPlayer.showHitFeedback();
+        if (typeof tPlayer.takeDamage === 'function') {
+          tPlayer.takeDamage(20);
+        }
       }
     };
   }
@@ -111,7 +116,6 @@ export class MultiplayerManager {
   }
 
   addPlayer(playerId, data) {
-    // Create a ThirdPersonModel for the remote player
     console.log(`Adding remote player ${playerId}`);
     const model = new ThirdPersonModel(this.scene, playerId);
     model.update(data);
@@ -128,15 +132,14 @@ export class MultiplayerManager {
   }
 
   update(deltaTime) {
-    // Animate each remote player's walk cycle, etc.
+    // Animate each remote player's walk cycle and smoothly update movement
     for (const [playerId, remoteModel] of this.remotePlayers.entries()) {
       if (remoteModel.isWalking) {
         remoteModel.animateWalk(deltaTime);
       } else {
         remoteModel.resetWalkAnimation();
       }
-      // Keep collision boxes up to date
-      remoteModel.updateCollisionBox();
+      remoteModel.animateMovement(deltaTime);
     }
   }
 

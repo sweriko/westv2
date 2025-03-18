@@ -43,6 +43,8 @@ function init() {
       soundManager,
       onShoot: handleLocalPlayerShoot  // callback for local shooting
     });
+    // Make localPlayer globally accessible for hit updates.
+    window.localPlayer = localPlayer;
 
     // Create an NPC target
     npc = createNPC(scene);
@@ -101,7 +103,7 @@ function animate(time) {
   // Update NPC
   updateNPC(npc, deltaTime);
 
-  // Update remote players (animations, etc.)
+  // Update remote players (animations, movement interpolation, etc.)
   multiplayerManager.update(deltaTime);
 
   // Update bullets (both local & remote)
@@ -217,15 +219,14 @@ function showGameInstructions() {
   instructions.style.textAlign = 'center';
   instructions.style.zIndex = '1000';
   
-  instructions.innerHTML = `
-    <h2>Wild Western Shooter - Multiplayer</h2>
+  instructions.innerHTML = 
+    `<h2>Wild Western Shooter - Multiplayer</h2>
     <p>WASD: Move</p>
     <p>Right-click: Aim</p>
     <p>Left-click (while aiming): Shoot</p>
     <p>R: Reload</p>
     <p>Space: Jump</p>
-    <p><strong>Click anywhere to start</strong></p>
-  `;
+    <p><strong>Click anywhere to start</strong></p>`;
   
   document.getElementById('game-container').appendChild(instructions);
   

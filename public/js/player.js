@@ -1,5 +1,5 @@
 import { Revolver } from './revolver.js';
-import { updateAmmoUI } from './ui.js';
+import { updateAmmoUI, updateHealthUI } from './ui.js';
 import { applyRecoil, ejectShell } from './effects.js';
 import { networkManager } from './network.js';
 
@@ -56,6 +56,9 @@ export class Player {
     this.maxBullets = 6;
     this.canShoot = true;
 
+    // Health
+    this.health = 100;
+
     // Networking
     this.lastNetworkUpdate = 0;
     this.networkUpdateInterval = 50; // ms
@@ -63,6 +66,7 @@ export class Player {
     // Initialize network & UI
     this.initNetworking();
     updateAmmoUI(this);
+    updateHealthUI(this);
   }
 
   initNetworking() {
@@ -140,7 +144,8 @@ export class Player {
         y: this.group.rotation.y
       },
       isAiming: this.isAiming,
-      isReloading: this.isReloading
+      isReloading: this.isReloading,
+      health: this.health
     });
   }
 
@@ -185,6 +190,21 @@ export class Player {
       if (reloadMessage) {
         reloadMessage.style.display = 'block';
       }
+    }
+  }
+
+  /**
+   * Called when the player takes damage.
+   * @param {number} amount - Damage amount.
+   */
+  takeDamage(amount) {
+    this.health = Math.max(this.health - amount, 0);
+    console.log(`Player ${this.id} took ${amount} damage. Health is now ${this.health}`);
+    updateHealthUI(this);
+    // You could add death/respawn logic here
+    if (this.health === 0) {
+      console.log('Game Over');
+      // Optionally, disable input or show a Game Over screen.
     }
   }
 

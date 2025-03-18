@@ -157,6 +157,13 @@ export class ThirdPersonModel {
     this.collisionBox = new THREE.Box3();
     this.hitboxSize = { width: 0.6, height: 1.8, depth: 0.6 };
 
+    // Health
+    this.health = 100;
+
+    // Target position/rotation for smooth interpolation.
+    this.targetPosition = this.group.position.clone();
+    this.targetRotation = this.group.rotation.y;
+
     // Build a basic "Minecraft-like" character.
     this.createBlockyCharacter();
     scene.add(this.group);
@@ -220,7 +227,6 @@ export class ThirdPersonModel {
     const rightLegMesh = new THREE.Mesh(legGeo, pantsMat);
     rightLegMesh.position.y = -0.3;
     this.rightLeg.add(rightLegMesh);
-    // Adjusted leg group vertical position from 0.6 to 0.8
     this.rightLeg.position.set(0.1, 0.8, 0);
     this.group.add(this.rightLeg);
 
@@ -229,7 +235,6 @@ export class ThirdPersonModel {
     const leftLegMesh = new THREE.Mesh(legGeo, pantsMat);
     leftLegMesh.position.y = -0.3;
     this.leftLeg.add(leftLegMesh);
-    // Adjusted leg group vertical position from 0.6 to 0.8
     this.leftLeg.position.set(-0.1, 0.8, 0);
     this.group.add(this.leftLeg);
   }
@@ -285,27 +290,37 @@ export class ThirdPersonModel {
   }
 
   /**
+   * Smoothly updates the model’s position and rotation toward target values.
+   * @param {number} deltaTime - Time elapsed since last frame.
+   */
+  animateMovement(deltaTime) {
+    // Interpolate position and rotation for smooth remote movement
+    this.group.position.lerp(this.targetPosition, 0.1);
+    this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, this.targetRotation, 0.1);
+    this.updateCollisionBox();
+  }
+
+  /**
    * Updates the third-person model using data received from the server.
    * @param {Object} playerData
    */
   update(playerData) {
-    // Shift down from eye-level (data) to model base.
+    // Update target position from network data (shifting from eye-level to model base)
     const newPos = new THREE.Vector3(
       playerData.position.x,
       playerData.position.y - 1.6,
       playerData.position.z
     );
+    this.targetPosition.copy(newPos);
+
+    // Update target rotation with a 180° offset for proper facing
+    if (playerData.rotation && playerData.rotation.y !== undefined) {
+      this.targetRotation = playerData.rotation.y + Math.PI;
+    }
 
     // Check if walking based on movement.
     this.isWalking = newPos.distanceTo(this.lastPosition) > 0.01;
     this.lastPosition.copy(newPos);
-
-    this.group.position.copy(newPos);
-
-    // Rotate the model to face the proper direction (+180 offset).
-    if (playerData.rotation && playerData.rotation.y !== undefined) {
-      this.group.rotation.y = playerData.rotation.y + Math.PI;
-    }
 
     // Set pose based on whether the player is aiming.
     if (playerData.isAiming) {
@@ -319,7 +334,10 @@ export class ThirdPersonModel {
       this.playReloadAnimation();
     }
 
-    this.updateCollisionBox();
+    // Update health if provided
+    if (playerData.health !== undefined) {
+      this.health = playerData.health;
+    }
   }
 
   /**
@@ -364,9 +382,7 @@ export class ThirdPersonModel {
 
   /**
    * Plays a smooth reload animation for the model.
-   * The reload animation is performed by the right arm (the one not holding the revolver),
-   * moving it up and sideways (by about 45°) towards the revolver arm with 2 back-and-forth cycles
-   * before returning to its default position.
+   * The reload animation is performed by the right arm.
    */
   playReloadAnimation() {
     const originalPos = this.rightArm.position.clone();
@@ -490,5 +506,15 @@ export class ThirdPersonModel {
         mesh.material = mat;
       });
     }, 200);
+  }
+
+  /**
+   * Reduces health when hit.
+   * @param {number} amount - Damage amount.
+   */
+  takeDamage(amount) {
+    this.health = Math.max(this.health - amount, 0);
+    console.log(`Remote player ${this.playerId} took ${amount} damage. Health: ${this.health}`);
+    // Optionally, you could change the model’s appearance or remove it on death.
   }
 }

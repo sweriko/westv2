@@ -7,5 +7,15 @@ export function updateAmmoUI(player) {
     if (ammoCounter && player) {
       ammoCounter.textContent = `Bullets: ${player.bullets}/${player.maxBullets}`;
     }
-  }
-  
+}
+
+/**
+ * Updates the health counter in the UI.
+ * @param {Player|ThirdPersonModel} player - The player instance.
+ */
+export function updateHealthUI(player) {
+    const healthCounter = document.getElementById('health-counter');
+    if (healthCounter && player) {
+      healthCounter.textContent = `Health: ${player.health}`;
+    }
+}

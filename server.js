@@ -15,7 +15,7 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, clientTracking: true });
 
 // Track connected players
-const players = new Map();    // playerId -> { ws, sessionId, position, rotation, ... }
+const players = new Map();    // playerId -> { ws, sessionId, position, rotation, health, ... }
 const sessions = new Set();   // tracks sessionIds to prevent duplicate connections
 let nextPlayerId = 1;
 
@@ -43,7 +43,7 @@ wss.on('connection', (ws, req) => {
   const playerId = nextPlayerId++;
   console.log(`Player ${playerId} connected (sessionId: ${sessionId || 'none'})`);
 
-  // Create initial player data
+  // Create initial player data with health
   players.set(playerId, {
     ws,
     sessionId,
@@ -52,6 +52,7 @@ wss.on('connection', (ws, req) => {
     isAiming: false,
     isShooting: false,
     isReloading: false,
+    health: 100,
     lastActivity: Date.now()
   });
 
@@ -67,7 +68,8 @@ wss.on('connection', (ws, req) => {
         rotation: p.rotation,
         isAiming: p.isAiming,
         isShooting: p.isShooting,
-        isReloading: p.isReloading
+        isReloading: p.isReloading,
+        health: p.health
       }))
   }));
 
@@ -76,7 +78,8 @@ wss.on('connection', (ws, req) => {
     type: 'playerJoined',
     id: playerId,
     position: players.get(playerId).position,
-    rotation: players.get(playerId).rotation
+    rotation: players.get(playerId).rotation,
+    health: players.get(playerId).health
   });
 
   // Handle incoming messages
@@ -92,18 +95,14 @@ wss.on('connection', (ws, req) => {
 
       switch (data.type) {
         case 'update':
-          // Update local state
+          // Update local state (do not allow client to change health directly)
           if (player) {
             player.position = data.position || player.position;
             player.rotation = data.rotation || player.rotation;
-            player.isAiming =
-              data.isAiming !== undefined ? data.isAiming : player.isAiming;
-            player.isShooting =
-              data.isShooting !== undefined ? data.isShooting : player.isShooting;
-            player.isReloading =
-              data.isReloading !== undefined ? data.isReloading : player.isReloading;
-
-            // Broadcast to others
+            player.isAiming = data.isAiming !== undefined ? data.isAiming : player.isAiming;
+            player.isShooting = data.isShooting !== undefined ? data.isShooting : player.isShooting;
+            player.isReloading = data.isReloading !== undefined ? data.isReloading : player.isReloading;
+            // Broadcast to others including current health
             broadcastToOthers(playerId, {
               type: 'playerUpdate',
               id: playerId,
@@ -111,7 +110,8 @@ wss.on('connection', (ws, req) => {
               rotation: player.rotation,
               isAiming: player.isAiming,
               isShooting: player.isShooting,
-              isReloading: player.isReloading
+              isReloading: player.isReloading,
+              health: player.health
             });
           }
           break;
@@ -130,20 +130,24 @@ wss.on('connection', (ws, req) => {
           const targetId = parseInt(data.targetId);
           console.log(`Player ${targetId} was hit by player ${playerId}`);
           const targetPlayer = players.get(targetId);
-          // Inform the target
           if (targetPlayer && targetPlayer.ws.readyState === WebSocket.OPEN) {
+            // Reduce health by a fixed amount (e.g., 20)
+            targetPlayer.health = Math.max(targetPlayer.health - 20, 0);
+            // Inform the target
             targetPlayer.ws.send(JSON.stringify({
               type: 'hit',
               sourceId: playerId,
-              hitData: data.hitData
+              hitData: data.hitData,
+              health: targetPlayer.health
             }));
           }
-          // Broadcast a "playerHit" to everyone
+          // Broadcast a "playerHit" to everyone with updated health
           broadcastToAll({
             type: 'playerHit',
             targetId: data.targetId,
             sourceId: playerId,
-            hitPosition: data.hitData.position
+            hitPosition: data.hitData.position,
+            health: targetPlayer ? targetPlayer.health : 0
           });
           break;
 
