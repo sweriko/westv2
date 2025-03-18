@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wild Western FPS – Enhanced Aiming & Effects</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="game-container">
+    <div id="ammo-counter">Bullets: 6/6</div>
+    <div id="reload-message">Hold R to reload</div>
+    <div id="reload-progress-container">
+      <div id="reload-progress-bar"></div>
+    </div>
+    <div id="crosshair"></div>
+    <div id="fps-counter">FPS: 0</div>
+  </div>
+
+  <!-- Three.js core -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- GLTFLoader for loading the GLB gun model -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <!-- Main JS -->
+  <script src="js/main.js"></script>
+</body>
+</html>
