@@ -1,5 +1,9 @@
 import { createImpactEffect } from './effects.js';
 
+/**
+ * A simple bullet that checks collisions by seeing if its end position
+ * is inside bounding boxes (NPC or players).
+ */
 export class Bullet {
   constructor(position, direction) {
     this.mesh = new THREE.Mesh(
@@ -7,45 +11,103 @@ export class Bullet {
       new THREE.MeshStandardMaterial({ color: 0xB8860B })
     );
     this.mesh.position.copy(position);
+
     this.direction = direction.clone();
-    this.speed = 80; // Speed of the bullet
+    this.speed = 80; // speed units/second
     this.distanceTraveled = 0;
     this.maxDistance = 100;
+
+    // Remember previous position for some rough continuous detection
+    this.lastPosition = position.clone();
+
+    // Track which player fired this bullet
+    this.sourcePlayerId = null;
   }
-  
+
   /**
-   * Updates the bullet's position and checks for collisions.
-   * Calls impact effects when colliding with the NPC or ground.
-   * @param {number} deltaTime - Time elapsed since the last frame.
-   * @param {THREE.Group} npc - The NPC target (if any).
-   * @param {THREE.Scene} scene - The scene to add impact effects.
-   * @returns {boolean} - Whether the bullet should remain active.
+   * Sets the player ID that fired this bullet.
+   * @param {string|number} playerId - The ID of the player who fired the bullet.
    */
-  update(deltaTime, npc, scene) {
+  setSourcePlayer(playerId) {
+    this.sourcePlayerId = playerId;
+  }
+
+  /**
+   * Updates the bullet's movement & handles collisions with NPC or players.
+   * Uses a simpler .containsPoint() approach so it won't throw an error on r128.
+   * @param {number} deltaTime
+   * @param {THREE.Group} npc
+   * @param {THREE.Scene} scene
+   * @param {Map<number, object>} allPlayers - Map of local + remote players.
+   */
+  update(deltaTime, npc, scene, allPlayers) {
+    // Move the bullet
     const displacement = this.direction.clone().multiplyScalar(this.speed * deltaTime);
     this.mesh.position.add(displacement);
     this.distanceTraveled += displacement.length();
-    
-    // Check collision with NPC target
+
+    // Current bullet position
+    const endPos = this.mesh.position.clone();
+
+    // 1) Check collision with NPC
     if (npc) {
-      const npcCenterPos = new THREE.Vector3(
-        npc.position.x,
-        npc.position.y + 1.0, // Approximate center of the NPC
-        npc.position.z
-      );
-      const distanceToNPC = this.mesh.position.distanceTo(npcCenterPos);
-      if (distanceToNPC < 0.7) { // Collision radius
-        createImpactEffect(this.mesh.position, this.direction, scene);
-        return false; // Bullet should be destroyed on impact
+      const npcBox = new THREE.Box3().setFromObject(npc);
+      npcBox.expandByScalar(0.2);
+      // Instead of npcBox.intersectsLine(...), we do a simpler point check
+      if (npcBox.containsPoint(endPos)) {
+        createImpactEffect(endPos, this.direction, scene);
+        return { active: false, hit: { type: 'npc', target: npc } };
       }
     }
-    
-    // Check collision with ground (assuming ground level at y=0)
-    if (this.mesh.position.y <= 0.1) {
-      createImpactEffect(this.mesh.position, this.direction, scene);
-      return false; // Bullet is removed after hitting the ground
+
+    // 2) Check collision with players
+    if (allPlayers) {
+      for (const [playerId, playerObj] of allPlayers.entries()) {
+        // Skip bullet’s owner
+        if (playerId === this.sourcePlayerId) continue;
+        if (!playerObj || !playerObj.group) continue;
+
+        // Build a bounding box around the player
+        const playerPos = playerObj.group.position.clone();
+        const boxMin = new THREE.Vector3(
+          playerPos.x - 0.5,
+          playerPos.y - 1.6,
+          playerPos.z - 0.5
+        );
+        const boxMax = new THREE.Vector3(
+          playerPos.x + 0.5,
+          playerPos.y - 1.6 + 2.0,
+          playerPos.z + 0.5
+        );
+        const playerBox = new THREE.Box3(boxMin, boxMax);
+
+        if (playerBox.containsPoint(endPos)) {
+          createImpactEffect(endPos, this.direction, scene);
+
+          // Notify server we hit this player
+          if (window.networkManager) {
+            window.networkManager.sendPlayerHit(playerId, {
+              position: { x: endPos.x, y: endPos.y, z: endPos.z },
+              sourcePlayerId: this.sourcePlayerId
+            });
+          }
+          return { active: false, hit: { type: 'player', playerId } };
+        }
+      }
     }
-    
-    return this.distanceTraveled < this.maxDistance;
+
+    // 3) Check collision with ground
+    if (this.mesh.position.y <= 0.1) {
+      createImpactEffect(endPos, this.direction, scene);
+      return { active: false, hit: { type: 'ground', position: endPos } };
+    }
+
+    // 4) If bullet exceeded max distance, remove
+    if (this.distanceTraveled >= this.maxDistance) {
+      return { active: false, hit: null };
+    }
+
+    // Still active
+    return { active: true, hit: null };
   }
 }

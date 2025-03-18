@@ -1,74 +1,133 @@
 /**
- * Initializes game input and pointer lock.
- * @param {THREE.WebGLRenderer} renderer - The renderer.
- * @param {Player} player - The player instance.
- * @param {SoundManager} soundManager - The sound manager.
+ * Initializes game input (keyboard + mouse) and pointer lock.
+ * @param {THREE.WebGLRenderer} renderer - The renderer instance.
+ * @param {Player} player - The local Player instance (first-person).
+ * @param {SoundManager} soundManager - The SoundManager for audio feedback.
  */
 export function initInput(renderer, player, soundManager) {
+    // Request pointer lock on click
     document.body.addEventListener('click', () => {
       if (document.pointerLockElement !== renderer.domElement) {
         renderer.domElement.requestPointerLock();
       }
     });
-    
+  
+    // Mouse look
     document.addEventListener('mousemove', (event) => {
       if (document.pointerLockElement === renderer.domElement) {
         const movementX = event.movementX || 0;
         const movementY = event.movementY || 0;
-        let sensitivity = player.isAiming ? 0.001 : 0.002;
+  
+        // Slightly lower sensitivity when aiming
+        const sensitivity = player.isAiming ? 0.001 : 0.002;
+  
+        // Yaw
         player.group.rotation.y -= movementX * sensitivity;
+  
+        // Pitch (limit to avoid flipping)
         player.camera.rotation.x -= movementY * sensitivity;
-        player.camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, player.camera.rotation.x));
+        player.camera.rotation.x = Math.max(
+          -Math.PI / 2,
+          Math.min(Math.PI / 2, player.camera.rotation.x)
+        );
       }
     });
-    
+  
+    // Keyboard down
     document.addEventListener('keydown', (event) => {
-      switch(event.code) {
-        case 'KeyW': player.moveForward = true; break;
-        case 'KeyS': player.moveBackward = true; break;
-        case 'KeyA': player.moveLeft = true; break;
-        case 'KeyD': player.moveRight = true; break;
-        case 'Space': if (player.canJump) { player.velocity.y = 10; player.canJump = false; } break;
-        case 'KeyR': player.startReload(); break;
+      switch (event.code) {
+        case 'KeyW':
+          player.moveForward = true;
+          break;
+        case 'KeyS':
+          player.moveBackward = true;
+          break;
+        case 'KeyA':
+          player.moveLeft = true;
+          break;
+        case 'KeyD':
+          player.moveRight = true;
+          break;
+        case 'Space':
+          if (player.canJump) {
+            player.velocity.y = 10;
+            player.canJump = false;
+          }
+          break;
+        case 'KeyR':
+          // Start reload
+          player.startReload();
+          break;
+        default:
+          break;
       }
     });
-    
+  
+    // Keyboard up
     document.addEventListener('keyup', (event) => {
-      switch(event.code) {
-        case 'KeyW': player.moveForward = false; break;
-        case 'KeyS': player.moveBackward = false; break;
-        case 'KeyA': player.moveLeft = false; break;
-        case 'KeyD': player.moveRight = false; break;
+      switch (event.code) {
+        case 'KeyW':
+          player.moveForward = false;
+          break;
+        case 'KeyS':
+          player.moveBackward = false;
+          break;
+        case 'KeyA':
+          player.moveLeft = false;
+          break;
+        case 'KeyD':
+          player.moveRight = false;
+          break;
+        default:
+          break;
       }
     });
-    
+  
+    // Mouse down
     document.addEventListener('mousedown', (event) => {
+      // Right-click => Aim
       if (event.button === 2) {
         player.isAiming = true;
         player.revolver.group.visible = true;
-        document.getElementById('crosshair').style.display = 'block';
+        // Optionally show arms in first-person
+        if (player.arms) {
+          player.arms.setVisible(true);
+        }
+        const crosshair = document.getElementById('crosshair');
+        if (crosshair) crosshair.style.display = 'block';
+  
         if (soundManager) {
           soundManager.playSound("aimclick");
         }
-      } else if (event.button === 0) {
-        if (player.revolver.group.visible) {
+      }
+      // Left-click => Shoot (only if aiming)
+      else if (event.button === 0) {
+        if (player.revolver.group.visible && !player.isReloading) {
           player.shoot();
         }
       }
     });
-    
+  
+    // Mouse up
     document.addEventListener('mouseup', (event) => {
+      // Stop aiming on right-click release
       if (event.button === 2) {
         player.isAiming = false;
         player.revolver.group.visible = false;
-        document.getElementById('crosshair').style.display = 'none';
+        if (player.arms) {
+          player.arms.setVisible(false);
+        }
+        const crosshair = document.getElementById('crosshair');
+        if (crosshair) crosshair.style.display = 'none';
       }
     });
-    
+  
+    // Prevent context menu on right-click
     document.addEventListener('contextmenu', (event) => {
       event.preventDefault();
     });
-    
+  
+    // Handle window resize
     window.addEventListener('resize', () => {
       player.camera.aspect = window.innerWidth / window.innerHeight;
       player.camera.updateProjectionMatrix();
