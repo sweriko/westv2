@@ -1,3 +1,4 @@
+// /public/js/multiplayerManager.js
 import { ThirdPersonModel } from './playerModel.js';
 import { networkManager } from './network.js';
 
@@ -128,15 +129,15 @@ export class MultiplayerManager {
   }
 
   update(deltaTime) {
-    // Animate each remote player's walk cycle, etc.
+    // Animate and smoothly interpolate each remote player's state.
     for (const [playerId, remoteModel] of this.remotePlayers.entries()) {
+      remoteModel.interpolate(deltaTime);
       if (remoteModel.isWalking) {
         remoteModel.animateWalk(deltaTime);
       } else {
         remoteModel.resetWalkAnimation();
       }
-      // Keep collision boxes up to date
-      remoteModel.updateCollisionBox();
+      // (Collision box updating is handled inside interpolate)
     }
   }
 

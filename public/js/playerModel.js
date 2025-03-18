@@ -161,9 +161,16 @@ export class ThirdPersonModel {
     this.createBlockyCharacter();
     scene.add(this.group);
 
+    // For walk animation
     this.walkCycle = 0;
     this.isWalking = false;
     this.lastPosition = new THREE.Vector3();
+
+    // Set up interpolation/prediction state:
+    this.targetPosition = this.group.position.clone();
+    this.lastTargetPosition = this.group.position.clone();
+    this.targetRotationY = this.group.rotation.y;
+    this.lastUpdateTime = performance.now();
   }
 
   createBlockyCharacter() {
@@ -286,39 +293,62 @@ export class ThirdPersonModel {
 
   /**
    * Updates the third-person model using data received from the server.
+   * Instead of immediately setting position and rotation, we store target values
+   * and update our state in the interpolate() method.
    * @param {Object} playerData
    */
   update(playerData) {
-    // Shift down from eye-level (data) to model base.
+    // Compute new target position from player data.
     const newPos = new THREE.Vector3(
       playerData.position.x,
       playerData.position.y - 1.6,
       playerData.position.z
     );
+    // Update prediction state: move last target to current target, then update target.
+    this.lastTargetPosition.copy(this.targetPosition);
+    this.targetPosition.copy(newPos);
+    this.lastUpdateTime = performance.now();
 
-    // Check if walking based on movement.
-    this.isWalking = newPos.distanceTo(this.lastPosition) > 0.01;
-    this.lastPosition.copy(newPos);
-
-    this.group.position.copy(newPos);
-
-    // Rotate the model to face the proper direction (+180 offset).
+    // Update target rotation (Y axis) based on received data.
     if (playerData.rotation && playerData.rotation.y !== undefined) {
-      this.group.rotation.y = playerData.rotation.y + Math.PI;
+      this.targetRotationY = playerData.rotation.y + Math.PI;
     }
 
-    // Set pose based on whether the player is aiming.
+    // Update pose immediately (aiming and reloading animations).
     if (playerData.isAiming) {
       this.setAimingPose();
     } else {
       this.setNormalPose();
     }
 
-    // If reloading, play the reload animation.
     if (playerData.isReloading) {
       this.playReloadAnimation();
     }
+  }
 
+  /**
+   * Interpolates the current model state toward the target state.
+   * It also performs a basic prediction (extrapolation) based on the velocity from the last update.
+   * @param {number} deltaTime - Seconds elapsed since last frame.
+   */
+  interpolate(deltaTime) {
+    const now = performance.now();
+    // Calculate time since the last network update in seconds.
+    const timeSinceUpdate = (now - this.lastUpdateTime) / 1000;
+    const maxPrediction = 0.1; // maximum 100ms prediction
+    const predictionTime = Math.min(timeSinceUpdate, maxPrediction);
+
+    // Compute a rudimentary velocity based on the last two target positions.
+    // (Avoid division by zero by using deltaTime if necessary.)
+    const dt = Math.max(deltaTime, 0.001);
+    const velocity = new THREE.Vector3().subVectors(this.targetPosition, this.lastTargetPosition).divideScalar(dt);
+    // Extrapolate a bit from the target position.
+    const predictedPosition = new THREE.Vector3().copy(this.targetPosition).add(velocity.multiplyScalar(predictionTime));
+
+    // Smooth interpolation factor – adjust the multiplier for responsiveness.
+    const lerpFactor = Math.min(5 * deltaTime, 1);
+    this.group.position.lerp(predictedPosition, lerpFactor);
+    this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, this.targetRotationY, lerpFactor);
     this.updateCollisionBox();
   }
 
