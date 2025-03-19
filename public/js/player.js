@@ -63,6 +63,9 @@ export class Player {
     this.lastNetworkUpdate = 0;
     this.networkUpdateInterval = 50; // ms
 
+    // Quick Draw mode
+    this.canAim = true; // Whether the player is allowed to aim (used by Quick Draw)
+
     // Initialize network & UI
     this.initNetworking();
     updateAmmoUI(this);
@@ -83,13 +86,13 @@ export class Player {
 
   update(deltaTime) {
     // Smoothly interpolate the gun offset & FOV
-    const targetOffset = this.isAiming ? this.aimOffset : this.holsterOffset;
+    const targetOffset = this.isAiming && this.canAim ? this.aimOffset : this.holsterOffset;
     this.currentGunOffset.lerp(targetOffset, 0.1);
     this.revolver.group.position.copy(this.currentGunOffset);
 
     this.camera.fov = THREE.MathUtils.lerp(
       this.camera.fov,
-      this.isAiming ? this.aimFOV : this.defaultFOV,
+      this.isAiming && this.canAim ? this.aimFOV : this.defaultFOV,
       0.1
     );
     this.camera.updateProjectionMatrix();

@@ -19,6 +19,10 @@ const players = new Map();    // playerId -> { ws, sessionId, position, rotation
 const sessions = new Set();   // tracks sessionIds to prevent duplicate connections
 let nextPlayerId = 1;
 
+// Track Quick Draw game mode queues and active duels
+const quickDrawQueue = []; // Players waiting for a match
+const quickDrawDuels = new Map(); // Map of duelId -> { player1Id, player2Id, state, ... }
+
 // On new connection
 wss.on('connection', (ws, req) => {
   // Parse sessionId from query string
@@ -155,6 +159,22 @@ wss.on('connection', (ws, req) => {
           // respond
           ws.send(JSON.stringify({ type: 'pong' }));
           break;
+          
+        case 'quickDrawJoin':
+          handleQuickDrawJoin(playerId);
+          break;
+          
+        case 'quickDrawLeave':
+          handleQuickDrawLeave(playerId);
+          break;
+          
+        case 'quickDrawReady':
+          handleQuickDrawReady(playerId);
+          break;
+          
+        case 'quickDrawShoot':
+          handleQuickDrawShoot(playerId, data.opponentId);
+          break;
 
         default:
           break;
@@ -187,6 +207,26 @@ function cleanupPlayer(playerId) {
     if (player.sessionId) {
       sessions.delete(player.sessionId);
     }
+    
+    // Quick Draw cleanup
+    if (player.inQuickDrawQueue) {
+      // Remove from queue
+      const index = quickDrawQueue.indexOf(playerId);
+      if (index !== -1) {
+        quickDrawQueue.splice(index, 1);
+      }
+    }
+    
+    if (player.inQuickDrawDuel && player.quickDrawDuelId) {
+      // End any active duel
+      const duel = quickDrawDuels.get(player.quickDrawDuelId);
+      if (duel) {
+        // The other player wins by default
+        const winnerId = duel.player1Id === playerId ? duel.player2Id : duel.player1Id;
+        endQuickDrawDuel(player.quickDrawDuelId, winnerId);
+      }
+    }
+    
     players.delete(playerId);
 
     // Notify all that the player left
@@ -224,6 +264,311 @@ function broadcastToAll(data) {
       pl.ws.send(JSON.stringify(data));
     }
   }
+}
+
+/**
+ * Handle a player joining the Quick Draw queue.
+ */
+function handleQuickDrawJoin(playerId) {
+  console.log(`Player ${playerId} joined Quick Draw queue`);
+  const playerData = players.get(playerId);
+  
+  if (!playerData || playerData.inQuickDrawQueue || playerData.inQuickDrawDuel) {
+    return; // Invalid state
+  }
+  
+  // Add to the queue
+  playerData.inQuickDrawQueue = true;
+  quickDrawQueue.push(playerId);
+  
+  // Notify the player they joined the queue
+  playerData.ws.send(JSON.stringify({
+    type: 'quickDrawJoin'
+  }));
+  
+  // Check if we have enough players to start a match
+  checkQuickDrawQueue();
+}
+
+/**
+ * Handle a player leaving the Quick Draw queue.
+ */
+function handleQuickDrawLeave(playerId) {
+  console.log(`Player ${playerId} left Quick Draw queue`);
+  const playerData = players.get(playerId);
+  
+  if (!playerData || !playerData.inQuickDrawQueue) {
+    return; // Invalid state
+  }
+  
+  // Remove from queue
+  playerData.inQuickDrawQueue = false;
+  const index = quickDrawQueue.indexOf(playerId);
+  if (index !== -1) {
+    quickDrawQueue.splice(index, 1);
+  }
+}
+
+/**
+ * Check if we have enough players in the Quick Draw queue to start a match.
+ */
+function checkQuickDrawQueue() {
+  if (quickDrawQueue.length < 2) {
+    return; // Not enough players
+  }
+  
+  // Get the two players who have been waiting the longest
+  const player1Id = quickDrawQueue.shift();
+  const player2Id = quickDrawQueue.shift();
+  
+  // Make sure both players are still connected
+  const player1 = players.get(player1Id);
+  const player2 = players.get(player2Id);
+  
+  if (!player1 || !player2) {
+    // Put the valid player back in the queue
+    if (player1) quickDrawQueue.push(player1Id);
+    if (player2) quickDrawQueue.push(player2Id);
+    return;
+  }
+  
+  // Create a new duel
+  const duelId = `duel_${player1Id}_${player2Id}`;
+  quickDrawDuels.set(duelId, {
+    id: duelId,
+    player1Id,
+    player2Id,
+    state: 'starting',
+    startTime: Date.now()
+  });
+  
+  // Mark players as in a duel
+  player1.inQuickDrawQueue = false;
+  player1.inQuickDrawDuel = true;
+  player1.quickDrawDuelId = duelId;
+  
+  player2.inQuickDrawQueue = false;
+  player2.inQuickDrawDuel = true;
+  player2.quickDrawDuelId = duelId;
+  
+  // Notify players of the match
+  player1.ws.send(JSON.stringify({
+    type: 'quickDrawMatch',
+    opponentId: player2Id,
+    position: 'left' // Player 1 spawns on the left
+  }));
+  
+  player2.ws.send(JSON.stringify({
+    type: 'quickDrawMatch',
+    opponentId: player1Id,
+    position: 'right' // Player 2 spawns on the right
+  }));
+  
+  console.log(`Started Quick Draw duel ${duelId} between players ${player1Id} and ${player2Id}`);
+}
+
+/**
+ * Handle a player being ready in a Quick Draw duel.
+ */
+function handleQuickDrawReady(playerId) {
+  const playerData = players.get(playerId);
+  
+  if (!playerData || !playerData.inQuickDrawDuel) {
+    return; // Invalid state
+  }
+  
+  const duelId = playerData.quickDrawDuelId;
+  const duel = quickDrawDuels.get(duelId);
+  
+  if (!duel) {
+    return; // Invalid duel
+  }
+  
+  // Mark this player as ready
+  if (duel.player1Id === playerId) {
+    duel.player1Ready = true;
+  } else if (duel.player2Id === playerId) {
+    duel.player2Ready = true;
+  }
+  
+  // If both players are ready, start the duel sequence
+  if (duel.player1Ready && duel.player2Ready) {
+    startQuickDrawDuel(duelId);
+  }
+}
+
+/**
+ * Start the Quick Draw duel sequence.
+ */
+function startQuickDrawDuel(duelId) {
+  const duel = quickDrawDuels.get(duelId);
+  
+  if (!duel) {
+    return; // Invalid duel
+  }
+  
+  duel.state = 'ready';
+  
+  const player1 = players.get(duel.player1Id);
+  const player2 = players.get(duel.player2Id);
+  
+  if (!player1 || !player2) {
+    endQuickDrawDuel(duelId, null); // End duel if either player disconnected
+    return;
+  }
+  
+  // Show "READY?" message to both players
+  player1.ws.send(JSON.stringify({ type: 'quickDrawReady' }));
+  player2.ws.send(JSON.stringify({ type: 'quickDrawReady' }));
+  
+  // After 1 second, start the countdown
+  setTimeout(() => {
+    if (quickDrawDuels.has(duelId)) {
+      duel.state = 'countdown';
+      player1.ws.send(JSON.stringify({ type: 'quickDrawCountdown' }));
+      player2.ws.send(JSON.stringify({ type: 'quickDrawCountdown' }));
+      
+      // Set a random time for the draw signal (1-8 seconds)
+      const drawTime = 1000 + Math.floor(Math.random() * 7000);
+      duel.drawTimeout = setTimeout(() => {
+        if (quickDrawDuels.has(duelId)) {
+          sendDrawSignal(duelId);
+        }
+      }, drawTime);
+    }
+  }, 1000);
+}
+
+/**
+ * Send the "DRAW!" signal to both players.
+ */
+function sendDrawSignal(duelId) {
+  const duel = quickDrawDuels.get(duelId);
+  
+  if (!duel) {
+    return; // Invalid duel
+  }
+  
+  duel.state = 'draw';
+  duel.drawTime = Date.now();
+  
+  const player1 = players.get(duel.player1Id);
+  const player2 = players.get(duel.player2Id);
+  
+  if (!player1 || !player2) {
+    endQuickDrawDuel(duelId, null); // End duel if either player disconnected
+    return;
+  }
+  
+  // Send draw signal to both players
+  player1.ws.send(JSON.stringify({ type: 'quickDrawDraw' }));
+  player2.ws.send(JSON.stringify({ type: 'quickDrawDraw' }));
+  
+  console.log(`Draw signal sent for duel ${duelId}`);
+}
+
+/**
+ * Handle a player shooting in a Quick Draw duel.
+ */
+function handleQuickDrawShoot(playerId, targetId) {
+    playerId = Number(playerId);
+    targetId = Number(targetId);
+    
+    console.log(`Quick Draw shoot: Player ${playerId} shot player ${targetId}`);
+    
+    const playerData = players.get(playerId);
+    
+    if (!playerData || !playerData.inQuickDrawDuel) {
+        console.log(`Quick Draw shoot rejected: Player ${playerId} not in a duel`);
+        return; // Invalid state
+    }
+    
+    const duelId = playerData.quickDrawDuelId;
+    const duel = quickDrawDuels.get(duelId);
+    
+    if (!duel) {
+        console.log(`Quick Draw shoot rejected: Duel ${duelId} not found`);
+        return; // Invalid duel
+    }
+    
+    if (duel.state !== 'draw') {
+        console.log(`Quick Draw shoot rejected: Duel ${duelId} not in 'draw' state, current state: ${duel.state}`);
+        return; // Can only shoot in 'draw' state
+    }
+    
+    // Make sure the target is the opponent in this duel
+    const isValidTarget = (duel.player1Id === playerId && duel.player2Id === targetId) ||
+                          (duel.player2Id === playerId && duel.player1Id === targetId);
+    
+    if (!isValidTarget) {
+        console.log(`Quick Draw shoot rejected: Invalid target ${targetId} for player ${playerId} in duel ${duelId}`);
+        return; // Not shooting at the opponent
+    }
+    
+    console.log(`Quick Draw shoot ACCEPTED: Player ${playerId} hit player ${targetId}. Ending duel ${duelId} with ${playerId} as winner`);
+    
+    // End the duel with this player as the winner
+    endQuickDrawDuel(duelId, playerId);
+}
+
+/**
+ * End a Quick Draw duel.
+ * @param {string} duelId - The ID of the duel to end
+ * @param {number|null} winnerId - The ID of the winning player or null if draw/aborted
+ */
+function endQuickDrawDuel(duelId, winnerId) {
+  const duel = quickDrawDuels.get(duelId);
+  
+  if (!duel) {
+    return; // Invalid duel
+  }
+  
+  console.log(`Ending duel ${duelId} with winner ${winnerId || 'none'}`);
+  
+  // Clear any pending timeouts
+  if (duel.drawTimeout) {
+    clearTimeout(duel.drawTimeout);
+  }
+  
+  // Get the players
+  const player1 = players.get(duel.player1Id);
+  const player2 = players.get(duel.player2Id);
+  
+  // Update player states
+  if (player1) {
+    player1.inQuickDrawDuel = false;
+    player1.quickDrawDuelId = null;
+    
+    // Notify player 1 of the result
+    player1.ws.send(JSON.stringify({
+      type: 'quickDrawEnd',
+      winnerId: winnerId
+    }));
+    
+    // If player 1 lost, set their health to 0
+    if (winnerId && winnerId !== duel.player1Id) {
+      player1.health = 0;
+    }
+  }
+  
+  if (player2) {
+    player2.inQuickDrawDuel = false;
+    player2.quickDrawDuelId = null;
+    
+    // Notify player 2 of the result
+    player2.ws.send(JSON.stringify({
+      type: 'quickDrawEnd',
+      winnerId: winnerId
+    }));
+    
+    // If player 2 lost, set their health to 0
+    if (winnerId && winnerId !== duel.player2Id) {
+      player2.health = 0;
+    }
+  }
+  
+  // Remove the duel
+  quickDrawDuels.delete(duelId);
 }
 
 // Heartbeat to remove stale connections
@@ -272,6 +617,12 @@ server.listen(PORT, () => {
 // Graceful shutdown
 process.on('SIGINT', () => {
   console.log('Server shutting down...');
+  
+  // End all Quick Draw duels
+  for (const duelId of quickDrawDuels.keys()) {
+    endQuickDrawDuel(duelId, null);
+  }
+  
   for (const [id, player] of players.entries()) {
     if (player.ws.readyState === WebSocket.OPEN) {
       player.ws.close(1000, 'Server shutting down');

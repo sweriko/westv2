@@ -6,6 +6,8 @@ import { networkManager } from './network.js';
 import { MultiplayerManager } from './multiplayerManager.js';
 import { Bullet } from './bullet.js';
 import { createMuzzleFlash, createSmokeEffect, createShockwaveRing } from './effects.js';
+import { QuickDraw } from './quickDraw.js';
+import { updateAmmoUI, updateHealthUI } from './ui.js'; // Added import for updateHealthUI
 
 // Keep track of all bullets in the game, both local and remote
 let bullets = [];
@@ -18,6 +20,7 @@ let playersMap = new Map();     // Master map including local + remote
 // Scenes, camera, etc.
 let renderer, camera, npc;
 let multiplayerManager;
+let quickDraw;
 let lastTime = 0;
 
 function init() {
@@ -51,6 +54,12 @@ function init() {
 
     // Initialize input
     initInput(renderer, localPlayer, soundManager);
+
+    // Initialize Quick Draw game mode after the local player is created
+    quickDraw = new QuickDraw(scene, localPlayer, networkManager, soundManager);
+    
+    // Make updateHealthUI globally accessible for the Quick Draw mode to use
+    window.updateHealthUI = updateHealthUI;
 
     // Show connection status
     const networkStatus = document.createElement('div');
@@ -113,6 +122,11 @@ function animate(time) {
 
   // Update remote players (animations, movement interpolation, etc.)
   multiplayerManager.update(deltaTime);
+  
+  // Update Quick Draw game mode
+  if (quickDraw) {
+    quickDraw.update(deltaTime);
+  }
 
   // Update bullets (both local & remote)
   for (let i = bullets.length - 1; i >= 0; i--) {
@@ -158,6 +172,11 @@ function handleLocalPlayerShoot(bulletStart, shootDir) {
       z: shootDir.z
     }
   });
+  
+  // Add this section to check for Quick Draw hit
+  if (quickDraw && quickDraw.inDuel && quickDraw.duelState === 'draw' && quickDraw.duelOpponentId) {
+    // We'll handle this in the bullet collision code instead
+  }
 }
 
 /**
@@ -204,7 +223,7 @@ function spawnBullet(sourcePlayerId, position, direction) {
  */
 function updatePlayersMap() {
   playersMap.clear();
-  // Only add remote players so that the local (shooter’s) model isn’t processed in bullet collisions.
+  // Only add remote players so that the local (shooter's) model isn't processed in bullet collisions.
   for (const [pid, remoteModel] of remotePlayers.entries()) {
     playersMap.set(pid, remoteModel);
   }
@@ -226,14 +245,15 @@ function showGameInstructions() {
   instructions.style.textAlign = 'center';
   instructions.style.zIndex = '1000';
   
-  instructions.innerHTML = 
-    `<h2>Wild Western Shooter - Multiplayer</h2>
+  instructions.innerHTML = `
+    <h2>Wild Western Shooter - Multiplayer</h2>
     <p>WASD: Move</p>
     <p>Right-click: Aim</p>
     <p>Left-click (while aiming): Shoot</p>
     <p>R: Reload</p>
     <p>Space: Jump</p>
-    <p><strong>Click anywhere to start</strong></p>`;
+    <p><strong>Click anywhere to start</strong></p>
+    <p><strong>New:</strong> Find the Quick Draw portal near spawn to duel other players!</p>`;
   
   document.getElementById('game-container').appendChild(instructions);
   

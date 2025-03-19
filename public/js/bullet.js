@@ -41,6 +41,9 @@ export class Bullet {
    * @param {Map<number, object>} allPlayers - Map of local + remote players.
    */
   update(deltaTime, npc, scene, allPlayers) {
+    // Previous position for boundary crossing detection
+    this.lastPosition = this.mesh.position.clone();
+    
     // Move the bullet
     const displacement = this.direction.clone().multiplyScalar(this.speed * deltaTime);
     this.mesh.position.add(displacement);
@@ -48,6 +51,36 @@ export class Bullet {
 
     // Current bullet position
     const endPos = this.mesh.position.clone();
+    
+    // NEW: Check if crossing Quick Draw arena boundary
+    if (window.quickDraw) {
+      const bulletInArena = window.quickDraw.isPointInArena(endPos);
+      const prevInArena = window.quickDraw.isPointInArena(this.lastPosition);
+      
+      // Calculate if bullet is inside duel arena or crossing the boundary
+      const bulletCrossingBoundary = bulletInArena !== prevInArena;
+      const playerInDuel = window.quickDraw.inDuel;
+      
+      // Player in duel means bullet should stay in arena
+      // Player outside duel means bullet should stay outside arena
+      if (bulletCrossingBoundary && (
+          (playerInDuel && Number(this.sourcePlayerId) === Number(window.localPlayer.id) && !bulletInArena) || 
+          (!playerInDuel && Number(this.sourcePlayerId) === Number(window.localPlayer.id) && bulletInArena))) {
+        // Bullet hit arena boundary
+        console.log("Bullet hit arena boundary - destroying it");
+        createImpactEffect(endPos, this.direction, scene, 'ground');
+        return { active: false, hit: { type: 'arena', position: endPos } };
+      }
+      
+      // If the bullet is coming from outside and entering the arena, destroy it
+      if (bulletCrossingBoundary && !playerInDuel && bulletInArena) {
+        console.log("Bullet from outside entering arena - destroying it");
+        createImpactEffect(endPos, this.direction, scene, 'ground');
+        return { active: false, hit: { type: 'arena', position: endPos } };
+      }
+      
+      // If the bullet is inside arena and coming from inside, let it continue
+    }
 
     // 1) Check collision with NPC
     if (npc) {
@@ -62,7 +95,7 @@ export class Bullet {
     // 2) Check collision with players
     if (allPlayers) {
       for (const [playerId, playerObj] of allPlayers.entries()) {
-        // Skip bullet’s owner by converting both IDs to numbers
+        // Skip bullet's owner by converting both IDs to numbers
         if (Number(playerId) === Number(this.sourcePlayerId)) continue;
         if (!playerObj || !playerObj.group) continue;
 
@@ -93,6 +126,17 @@ export class Bullet {
               position: { x: endPos.x, y: endPos.y, z: endPos.z },
               sourcePlayerId: this.sourcePlayerId
             });
+            
+            // ENHANCED: Add this section for Quick Draw duels with better logging
+            if (window.quickDraw && window.quickDraw.inDuel && 
+                window.quickDraw.duelState === 'draw' && 
+                Number(playerId) === Number(window.quickDraw.duelOpponentId) && 
+                Number(this.sourcePlayerId) === Number(window.localPlayer.id)) {
+                
+                console.log('Quick Draw hit detected! Notifying server player ' + this.sourcePlayerId + ' hit player ' + playerId);
+                // Send special Quick Draw hit notification
+                window.networkManager.sendQuickDrawShoot(playerId);
+            }
           }
           return { active: false, hit: { type: 'player', playerId } };
         }
