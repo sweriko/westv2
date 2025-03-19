@@ -171,6 +171,9 @@ export class ThirdPersonModel {
     this.walkCycle = 0;
     this.isWalking = false;
     this.lastPosition = new THREE.Vector3();
+
+    // To track active hit feedback timeout.
+    this.hitFeedbackTimeout = null;
   }
 
   createBlockyCharacter() {
@@ -481,30 +484,56 @@ export class ThirdPersonModel {
 
   /**
    * Removes the model from the scene (e.g. on player disconnect).
+   * Fully disposes geometry and material.
    */
   remove() {
     this.scene.remove(this.group);
+    this.group.traverse(child => {
+      if (child.isMesh) {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => mat.dispose());
+          } else {
+            child.material.dispose();
+          }
+        }
+      }
+    });
   }
 
   /**
-   * Provides visual feedback (flash red) when the model is hit.
+   * Provides visual feedback (temporary red flash) when the model is hit.
+   * The original materials are stored on each mesh (if not already stored)
+   * and restored after 200ms.
    */
   showHitFeedback() {
-    const originalMaterials = [];
-
-    this.group.traverse((child) => {
+    // Clear any existing hit feedback timeout.
+    if (this.hitFeedbackTimeout) {
+      clearTimeout(this.hitFeedbackTimeout);
+    }
+    // Traverse the model and replace each mesh's material with a red flash.
+    this.group.traverse(child => {
       if (child.isMesh && child.material) {
-        const cloneMat = child.material.clone();
-        originalMaterials.push({ mesh: child, mat: cloneMat });
+        // Store the original material in userData if not already stored.
+        if (!child.userData.originalMaterial) {
+          child.userData.originalMaterial = child.material;
+        }
         child.material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        child.material.needsUpdate = true;
       }
     });
-
-    setTimeout(() => {
-      originalMaterials.forEach(({ mesh, mat }) => {
-        mesh.material.dispose();
-        mesh.material = mat;
+    // After 200ms, restore the original materials.
+    this.hitFeedbackTimeout = setTimeout(() => {
+      this.group.traverse(child => {
+        if (child.isMesh && child.userData.originalMaterial) {
+          child.material.dispose();
+          child.material = child.userData.originalMaterial;
+          child.material.needsUpdate = true;
+          delete child.userData.originalMaterial;
+        }
       });
+      this.hitFeedbackTimeout = null;
     }, 200);
   }
 

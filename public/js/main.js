@@ -58,6 +58,14 @@ function init() {
     networkStatus.textContent = 'Connecting...';
     document.getElementById('game-container').appendChild(networkStatus);
 
+    // Update player count UI when server broadcasts the count.
+    networkManager.onPlayerCount = (count) => {
+      const playerCountEl = document.getElementById('player-count');
+      if (playerCountEl) {
+        playerCountEl.textContent = `Players: ${count}`;
+      }
+    };
+
     // Listen for network open/close
     networkManager.socket.addEventListener('open', () => {
       networkStatus.textContent = 'Connected';
@@ -100,7 +108,7 @@ function animate(time) {
   // Update local player
   localPlayer.update(deltaTime);
 
-  // Update NPC
+  // Update NPC using the imported updateNPC function
   updateNPC(npc, deltaTime);
 
   // Update remote players (animations, movement interpolation, etc.)
@@ -191,18 +199,17 @@ function spawnBullet(sourcePlayerId, position, direction) {
 }
 
 /**
- * Rebuilds a master map of all players (local & remote).
- * This map is passed to bullet collision checks so bullets can hit any player.
+ * Rebuilds a master map of all remote players.
+ * This map is passed to bullet collision checks so bullets can hit any remote player.
  */
 function updatePlayersMap() {
   playersMap.clear();
-  if (localPlayer && localPlayer.id !== null) {
-    playersMap.set(localPlayer.id, localPlayer);
-  }
+  // Only add remote players so that the local (shooter’s) model isn’t processed in bullet collisions.
   for (const [pid, remoteModel] of remotePlayers.entries()) {
     playersMap.set(pid, remoteModel);
   }
 }
+
 
 function showGameInstructions() {
   const instructions = document.createElement('div');

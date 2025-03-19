@@ -12,6 +12,9 @@ export function initScene() {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
+  // Set output encoding for consistent lighting and color reproduction.
+  renderer.outputEncoding = THREE.sRGBEncoding;
+
   const gameContainer = document.getElementById('game-container');
   if (!gameContainer) {
     throw new Error("Game container not found in HTML.");

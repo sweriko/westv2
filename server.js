@@ -5,7 +5,7 @@ const WebSocket = require('ws');
 const url = require('url');
 const app = express();
 
-// Port default 8080 to match the Cloudflare Tunnel config
+// Port default 8080 to match your previous Cloudflare Tunnel config
 const PORT = process.env.PORT || 8080;
 
 // Serve static files from "public"
@@ -249,6 +249,24 @@ setInterval(() => {
 // Start server
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  
+  // If the environment variable USE_NGROK is set to 'true', start an ngrok tunnel.
+  if (process.env.USE_NGROK === 'true') {
+    // Dynamically require ngrok so it is only used when needed.
+    const ngrok = require('ngrok');
+    (async function() {
+      try {
+        // Connect ngrok to the same port that the server is running on.
+        const url = await ngrok.connect({
+          addr: PORT,
+          // You can add additional ngrok options here (e.g., authtoken, subdomain, region)
+        });
+        console.log(`ngrok tunnel established at ${url}`);
+      } catch (error) {
+        console.error('Error starting ngrok tunnel:', error);
+      }
+    })();
+  }
 });
 
 // Graceful shutdown
