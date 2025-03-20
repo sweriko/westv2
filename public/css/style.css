@@ -53,29 +53,32 @@ body {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 20px;
-  height: 20px;
-  border: 2px solid white;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.8);
   border-radius: 50%;
-  display: none; /* Always keep it hidden to make the game more realistic */
+  display: none; /* Will be controlled by JavaScript */
+  pointer-events: none;
+  z-index: 100;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
 }
 #crosshair::before,
 #crosshair::after {
   content: '';
   position: absolute;
-  background-color: white;
+  background-color: rgba(255, 255, 255, 0.8);
 }
 #crosshair::before {
   width: 2px;
-  height: 10px;
-  top: 5px;
-  left: 9px;
+  height: 8px;
+  top: 4px;
+  left: 7px;
 }
 #crosshair::after {
-  width: 10px;
+  width: 8px;
   height: 2px;
-  top: 9px;
-  left: 5px;
+  top: 7px;
+  left: 4px;
 }
 #fps-counter {
   position: absolute;

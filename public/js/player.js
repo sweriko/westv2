@@ -323,6 +323,14 @@ export class Player {
       this.lastNetworkUpdate = now;
       this.sendNetworkUpdate();
     }
+
+    // Update camera bob (only if on ground)
+    if (this.canJump) {
+      this.updateHeadBob(deltaTime);
+    }
+    
+    // Update aiming effects including crosshair
+    this.updateAiming(deltaTime);
   }
 
   /**
@@ -763,5 +771,33 @@ export class Player {
     
     // Send update to server
     this.sendNetworkUpdate();
+  }
+
+  /**
+   * Updates aiming effects including crosshair animation
+   * @param {number} deltaTime - Time elapsed since last frame
+   */
+  updateAiming(deltaTime) {
+    // Crosshair animation if aiming
+    const crosshair = document.getElementById('crosshair');
+    if (crosshair && this.isAiming) {
+      // Add subtle pulse animation based on player movement
+      const isMoving = this.isMoving();
+      const movementFactor = isMoving ? 1.0 + (this.velocity.length() * 0.008) : 1.0;
+      
+      // Calculate scaled size based on movement
+      const size = 16 * movementFactor;
+      crosshair.style.width = `${size}px`;
+      crosshair.style.height = `${size}px`;
+      
+      // Add slight opacity change based on movement
+      const opacity = isMoving ? 0.7 : 0.8;
+      crosshair.style.borderColor = `rgba(255, 255, 255, ${opacity})`;
+      
+      // A slight color tint for low health
+      if (this.health < 30) {
+        crosshair.style.borderColor = `rgba(255, ${Math.floor(255 * (this.health/30))}, ${Math.floor(255 * (this.health/60))}, ${opacity})`;
+      }
+    }
   }
 }
