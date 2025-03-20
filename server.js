@@ -19,6 +19,11 @@ const players = new Map();    // playerId -> { ws, sessionId, position, rotation
 const sessions = new Set();   // tracks sessionIds to prevent duplicate connections
 let nextPlayerId = 1;
 
+// Position history tracking to reduce unnecessary corrections
+const playerPositionHistory = new Map(); // playerId -> array of recent positions
+const POSITION_HISTORY_SIZE = 10; // Number of positions to track per player
+const CORRECTION_COOLDOWN = 5000; // Minimum ms between position corrections
+
 // Track Quick Draw game mode queues and active duels
 // Support for 5 concurrent lobbies
 const MAX_ARENAS = 5;
@@ -113,6 +118,7 @@ wss.on('connection', (ws, req) => {
     lastMovement: 0,
     lastReload: 0,
     lastPositionUpdate: 0,
+    lastPositionCorrection: 0,
     reloadStartTime: 0,
     isReloading: false
   });
@@ -726,10 +732,37 @@ function sendPositionCorrection(playerId, correctPosition) {
   const player = players.get(playerId);
   if (!player || player.ws.readyState !== WebSocket.OPEN) return;
   
-  player.ws.send(JSON.stringify({
-    type: 'positionCorrection',
-    position: correctPosition
-  }));
+  const now = Date.now();
+  const timeouts = playerTimeouts.get(playerId);
+  
+  // Skip if we've recently sent a correction
+  if (timeouts && timeouts.lastPositionCorrection && 
+      now - timeouts.lastPositionCorrection < CORRECTION_COOLDOWN) {
+    return;
+  }
+  
+  // Calculate distance between current position and correction
+  const currentPos = player.position;
+  const distance = Math.sqrt(
+    Math.pow(currentPos.x - correctPosition.x, 2) +
+    Math.pow(currentPos.y - correctPosition.y, 2) +
+    Math.pow(currentPos.z - correctPosition.z, 2)
+  );
+  
+  // Only send significant corrections (>5 units) to avoid unnecessary resets
+  if (distance > 5) {
+    console.log(`Sending position correction to player ${playerId}, distance: ${distance.toFixed(2)}`);
+    
+    // Update last correction time
+    if (timeouts) {
+      timeouts.lastPositionCorrection = now;
+    }
+    
+    player.ws.send(JSON.stringify({
+      type: 'positionCorrection',
+      position: correctPosition
+    }));
+  }
 }
 
 // Anti-cheat: Send error message to player

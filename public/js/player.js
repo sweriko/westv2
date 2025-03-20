@@ -82,7 +82,7 @@ export class Player {
 
     // Networking
     this.lastNetworkUpdate = 0;
-    this.networkUpdateInterval = 50; // ms
+    this.networkUpdateInterval = 33; // ~30 fps updates, balanced between responsiveness and bandwidth
 
     // Quick Draw mode
     this.canAim = true; // Whether the player is allowed to aim (used by Quick Draw)
@@ -156,13 +156,29 @@ export class Player {
     
     // Anti-cheat: Handle position corrections from server
     networkManager.onPositionCorrection = (correctedPosition) => {
-      console.log("Received position correction from server:", correctedPosition);
-      this.serverPosition.set(
+      console.log("Received position correction from server");
+      
+      // Instead of constant reconciliation, we'll use a "rubber-banding" approach
+      // Save server position and current client position
+      this.serverPosition = new THREE.Vector3(
         correctedPosition.x,
         correctedPosition.y,
         correctedPosition.z
       );
-      this.isReconciling = true;
+      
+      // Only apply corrections when player is not actively moving
+      // This prevents teleports during active gameplay
+      if (!this.isMoving()) {
+        // Immediate reposition when not moving
+        this.group.position.copy(this.serverPosition);
+        this.previousPosition.copy(this.serverPosition);
+        console.log("Applied immediate position correction (not moving)");
+      } else {
+        // Mark for gradual correction if moving
+        this.isReconciling = true;
+        // Use a very subtle correction that's almost unnoticeable
+        this.reconciliationLerpFactor = 0.05;
+      }
     };
     
     // Anti-cheat: Handle respawn from server
@@ -195,11 +211,15 @@ export class Player {
     
     // Anti-cheat: Handle server reconciliation
     if (this.isReconciling) {
-      // Smoothly move to server-corrected position
-      this.group.position.lerp(this.serverPosition, this.reconciliationLerpFactor);
+      // Calculate distance to server position
+      const distance = this.group.position.distanceTo(this.serverPosition);
       
-      // Stop reconciling when close enough
-      if (this.group.position.distanceTo(this.serverPosition) < 0.1) {
+      // Only apply reconciliation if significant deviation exists
+      if (distance > 0.1) {
+        // For large corrections, blend gradually
+        this.group.position.lerp(this.serverPosition, this.reconciliationLerpFactor);
+      } else {
+        // Close enough, stop reconciling
         this.isReconciling = false;
       }
     }
