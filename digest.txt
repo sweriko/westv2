@@ -1,23 +1,5 @@
 <goal>
- I noticed that bullet hits are not being recognized correctly on there rn
-server log:
-""
-Rejecting invalid hit claim from player 8 on 9
-""
-client f12 log:
-""
-Bullet hit player 9 in the body for 40 damage
-network.js:291 Server error: Invalid hit claim
-handleMessage @ network.js:291
-socket.onmessage @ network.js:84
-networkManager.socket.onmessage @ quickDraw.js:892
-networkManager.socket.onmessage @ properShootout.js:960Understand this errorAI
-main.js:416 Bullet 16 not found for impact event
-network.js:291 Server error: Invalid hit claim
-""
-
-In p debug mode, i can correctly see a players hitbox zones, but i noticed that i cant see the boundary of the map like i do on the main spawn map (not able to go outside the shootout map though so it kinda seems to work, maybe just not inlcuded in the debug logic?)
-Also when i shoot, i can see a fleshimpact effect on myself (own body), maybe thats an issue too?
+ 
 </goal>
 
 <output_requirements>
@@ -628,6 +610,19 @@ export class Bullet {
       }
     }
     
+    // Similar check for Proper Shootout - only allow bullets from players in the same shootout match
+    if (window.properShootout && window.properShootout.inLobby && window.properShootout.isPointInMap(this.mesh.position)) {
+      const isLocalPlayerBullet = Number(this.sourcePlayerId) === Number(window.localPlayer.id);
+      const isPlayerInShootout = window.properShootout && window.properShootout.inLobby;
+      
+      // If bullet is inside shootout map but player is not in shootout, destroy it
+      if (!isPlayerInShootout && isLocalPlayerBullet) {
+        console.log("Destroying unauthorized bullet inside shootout map from player " + this.sourcePlayerId);
+        createImpactEffect(this.mesh.position, this.direction, scene, 'ground');
+        return { active: false, hit: { type: 'boundary', position: this.mesh.position } };
+      }
+    }
+    
     // Move the bullet
     const displacement = this.direction.clone().multiplyScalar(this.speed * deltaTime);
     this.mesh.position.add(displacement);
@@ -749,26 +744,54 @@ export class Bullet {
         if (Number(playerId) === Number(this.sourcePlayerId)) continue;
         if (!playerObj || !playerObj.group) continue;
 
-        // Prevent hits across arena boundary
-        // Only allow hits if both players are in the same area (both in arena or both outside)
-        const bulletPlayerInArena = window.quickDraw && window.quickDraw.inDuel;
-        const targetPlayerInArena = window.quickDraw && 
-                                   window.quickDraw.duelOpponentId === Number(playerId);
+        // Prevent hits across arena boundary or between different game modes
+        // Only allow hits if players are in compatible states:
+        // 1. Both in the same QuickDraw duel
+        // 2. Both in the same Proper Shootout match
+        // 3. Both in the regular town area (not in any game mode)
         
-        if (bulletPlayerInArena !== targetPlayerInArena) {
-          continue; // Skip collision check if players are in different areas
+        const sourcePlayerId = Number(this.sourcePlayerId);
+        const targetPlayerId = Number(playerId);
+        
+        // Check if source and target are in QuickDraw duel
+        const bulletPlayerInDuel = window.quickDraw && window.quickDraw.inDuel;
+        const targetPlayerInDuel = window.quickDraw && 
+                                   window.quickDraw.duelOpponentId === targetPlayerId;
+        
+        // Check if source and target are in Proper Shootout
+        const bulletPlayerInShootout = window.properShootout && window.properShootout.inLobby;
+        const targetPlayerInShootout = window.properShootout && 
+                                      window.localPlayer && 
+                                      window.localPlayer.id !== targetPlayerId; // Any non-local player in shootout mode
+        
+        // Make sure players are in the same game mode to allow hits
+        const bothInDuel = bulletPlayerInDuel && targetPlayerInDuel;
+        const bothInShootout = bulletPlayerInShootout && targetPlayerInShootout;
+        const bothInRegularTown = !bulletPlayerInDuel && !bulletPlayerInShootout && 
+                                 !targetPlayerInDuel && !targetPlayerInShootout;
+        
+        if (!(bothInDuel || bothInShootout || bothInRegularTown)) {
+          continue; // Skip collision check if players are in different areas/modes
         }
         
         // Detect which hit zone was hit (head, body, limbs)
         const hitResult = this.checkPlayerHitZones(playerObj, endPos);
         
         if (hitResult.hit) {
-          // Create the impact effect
-          createImpactEffect(endPos, this.direction, scene, 'player');
+          // Check that this isn't a hit on the local player's own model
+          const isHitOnLocalPlayer = window.localPlayer && 
+                                   Number(window.localPlayer.id) === Number(playerId);
           
-          // Play headshot sound if it was a headshot
-          if (hitResult.zone === 'head' && window.localPlayer && window.localPlayer.soundManager) {
-            window.localPlayer.soundManager.playSound("headshotmarker", 100);
+          if (!isHitOnLocalPlayer) {
+            // Create the impact effect
+            createImpactEffect(endPos, this.direction, scene, 'player');
+            
+            // Play headshot sound if it was a headshot
+            if (hitResult.zone === 'head' && window.localPlayer && window.localPlayer.soundManager) {
+              window.localPlayer.soundManager.playSound("headshotmarker", 100);
+            }
+          } else {
+            console.log("Prevented impact effect on local player's own model");
           }
           
           // Anti-cheat: For local bullets, send hit to server and let server decide
@@ -1587,7 +1610,17 @@ export function createImpactEffect(position, direction, scene, hitType) {
     if (hitType === 'ground') {
       window.localPlayer.soundManager.playSoundAt("woodimpact", position);
     } else if (hitType === 'player') {
-      window.localPlayer.soundManager.playSoundAt("fleshimpact", position);
+      // Calculate distance to local player to avoid playing impact on own body
+      const localPlayerPos = window.localPlayer.group.position;
+      const distToLocalPlayer = Math.sqrt(
+        Math.pow(position.x - localPlayerPos.x, 2) + 
+        Math.pow(position.z - localPlayerPos.z, 2)
+      );
+      
+      // Only play flesh impact if not too close to local player (prevents self-impacts)
+      if (distToLocalPlayer > 0.5) {
+        window.localPlayer.soundManager.playSoundAt("fleshimpact", position);
+      }
     }
   }
 
@@ -3919,6 +3952,12 @@ export class PhysicsSystem {
       // This is important for making bullet.js know it should show hitboxes
       window.showHitZoneDebug = true;
       
+      // Special handling for Proper Shootout mode - ensure boundary is visualized
+      if (window.properShootout && window.properShootout.inLobby && window.properShootout.mapBoundaryBody) {
+        this.createDebugMesh(window.properShootout.mapBoundaryBody);
+        console.log("Created debug visualization for Proper Shootout map boundary");
+      }
+      
       console.log("Physics debug mode enabled - hit zones visible");
     }
     // If disabling and we were previously in debug mode
@@ -4019,6 +4058,23 @@ export class PhysicsSystem {
           dummyBullet.checkPlayerHitZones(player, new THREE.Vector3(0, 0, 0));
         }
       });
+    }
+    
+    // Also make sure the Proper Shootout map boundary is visualized if in that mode
+    if (window.properShootout && window.properShootout.inLobby && window.properShootout.mapBoundaryBody) {
+      // Create debug mesh for Proper Shootout map boundary if it doesn't exist yet
+      let hasDebugMesh = false;
+      for (const debugMesh of this.debugMeshes) {
+        if (debugMesh.body === window.properShootout.mapBoundaryBody) {
+          hasDebugMesh = true;
+          break;
+        }
+      }
+      
+      if (!hasDebugMesh) {
+        this.createDebugMesh(window.properShootout.mapBoundaryBody);
+        console.log("Created missing debug visualization for Proper Shootout map boundary");
+      }
     }
   }
   
@@ -6216,87 +6272,88 @@ export class ProperShootout {
     }
     
     /**
-     * Create a physics boundary for the shootout map
-     */
-    createMapBoundary() {
-        if (!this.physics) return;
-        
-        // Remove any existing boundary first
-        this.removeMapBoundary();
-        
-        // Create a box boundary around the map
-        const boundaryBody = new CANNON.Body({
-            mass: 0, // Static body
-            material: this.physics.defaultMaterial
-        });
-        
-        // Add a box shape for each border
-        const halfWidth = this.mapWidth / 2;
-        const halfLength = this.mapLength / 2;
-        const borderThickness = 1;
-        const wallHeight = 5;
-        
-        // Left border (negative X)
-        const leftBorderShape = new CANNON.Box(new CANNON.Vec3(
-            borderThickness / 2, 
-            wallHeight / 2, 
-            halfLength
-        ));
-        boundaryBody.addShape(
-            leftBorderShape, 
-            new CANNON.Vec3(this.mapCenter.x - halfWidth, wallHeight / 2, this.mapCenter.z)
-        );
-        
-        // Right border (positive X)
-        const rightBorderShape = new CANNON.Box(new CANNON.Vec3(
-            borderThickness / 2, 
-            wallHeight / 2, 
-            halfLength
-        ));
-        boundaryBody.addShape(
-            rightBorderShape, 
-            new CANNON.Vec3(this.mapCenter.x + halfWidth, wallHeight / 2, this.mapCenter.z)
-        );
-        
-        // Front border (negative Z)
-        const frontBorderShape = new CANNON.Box(new CANNON.Vec3(
-            halfWidth, 
-            wallHeight / 2, 
-            borderThickness / 2
-        ));
-        boundaryBody.addShape(
-            frontBorderShape, 
-            new CANNON.Vec3(this.mapCenter.x, wallHeight / 2, this.mapCenter.z - halfLength)
-        );
-        
-        // Back border (positive Z)
-        const backBorderShape = new CANNON.Box(new CANNON.Vec3(
-            halfWidth, 
-            wallHeight / 2, 
-            borderThickness / 2
-        ));
-        boundaryBody.addShape(
-            backBorderShape, 
-            new CANNON.Vec3(this.mapCenter.x, wallHeight / 2, this.mapCenter.z + halfLength)
-        );
-        
-        boundaryBody.mapBoundary = true; // Tag this body as a map boundary
-        boundaryBody.collisionFilterGroup = 2; // Group 2 for boundaries
-        
-        // Add the boundary body to the world
-        this.physics.world.addBody(boundaryBody);
-        this.physics.bodies.push(boundaryBody);
-        
-        // Store a reference to easily find this body later
-        this.mapBoundaryBody = boundaryBody;
-        
-        // If debug mode is enabled, create a visual representation
-        if (this.physics.debugMode) {
-            this.physics.createDebugMesh(boundaryBody);
-        }
-        
-        console.log("Created shootout map boundary");
+   * Create a physics boundary for the shootout map
+   */
+  createMapBoundary() {
+    if (!this.physics) return;
+    
+    // Remove any existing boundary first
+    this.removeMapBoundary();
+    
+    // Create a box boundary around the map
+    const boundaryBody = new CANNON.Body({
+      mass: 0, // Static body
+      material: this.physics.defaultMaterial
+    });
+    
+    // Add a box shape for each border
+    const halfWidth = this.mapWidth / 2;
+    const halfLength = this.mapLength / 2;
+    const borderThickness = 1;
+    const wallHeight = 5;
+    
+    // Left border (negative X)
+    const leftBorderShape = new CANNON.Box(new CANNON.Vec3(
+      borderThickness / 2, 
+      wallHeight / 2, 
+      halfLength
+    ));
+    boundaryBody.addShape(
+      leftBorderShape, 
+      new CANNON.Vec3(this.mapCenter.x - halfWidth, wallHeight / 2, this.mapCenter.z)
+    );
+    
+    // Right border (positive X)
+    const rightBorderShape = new CANNON.Box(new CANNON.Vec3(
+      borderThickness / 2, 
+      wallHeight / 2, 
+      halfLength
+    ));
+    boundaryBody.addShape(
+      rightBorderShape, 
+      new CANNON.Vec3(this.mapCenter.x + halfWidth, wallHeight / 2, this.mapCenter.z)
+    );
+    
+    // Front border (negative Z)
+    const frontBorderShape = new CANNON.Box(new CANNON.Vec3(
+      halfWidth, 
+      wallHeight / 2, 
+      borderThickness / 2
+    ));
+    boundaryBody.addShape(
+      frontBorderShape, 
+      new CANNON.Vec3(this.mapCenter.x, wallHeight / 2, this.mapCenter.z - halfLength)
+    );
+    
+    // Back border (positive Z)
+    const backBorderShape = new CANNON.Box(new CANNON.Vec3(
+      halfWidth, 
+      wallHeight / 2, 
+      borderThickness / 2
+    ));
+    boundaryBody.addShape(
+      backBorderShape, 
+      new CANNON.Vec3(this.mapCenter.x, wallHeight / 2, this.mapCenter.z + halfLength)
+    );
+    
+    boundaryBody.mapBoundary = true; // Tag this body as a map boundary
+    boundaryBody.collisionFilterGroup = 2; // Group 2 for boundaries
+    
+    // Add the boundary body to the world
+    this.physics.world.addBody(boundaryBody);
+    this.physics.bodies.push(boundaryBody);
+    
+    // Store a reference to easily find this body later
+    this.mapBoundaryBody = boundaryBody;
+    
+    // If debug mode is enabled, create a visual representation
+    if (this.physics.debugMode) {
+      this.physics.createDebugMesh(boundaryBody);
+      console.log("Creating debug visualization for shootout map boundary");
     }
+    
+    console.log("Created shootout map boundary");
+  }
     
     /**
      * Remove the map boundary
@@ -6380,51 +6437,65 @@ export class ProperShootout {
     }
     
     /**
-     * Update method called from main animation loop.
-     */
-    update(deltaTime) {
-        // Skip if player not loaded
-        if (!this.localPlayer || !this.localPlayer.group) {
-            return;
-        }
-        
-        // Check for portal collision when not in lobby
-        if (!this.inLobby) {
-            const playerPos = this.localPlayer.group.position.clone();
-            
-            // Check if player is colliding with the portal
-            if (this.portalCollider && this.portalCollider.containsPoint(playerPos)) {
-                this.joinMatch();
-            }
-        }
-        
-        // Update physics system
-        if (this.physics) {
-            this.physics.update(deltaTime);
-            
-            // If the player is in the shootout map, enforce map boundary collision
-            if (this.inLobby && this.mapBoundaryBody) {
-                const playerPos = this.localPlayer.group.position.clone();
-                const isInMap = this.isPointInMap(playerPos);
-                
-                if (!isInMap) {
-                    // If player is outside the map, push them back in
-                    const dirToCenter = new THREE.Vector3(
-                        this.mapCenter.x - playerPos.x,
-                        0,
-                        this.mapCenter.z - playerPos.z
-                    ).normalize();
-                    
-                    // Move player back inside
-                    this.localPlayer.group.position.x += dirToCenter.x * 0.1;
-                    this.localPlayer.group.position.z += dirToCenter.z * 0.1;
-                }
-            }
-        }
-        
-        // Update portal instruction visibility
-        this.updatePortalInstructions();
+   * Update method called from main animation loop.
+   */
+  update(deltaTime) {
+    // Skip if player not loaded
+    if (!this.localPlayer || !this.localPlayer.group) {
+      return;
     }
+    
+    // Update physics system
+    if (this.physics) {
+      this.physics.update(deltaTime);
+      
+      // If the player is in the shootout map, enforce map boundary collision
+      if (this.inLobby && this.mapBoundaryBody) {
+        const playerPos = this.localPlayer.group.position.clone();
+        const isInMap = this.isPointInMap(playerPos);
+        
+        if (!isInMap) {
+          // If player is outside the map, push them back in
+          const dirToCenter = new THREE.Vector3(
+            this.mapCenter.x - playerPos.x,
+            0,
+            this.mapCenter.z - playerPos.z
+          ).normalize();
+          
+          // Move player back inside
+          this.localPlayer.group.position.x += dirToCenter.x * 0.1;
+          this.localPlayer.group.position.z += dirToCenter.z * 0.1;
+        }
+        
+        // Make sure map boundary is visualized in debug mode - with proper null checking
+        if (this.physics.debugMode && this.mapBoundaryBody) {
+          // Check if debugMeshes array exists and has items
+          let hasDebugMesh = false;
+          if (this.physics.debugMeshes && Array.isArray(this.physics.debugMeshes)) {
+            hasDebugMesh = this.physics.debugMeshes.some(item => item && item.body === this.mapBoundaryBody);
+          }
+          
+          if (!hasDebugMesh) {
+            this.physics.createDebugMesh(this.mapBoundaryBody);
+            console.log("Recreating debug visualization for shootout map boundary");
+          }
+        }
+      }
+    }
+    
+    // Update portal instruction visibility
+    this.updatePortalInstructions();
+
+    // Check for portal collision when not in lobby
+    if (!this.inLobby) {
+        const playerPos = this.localPlayer.group.position.clone();
+        
+        // Check if player is colliding with the portal
+        if (this.portalCollider && this.portalCollider.containsPoint(playerPos)) {
+            this.joinMatch();
+        }
+    }
+  }
     
     /**
      * Check if a point is inside the map
@@ -10019,68 +10090,43 @@ function handlePlayerHit(playerId, data) {
   
   if (!sourcePlayer || !targetPlayer) return;
   
-  // Anti-cheat: Validate the hit using server-side bullets
-  let validHit = false;
-  let bulletId = null;
+  // Validate that players are in compatible game modes
+  const sourceInQuickDraw = sourcePlayer.inQuickDrawDuel;
+  const targetInQuickDraw = targetPlayer.inQuickDrawDuel;
+  const sourceInShootout = sourcePlayer.inProperShootout;
+  const targetInShootout = targetPlayer.inProperShootout;
   
-  // If bulletId is provided, validate against that specific bullet
-  if (data.bulletId) {
-    const bullet = activeBullets.get(data.bulletId);
-    if (bullet && bullet.sourcePlayerId === playerId && bullet.active) {
-      // Check if the bullet is close enough to the target
-      validHit = isPlayerHitByBullet(targetPlayer, bullet);
-      if (validHit) {
-        bulletId = data.bulletId;
-      }
-    }
-  } else {
-    // Otherwise, check all active bullets from this player
-    for (const [bid, bullet] of activeBullets.entries()) {
-      if (bullet.sourcePlayerId === playerId && bullet.active) {
-        if (isPlayerHitByBullet(targetPlayer, bullet)) {
-          validHit = true;
-          bulletId = bid;
-          break;
-        }
-      }
-    }
+  // Verify that players are either both in QuickDraw, both in Shootout, or both in regular mode
+  const bothInQuickDraw = sourceInQuickDraw && targetInQuickDraw && 
+                         sourcePlayer.quickDrawDuelId === targetPlayer.quickDrawDuelId;
+  const bothInShootout = sourceInShootout && targetInShootout &&
+                         sourcePlayer.properShootoutLobbyId === targetPlayer.properShootoutLobbyId;
+  const bothInRegularMode = !sourceInQuickDraw && !targetInQuickDraw && 
+                           !sourceInShootout && !targetInShootout;
+  
+  if (!(bothInQuickDraw || bothInShootout || bothInRegularMode)) {
+    console.log(`Rejecting hit claim from player ${playerId} on ${targetId}: incompatible game modes`);
+    console.log(`Source: QuickDraw=${sourceInQuickDraw}, Shootout=${sourceInShootout}`);
+    console.log(`Target: QuickDraw=${targetInQuickDraw}, Shootout=${targetInShootout}`);
+    return sendErrorToPlayer(playerId, "Invalid hit: players in different game modes", false);
   }
   
-  // If no valid hit was found, reject the hit claim
-  if (!validHit) {
-    console.log(`Rejecting invalid hit claim from player ${playerId} on ${targetId}`);
-    return sendErrorToPlayer(playerId, "Invalid hit claim", false);
-  }
+  // Get hit data
+  const hitZone = data.hitData && data.hitData.hitZone ? data.hitData.hitZone : 'body';
+  const damage = data.hitData && data.hitData.damage ? data.hitData.damage : 40;
   
-  console.log(`Player ${targetId} was hit by player ${playerId}'s bullet ${bulletId}`);
-  
-  // Mark the bullet as inactive
-  if (bulletId !== null) {
-    const bullet = activeBullets.get(bulletId);
-    if (bullet) {
-      bullet.active = false;
-    }
-  }
-  
-  // Calculate damage based on hit zone if provided
-  let damage = GAME_CONSTANTS.DAMAGE_PER_HIT; // Default damage
-  const hitZone = data.hitData && data.hitData.hitZone ? data.hitData.hitZone : null;
-  
-  if (hitZone) {
-    if (hitZone === 'head') {
-      damage = 100; // Headshot is always lethal
-    } else if (hitZone === 'body') {
-      damage = 40; // Body shot deals 40 damage
-    } else if (hitZone === 'limbs') {
-      damage = 20; // Limb shot deals 20 damage
-    }
-  } else if (data.hitData && data.hitData.damage) {
-    // If explicit damage is provided, use that
-    damage = data.hitData.damage;
+  // Validate hit zone and damage
+  let finalDamage = damage;
+  if (hitZone === 'head') {
+    finalDamage = 100; // Headshot is always lethal
+  } else if (hitZone === 'body') {
+    finalDamage = 40; // Body shot deals 40 damage
+  } else if (hitZone === 'limbs') {
+    finalDamage = 20; // Limb shot deals 20 damage
   }
   
   // Apply hit effects: reduce health
-  targetPlayer.health = Math.max(targetPlayer.health - damage, 0);
+  targetPlayer.health = Math.max(targetPlayer.health - finalDamage, 0);
   
   // Inform the target
   if (targetPlayer.ws.readyState === WebSocket.OPEN) {
@@ -10100,9 +10146,9 @@ function handlePlayerHit(playerId, data) {
     sourceId: playerId,
     hitPosition: data.hitData ? data.hitData.position : null,
     health: targetPlayer.health,
-    bulletId: bulletId,
+    bulletId: data.bulletId,
     hitZone: hitZone,
-    damage: damage
+    damage: finalDamage
   });
   
   // Check for player death
@@ -10114,7 +10160,7 @@ function handlePlayerHit(playerId, data) {
 // Anti-cheat: Bullet-player collision detection
 function isPlayerHitByBullet(player, bullet) {
   // Calculate player hitbox (simple cylinder)
-  const playerRadius = 0.5;  // horizontal radius
+  const playerRadius = 0.6;  // Increased horizontal radius to match client's bodyWidth
   const playerHeight = 2.0;  // vertical height
   
   // Calculate distance from bullet to player (horizontal only)
@@ -10132,7 +10178,9 @@ function isPlayerHitByBullet(player, bullet) {
   const playerBottom = player.position.y - 1.6; // Adjust based on your coordinate system
   const playerTop = playerBottom + playerHeight;
   
-  if (bulletY < playerBottom || bulletY > playerTop) {
+  // Add some tolerance to vertical bounds
+  const tolerance = 0.2;
+  if (bulletY < playerBottom - tolerance || bulletY > playerTop + tolerance) {
     return false;
   }
   

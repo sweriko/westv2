@@ -52,10 +52,9 @@ export class ProperShootout {
             const streetWidth = window.townDimensions.streetWidth;
             const townLength = window.townDimensions.length;
             
-            // Position portal on the side of the street in the center of town
-            // Offset slightly from the Quick Draw portal (which is at streetWidth * 0.4)
-            portalX = streetWidth * 0.4 - 6; // 6 units to the left of Quick Draw portal
-            portalZ = 0; // Center of town (Z axis)
+            // Position portal on the side of the street in a line with Quick Draw portal
+            portalX = streetWidth * 0.4; // Same X as Quick Draw portal
+            portalZ = 6; // Offset on Z axis instead of X to place them in a line
         }
         
         // Create a wooden frame portal with different color
@@ -195,7 +194,7 @@ export class ProperShootout {
         
         // Position the portal
         this.portalGroup.position.set(x, y, z);
-        this.portalGroup.rotation.y = Math.PI / 2; // Make it vertical and facing the street
+        this.portalGroup.rotation.y = Math.PI / 2; // Keep the same rotation to match Quick Draw portal
     }
     
     /**
