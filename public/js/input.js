@@ -104,8 +104,7 @@ export function initInput(renderer, player, soundManager) {
       if (player.arms) {
         player.arms.setVisible(true);
       }
-      const crosshair = document.getElementById('crosshair');
-      if (crosshair) crosshair.style.display = 'block';
+      // Removed crosshair display - making the game more realistic
 
       if (soundManager) {
         soundManager.playSound("aimclick");
@@ -128,8 +127,7 @@ export function initInput(renderer, player, soundManager) {
       if (player.arms) {
         player.arms.setVisible(false);
       }
-      const crosshair = document.getElementById('crosshair');
-      if (crosshair) crosshair.style.display = 'none';
+      // Removed crosshair display code
     }
   });
 

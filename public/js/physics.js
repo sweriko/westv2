@@ -1,6 +1,6 @@
 /**
  * Physics system using cannon.js for collision detection and physics simulation.
- * Focused on creating invisible boundaries for the QuickDraw arena.
+ * Focused on creating invisible boundaries for the QuickDraw arenas and town.
  */
 export class PhysicsSystem {
     constructor() {
@@ -27,6 +27,9 @@ export class PhysicsSystem {
       // Debug helper for visualizing physics bodies
       this.debugMeshes = [];
       this.debugMode = false;
+      
+      // Track arena boundaries separately
+      this.arenaBoundaryBodies = [];
       
       // Initialize ground
       this.initGround();
@@ -152,14 +155,16 @@ export class PhysicsSystem {
     }
     
     /**
-     * Creates an invisible cylindrical boundary for the QuickDraw arena
+     * Creates an invisible cylindrical boundary for a QuickDraw arena
      * @param {THREE.Vector3} center - Center position of the arena
      * @param {number} radius - Radius of the cylindrical arena
      * @param {number} height - Height of the cylindrical arena
+     * @param {number} arenaIndex - Index of the arena (0-4)
+     * @returns {CANNON.Body} - The created physics body
      */
-    createQuickDrawArenaBoundary(center, radius, height) {
-      // First remove any existing arena boundaries
-      this.removeQuickDrawArenaBoundary();
+    createQuickDrawArenaBoundary(center, radius, height, arenaIndex = 0) {
+      // First remove any existing arena boundary for this index
+      this.removeQuickDrawArenaBoundaryByIndex(arenaIndex);
       
       // Create a physics body for the arena boundary
       const arenaBody = new CANNON.Body({
@@ -170,7 +175,6 @@ export class PhysicsSystem {
       // Position at the center
       arenaBody.position.set(center.x, center.y + height/2, center.z);
       
-      // Add a cylindrical shape for the arena
       // Use a hollow cylinder (cylinder + inverted cylinder)
       // We make the walls a bit thick (0.5 units) to ensure reliable collision detection
       const wallThickness = 0.5;
@@ -220,41 +224,53 @@ export class PhysicsSystem {
       arenaBody.addShape(bottomShape, bottomOffset, bottomQuaternion);
       
       arenaBody.arenaBoundary = true; // Tag this body as an arena boundary
+      arenaBody.arenaIndex = arenaIndex; // Store which arena this belongs to
       arenaBody.collisionFilterGroup = 2; // Group 2 for arena boundaries
       
       // Add the arena body to the world
       this.world.addBody(arenaBody);
       this.bodies.push(arenaBody);
       
-      // Create a reference to easily find this body later
-      this.arenaBoundaryBody = arenaBody;
+      // Store in our array of arena boundaries
+      this.arenaBoundaryBodies[arenaIndex] = arenaBody;
       
       // If debug mode is enabled, create a visual representation
       if (this.debugMode) {
         this.createDebugMesh(arenaBody);
       }
       
-      console.log("Created QuickDraw arena boundary at", center, "with radius", radius, "and height", height);
+      console.log(`Created QuickDraw arena boundary ${arenaIndex + 1} at`, center, "with radius", radius, "and height", height);
       
       return arenaBody;
     }
     
     /**
-     * Removes the QuickDraw arena boundary if it exists
+     * Removes a QuickDraw arena boundary for a specific arena index
+     * @param {number} arenaIndex - The index of the arena (0-4)
      */
-    removeQuickDrawArenaBoundary() {
-      if (this.arenaBoundaryBody) {
-        this.world.removeBody(this.arenaBoundaryBody);
+    removeQuickDrawArenaBoundaryByIndex(arenaIndex) {
+      if (this.arenaBoundaryBodies[arenaIndex]) {
+        this.world.removeBody(this.arenaBoundaryBodies[arenaIndex]);
         
         // Remove from our bodies array
-        const index = this.bodies.indexOf(this.arenaBoundaryBody);
+        const index = this.bodies.indexOf(this.arenaBoundaryBodies[arenaIndex]);
         if (index !== -1) {
           this.bodies.splice(index, 1);
         }
         
-        // Clear the reference
-        this.arenaBoundaryBody = null;
-        console.log("Removed QuickDraw arena boundary");
+        // Clear the reference in our arena boundaries array
+        this.arenaBoundaryBodies[arenaIndex] = null;
+        console.log(`Removed QuickDraw arena boundary ${arenaIndex + 1}`);
+      }
+    }
+    
+    /**
+     * Removes the QuickDraw arena boundary (legacy method for backward compatibility)
+     */
+    removeQuickDrawArenaBoundary() {
+      // Remove all arena boundaries
+      for (let i = 0; i < this.arenaBoundaryBodies.length; i++) {
+        this.removeQuickDrawArenaBoundaryByIndex(i);
       }
     }
     
@@ -293,16 +309,32 @@ export class PhysicsSystem {
     }
     
     /**
-     * Checks if a point is inside the arena boundary
+     * Checks if a point is inside any active arena boundary
      * @param {THREE.Vector3} point - The point to check
      * @returns {boolean} - True if inside, false if outside
      */
     isPointInArenaBoundary(point) {
-      // If no arena boundary exists, return false
-      if (!this.arenaBoundaryBody) return false;
+      // Check all arena boundaries
+      for (let i = 0; i < this.arenaBoundaryBodies.length; i++) {
+        if (this.isPointInSpecificArenaBoundary(point, i)) {
+          return true;
+        }
+      }
+      return false;
+    }
+    
+    /**
+     * Checks if a point is inside a specific arena boundary
+     * @param {THREE.Vector3} point - The point to check
+     * @param {number} arenaIndex - The arena index to check
+     * @returns {boolean} - True if inside, false if outside
+     */
+    isPointInSpecificArenaBoundary(point, arenaIndex) {
+      // If no arena boundary exists for this index, return false
+      if (!this.arenaBoundaryBodies[arenaIndex]) return false;
       
-      // Get arena position and create a CANNON vector for the point
-      const arenaPos = this.arenaBoundaryBody.position;
+      // Get arena position
+      const arenaPos = this.arenaBoundaryBodies[arenaIndex].position;
       const pointVec = new CANNON.Vec3(point.x, point.y, point.z);
       
       // Calculate horizontal distance (ignoring Y) from arena center
@@ -310,10 +342,10 @@ export class PhysicsSystem {
       const dz = pointVec.z - arenaPos.z;
       const horizontalDist = Math.sqrt(dx * dx + dz * dz);
       
-      // Get the radius from the first shape (assuming it's a cylinder or shape with radius property)
-      const radius = 15; // Default from QuickDraw.js
+      // Get the radius - assuming 15 is the standard radius for all arenas
+      const radius = 15;
       
-      // Check if point is inside the cylinder horizontally and vertically
+      // Check if point is inside the cylinder horizontally
       return horizontalDist < radius;
     }
 
@@ -531,5 +563,6 @@ export class PhysicsSystem {
       
       this.bodies = [];
       this.debugMeshes = [];
+      this.arenaBoundaryBodies = [];
     }
   }

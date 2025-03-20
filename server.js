@@ -20,8 +20,10 @@ const sessions = new Set();   // tracks sessionIds to prevent duplicate connecti
 let nextPlayerId = 1;
 
 // Track Quick Draw game mode queues and active duels
-const quickDrawQueue = []; // Players waiting for a match
-const quickDrawDuels = new Map(); // Map of duelId -> { player1Id, player2Id, state, ... }
+// Support for 5 concurrent lobbies
+const MAX_ARENAS = 5;
+const quickDrawQueues = Array(MAX_ARENAS).fill(null).map(() => []);  // Array of queues for each arena
+const quickDrawDuels = new Map(); // Map of duelId -> { player1Id, player2Id, state, arenaIndex, ... }
 
 // On new connection
 wss.on('connection', (ws, req) => {
@@ -47,7 +49,7 @@ wss.on('connection', (ws, req) => {
   const playerId = nextPlayerId++;
   console.log(`Player ${playerId} connected (sessionId: ${sessionId || 'none'})`);
 
-  // Create initial player data with health
+  // Create initial player data with health and QuickDraw info
   players.set(playerId, {
     ws,
     sessionId,
@@ -57,7 +59,11 @@ wss.on('connection', (ws, req) => {
     isShooting: false,
     isReloading: false,
     health: 100,
-    lastActivity: Date.now()
+    lastActivity: Date.now(),
+    quickDrawLobbyIndex: -1, // -1 means not in any lobby
+    inQuickDrawQueue: false,
+    inQuickDrawDuel: false,
+    quickDrawDuelId: null
   });
 
   // Send init data to this client (their ID + existing players)
@@ -73,7 +79,8 @@ wss.on('connection', (ws, req) => {
         isAiming: p.isAiming,
         isShooting: p.isShooting,
         isReloading: p.isReloading,
-        health: p.health
+        health: p.health,
+        quickDrawLobbyIndex: p.quickDrawLobbyIndex
       }))
   }));
 
@@ -83,7 +90,8 @@ wss.on('connection', (ws, req) => {
     id: playerId,
     position: players.get(playerId).position,
     rotation: players.get(playerId).rotation,
-    health: players.get(playerId).health
+    health: players.get(playerId).health,
+    quickDrawLobbyIndex: players.get(playerId).quickDrawLobbyIndex
   });
 
   // Handle incoming messages
@@ -106,7 +114,13 @@ wss.on('connection', (ws, req) => {
             player.isAiming = data.isAiming !== undefined ? data.isAiming : player.isAiming;
             player.isShooting = data.isShooting !== undefined ? data.isShooting : player.isShooting;
             player.isReloading = data.isReloading !== undefined ? data.isReloading : player.isReloading;
-            // Broadcast to others including current health
+            
+            // Update QuickDraw lobby index if provided
+            if (data.quickDrawLobbyIndex !== undefined) {
+              player.quickDrawLobbyIndex = data.quickDrawLobbyIndex;
+            }
+            
+            // Broadcast to others including current health and Quick Draw info
             broadcastToOthers(playerId, {
               type: 'playerUpdate',
               id: playerId,
@@ -115,7 +129,8 @@ wss.on('connection', (ws, req) => {
               isAiming: player.isAiming,
               isShooting: player.isShooting,
               isReloading: player.isReloading,
-              health: player.health
+              health: player.health,
+              quickDrawLobbyIndex: player.quickDrawLobbyIndex
             });
           }
           break;
@@ -161,7 +176,7 @@ wss.on('connection', (ws, req) => {
           break;
           
         case 'quickDrawJoin':
-          handleQuickDrawJoin(playerId);
+          handleQuickDrawJoin(playerId, data.arenaIndex);
           break;
           
         case 'quickDrawLeave':
@@ -169,11 +184,11 @@ wss.on('connection', (ws, req) => {
           break;
           
         case 'quickDrawReady':
-          handleQuickDrawReady(playerId);
+          handleQuickDrawReady(playerId, data.arenaIndex);
           break;
           
         case 'quickDrawShoot':
-          handleQuickDrawShoot(playerId, data.opponentId);
+          handleQuickDrawShoot(playerId, data.opponentId, data.arenaIndex);
           break;
 
         default:
@@ -209,11 +224,15 @@ function cleanupPlayer(playerId) {
     }
     
     // Quick Draw cleanup
-    if (player.inQuickDrawQueue) {
-      // Remove from queue
-      const index = quickDrawQueue.indexOf(playerId);
-      if (index !== -1) {
-        quickDrawQueue.splice(index, 1);
+    if (player.inQuickDrawQueue && player.quickDrawLobbyIndex >= 0) {
+      // Remove from the appropriate queue
+      const queueIndex = player.quickDrawLobbyIndex;
+      if (queueIndex >= 0 && queueIndex < MAX_ARENAS) {
+        const queue = quickDrawQueues[queueIndex];
+        const index = queue.indexOf(playerId);
+        if (index !== -1) {
+          queue.splice(index, 1);
+        }
       }
     }
     
@@ -267,59 +286,85 @@ function broadcastToAll(data) {
 }
 
 /**
- * Handle a player joining the Quick Draw queue.
+ * Handle a player joining a specific Quick Draw queue.
+ * @param {number} playerId - The player's ID
+ * @param {number} arenaIndex - The arena index to join (0-4)
  */
-function handleQuickDrawJoin(playerId) {
-  console.log(`Player ${playerId} joined Quick Draw queue`);
+function handleQuickDrawJoin(playerId, arenaIndex) {
+  // Validate arena index
+  if (arenaIndex < 0 || arenaIndex >= MAX_ARENAS) {
+    console.error(`Invalid arena index: ${arenaIndex}`);
+    return;
+  }
+  
+  console.log(`Player ${playerId} joined Quick Draw queue for arena ${arenaIndex + 1}`);
   const playerData = players.get(playerId);
   
   if (!playerData || playerData.inQuickDrawQueue || playerData.inQuickDrawDuel) {
     return; // Invalid state
   }
   
-  // Add to the queue
+  // Add to the specific queue
   playerData.inQuickDrawQueue = true;
-  quickDrawQueue.push(playerId);
+  playerData.quickDrawLobbyIndex = arenaIndex;
+  quickDrawQueues[arenaIndex].push(playerId);
   
   // Notify the player they joined the queue
   playerData.ws.send(JSON.stringify({
-    type: 'quickDrawJoin'
+    type: 'quickDrawJoin',
+    arenaIndex: arenaIndex
   }));
   
-  // Check if we have enough players to start a match
-  checkQuickDrawQueue();
+  // Check if we have enough players in this queue to start a match
+  checkQuickDrawQueue(arenaIndex);
 }
 
 /**
  * Handle a player leaving the Quick Draw queue.
+ * @param {number} playerId - The player's ID
  */
 function handleQuickDrawLeave(playerId) {
-  console.log(`Player ${playerId} left Quick Draw queue`);
   const playerData = players.get(playerId);
   
   if (!playerData || !playerData.inQuickDrawQueue) {
     return; // Invalid state
   }
   
-  // Remove from queue
-  playerData.inQuickDrawQueue = false;
-  const index = quickDrawQueue.indexOf(playerId);
-  if (index !== -1) {
-    quickDrawQueue.splice(index, 1);
+  // Get the arena index
+  const arenaIndex = playerData.quickDrawLobbyIndex;
+  if (arenaIndex >= 0 && arenaIndex < MAX_ARENAS) {
+    console.log(`Player ${playerId} left Quick Draw queue for arena ${arenaIndex + 1}`);
+    
+    // Remove from appropriate queue
+    const index = quickDrawQueues[arenaIndex].indexOf(playerId);
+    if (index !== -1) {
+      quickDrawQueues[arenaIndex].splice(index, 1);
+    }
   }
+  
+  // Reset player state
+  playerData.inQuickDrawQueue = false;
+  playerData.quickDrawLobbyIndex = -1;
 }
 
 /**
- * Check if we have enough players in the Quick Draw queue to start a match.
+ * Check if we have enough players in a specific Quick Draw queue to start a match.
+ * @param {number} arenaIndex - The arena index to check
  */
-function checkQuickDrawQueue() {
-  if (quickDrawQueue.length < 2) {
-    return; // Not enough players
+function checkQuickDrawQueue(arenaIndex) {
+  if (arenaIndex < 0 || arenaIndex >= MAX_ARENAS) {
+    return; // Invalid arena index
+  }
+  
+  const queue = quickDrawQueues[arenaIndex];
+  
+  if (queue.length < 2) {
+    return; // Not enough players in this queue
   }
   
   // Get the two players who have been waiting the longest
-  const player1Id = quickDrawQueue.shift();
-  const player2Id = quickDrawQueue.shift();
+  const player1Id = queue.shift();
+  const player2Id = queue.shift();
   
   // Make sure both players are still connected
   const player1 = players.get(player1Id);
@@ -327,15 +372,16 @@ function checkQuickDrawQueue() {
   
   if (!player1 || !player2) {
     // Put the valid player back in the queue
-    if (player1) quickDrawQueue.push(player1Id);
-    if (player2) quickDrawQueue.push(player2Id);
+    if (player1) queue.push(player1Id);
+    if (player2) queue.push(player2Id);
     return;
   }
   
   // Create a new duel
-  const duelId = `duel_${player1Id}_${player2Id}`;
+  const duelId = `duel_${arenaIndex}_${player1Id}_${player2Id}`;
   quickDrawDuels.set(duelId, {
     id: duelId,
+    arenaIndex: arenaIndex,
     player1Id,
     player2Id,
     state: 'starting',
@@ -355,22 +401,26 @@ function checkQuickDrawQueue() {
   player1.ws.send(JSON.stringify({
     type: 'quickDrawMatch',
     opponentId: player2Id,
-    position: 'left' // Player 1 spawns on the left
+    position: 'left', // Player 1 spawns on the left
+    arenaIndex: arenaIndex
   }));
   
   player2.ws.send(JSON.stringify({
     type: 'quickDrawMatch',
     opponentId: player1Id,
-    position: 'right' // Player 2 spawns on the right
+    position: 'right', // Player 2 spawns on the right
+    arenaIndex: arenaIndex
   }));
   
-  console.log(`Started Quick Draw duel ${duelId} between players ${player1Id} and ${player2Id}`);
+  console.log(`Started Quick Draw duel ${duelId} between players ${player1Id} and ${player2Id} in arena ${arenaIndex + 1}`);
 }
 
 /**
  * Handle a player being ready in a Quick Draw duel.
+ * @param {number} playerId - The player's ID
+ * @param {number} arenaIndex - The arena index for the duel
  */
-function handleQuickDrawReady(playerId) {
+function handleQuickDrawReady(playerId, arenaIndex) {
   const playerData = players.get(playerId);
   
   if (!playerData || !playerData.inQuickDrawDuel) {
@@ -382,6 +432,12 @@ function handleQuickDrawReady(playerId) {
   
   if (!duel) {
     return; // Invalid duel
+  }
+  
+  // Verify arena index matches
+  if (arenaIndex !== undefined && duel.arenaIndex !== arenaIndex) {
+    console.error(`Arena index mismatch: expected ${duel.arenaIndex}, got ${arenaIndex}`);
+    return;
   }
   
   // Mark this player as ready
@@ -399,6 +455,7 @@ function handleQuickDrawReady(playerId) {
 
 /**
  * Start the Quick Draw duel sequence.
+ * @param {string} duelId - The duel ID
  */
 function startQuickDrawDuel(duelId) {
   const duel = quickDrawDuels.get(duelId);
@@ -441,6 +498,7 @@ function startQuickDrawDuel(duelId) {
 
 /**
  * Send the "DRAW!" signal to both players.
+ * @param {string} duelId - The duel ID
  */
 function sendDrawSignal(duelId) {
   const duel = quickDrawDuels.get(duelId);
@@ -464,17 +522,20 @@ function sendDrawSignal(duelId) {
   player1.ws.send(JSON.stringify({ type: 'quickDrawDraw' }));
   player2.ws.send(JSON.stringify({ type: 'quickDrawDraw' }));
   
-  console.log(`Draw signal sent for duel ${duelId}`);
+  console.log(`Draw signal sent for duel ${duelId} in arena ${duel.arenaIndex + 1}`);
 }
 
 /**
  * Handle a player shooting in a Quick Draw duel.
+ * @param {number} playerId - The player's ID
+ * @param {number} targetId - The target player's ID
+ * @param {number} arenaIndex - The arena index for the duel
  */
-function handleQuickDrawShoot(playerId, targetId) {
+function handleQuickDrawShoot(playerId, targetId, arenaIndex) {
     playerId = Number(playerId);
     targetId = Number(targetId);
     
-    console.log(`Quick Draw shoot: Player ${playerId} shot player ${targetId}`);
+    console.log(`Quick Draw shoot: Player ${playerId} shot player ${targetId} in arena ${arenaIndex + 1}`);
     
     const playerData = players.get(playerId);
     
@@ -489,6 +550,12 @@ function handleQuickDrawShoot(playerId, targetId) {
     if (!duel) {
         console.log(`Quick Draw shoot rejected: Duel ${duelId} not found`);
         return; // Invalid duel
+    }
+    
+    // Verify arena index matches
+    if (arenaIndex !== undefined && duel.arenaIndex !== arenaIndex) {
+        console.error(`Arena index mismatch: expected ${duel.arenaIndex}, got ${arenaIndex}`);
+        return;
     }
     
     if (duel.state !== 'draw') {
@@ -523,7 +590,8 @@ function endQuickDrawDuel(duelId, winnerId) {
     return; // Invalid duel
   }
   
-  console.log(`Ending duel ${duelId} with winner ${winnerId || 'none'}`);
+  const arenaIndex = duel.arenaIndex;
+  console.log(`Ending duel ${duelId} in arena ${arenaIndex + 1} with winner ${winnerId || 'none'}`);
   
   // Clear any pending timeouts
   if (duel.drawTimeout) {

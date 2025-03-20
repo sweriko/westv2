@@ -57,7 +57,7 @@ body {
   height: 20px;
   border: 2px solid white;
   border-radius: 50%;
-  display: none;
+  display: none; /* Always keep it hidden to make the game more realistic */
 }
 #crosshair::before,
 #crosshair::after {
@@ -267,6 +267,23 @@ body {
 #portal-instructions li {
   margin-bottom: 5px;
   list-style-type: square;
+}
+
+/* Lobby display for showing which arena the player is in */
+#lobby-indicator {
+  position: absolute;
+  top: 150px;
+  left: 20px;
+  color: white;
+  font-size: 16px;
+  background-color: rgba(255, 107, 0, 0.7);
+  padding: 8px 12px;
+  border-radius: 5px;
+  font-family: 'Courier New', Courier, monospace;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  display: none;
 }
 
 @font-face {

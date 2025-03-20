@@ -71,7 +71,7 @@ export class Player {
 
     // Reload
     this.isReloading = false;
-    this.reloadTime = 2000;
+    this.reloadTime = 4000; // Changed from 2000ms to 4000ms (4 seconds)
     this.reloadProgress = 0;
     this.bullets = 6;
     this.maxBullets = 6;
@@ -89,6 +89,9 @@ export class Player {
     
     // Store previous position to detect collision with arena boundary
     this.previousPosition = new THREE.Vector3();
+
+    // Quick Draw lobby information
+    this.quickDrawLobbyIndex = -1; // -1 means not in a lobby
 
     // Initialize network & UI
     this.initNetworking();
@@ -376,7 +379,8 @@ export class Player {
       },
       isAiming: this.isAiming,
       isReloading: this.isReloading,
-      health: this.health
+      health: this.health,
+      quickDrawLobbyIndex: this.quickDrawLobbyIndex
     });
   }
 
@@ -461,6 +465,9 @@ export class Player {
     // Reset vertical velocity
     this.velocity.y = 0;
     
+    // Reset Quick Draw lobby information
+    this.quickDrawLobbyIndex = -1;
+    
     console.log('Player respawned');
   }
 
@@ -514,5 +521,27 @@ export class Player {
     
     this.isReloading = false;
     this.sendNetworkUpdate(); // let others know
+  }
+  
+  /**
+   * Set the Quick Draw lobby index for this player
+   * @param {number} index - The lobby index (0-4) or -1 for none
+   */
+  setQuickDrawLobby(index) {
+    this.quickDrawLobbyIndex = index;
+    
+    // Update UI indicator
+    const lobbyIndicator = document.getElementById('lobby-indicator');
+    if (lobbyIndicator) {
+      if (index >= 0) {
+        lobbyIndicator.textContent = `Arena ${index + 1}`;
+        lobbyIndicator.style.display = 'block';
+      } else {
+        lobbyIndicator.style.display = 'none';
+      }
+    }
+    
+    // Send update to server
+    this.sendNetworkUpdate();
   }
 }
