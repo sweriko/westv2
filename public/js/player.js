@@ -495,6 +495,12 @@ export class Player {
       }
     }
     
+    // Check Proper Shootout map boundary
+    if (window.properShootout && window.properShootout.inLobby) {
+      // If in Proper Shootout, only check those boundaries and ignore town boundaries
+      return window.properShootout.isPointInMap(position);
+    }
+    
     // Check town boundary
     if (window.physics && typeof window.physics.isPointInTown === 'function') {
       if (!window.physics.isPointInTown(position)) {

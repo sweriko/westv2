@@ -134,8 +134,23 @@ export class Bullet {
       }
     }
 
-    // Check if crossing town boundary using the physics system
-    if (window.physics && typeof window.physics.isPointInTown === 'function') {
+    // Check for Proper Shootout map boundary
+    if (window.properShootout && window.properShootout.inLobby) {
+      const bulletInMap = window.properShootout.isPointInMap(endPos);
+      const prevInMap = window.properShootout.isPointInMap(this.lastPosition);
+      
+      // Calculate if bullet is crossing the boundary
+      const bulletCrossingBoundary = bulletInMap !== prevInMap;
+      
+      // If the bullet is crossing the boundary from inside to outside, destroy it
+      if (bulletCrossingBoundary && !bulletInMap) {
+        console.log("Bullet hit Proper Shootout map boundary - destroying it");
+        createImpactEffect(endPos, this.direction, scene, 'ground');
+        return { active: false, hit: { type: 'boundary', position: endPos } };
+      }
+    }
+    // Only check town boundary if not in Proper Shootout
+    else if (window.physics && typeof window.physics.isPointInTown === 'function') {
       const bulletInTown = window.physics.isPointInTown(endPos);
       const prevInTown = window.physics.isPointInTown(this.lastPosition);
       

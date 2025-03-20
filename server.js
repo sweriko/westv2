@@ -25,6 +25,14 @@ const MAX_ARENAS = 5;
 const quickDrawQueues = Array(MAX_ARENAS).fill(null).map(() => []);  // Array of queues for each arena
 const quickDrawDuels = new Map(); // Map of duelId -> { player1Id, player2Id, state, arenaIndex, ... }
 
+// Track Proper Shootout game mode
+const properShootoutLobbies = new Map(); // lobbyId -> { players: Set(), scores: Map() }
+let nextLobbyId = 1;
+const MAX_SHOOTOUT_PLAYERS = 10;
+const SHOOTOUT_WIN_SCORE = 10;
+const SHOOTOUT_MAP_CENTER = { x: 0, z: -100 }; // Coordinates matching the client map center
+const SHOOTOUT_MAP_DIMENSIONS = { width: 50, length: 50 };
+
 // Anti-cheat: Game physics constants
 const GAME_CONSTANTS = {
   // Weapon constraints
@@ -90,6 +98,9 @@ wss.on('connection', (ws, req) => {
     inQuickDrawQueue: false,
     inQuickDrawDuel: false,
     quickDrawDuelId: null,
+    // Proper Shootout info
+    inProperShootout: false,
+    properShootoutLobbyId: null,
     // Additional player state
     bullets: 6,
     maxBullets: 6,
@@ -230,6 +241,14 @@ wss.on('connection', (ws, req) => {
             data.hitZone || 'body', 
             data.damage || 40
           );
+          break;
+          
+        case 'properShootoutJoin':
+          handleProperShootoutJoin(playerId);
+          break;
+          
+        case 'properShootoutLeave':
+          handleProperShootoutLeave(playerId);
           break;
 
         default:
@@ -604,6 +623,41 @@ function handlePlayerDeath(playerId, killedById) {
     }
   }
   
+  // If player was in Proper Shootout, handle kill scoring
+  if (player.inProperShootout && player.properShootoutLobbyId) {
+    const lobbyId = player.properShootoutLobbyId;
+    const lobby = properShootoutLobbies.get(lobbyId);
+    const killer = players.get(killedById);
+    
+    if (lobby && killer && killer.inProperShootout && killer.properShootoutLobbyId === lobbyId) {
+      // Increment killer's score
+      const currentKills = lobby.scores.get(killedById) || 0;
+      const newKills = currentKills + 1;
+      lobby.scores.set(killedById, newKills);
+      
+      // Notify lobby about the kill
+      notifyLobbyPlayers(lobbyId, {
+        type: 'properShootoutKill',
+        killerId: killedById,
+        victimId: playerId,
+        scores: getScoresArray(lobby)
+      });
+      
+      // Check if killer reached win condition
+      if (newKills >= SHOOTOUT_WIN_SCORE) {
+        // End the match
+        notifyLobbyPlayers(lobbyId, {
+          type: 'properShootoutEnd',
+          winnerId: killedById,
+          scores: getScoresArray(lobby)
+        });
+        
+        // Reset the lobby
+        resetProperShootoutLobby(lobbyId);
+      }
+    }
+  }
+  
   // Respawn the player
   respawnPlayer(playerId);
 }
@@ -620,13 +674,19 @@ function respawnPlayer(playerId) {
   player.isAiming = false;
   player.isShooting = false;
   
-  // Generate random spawn position within town
-  const spawnX = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_WIDTH * 0.8;
-  const spawnY = 1.6;
-  const spawnZ = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_LENGTH * 0.8;
-  
-  // Set spawn position
-  player.position = { x: spawnX, y: spawnY, z: spawnZ };
+  // If in Proper Shootout, use map-specific spawn
+  if (player.inProperShootout) {
+    const spawnPos = generateRandomShootoutPosition();
+    player.position = spawnPos;
+  } else {
+    // Generate random spawn position within town
+    const spawnX = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_WIDTH * 0.8;
+    const spawnY = 1.6;
+    const spawnZ = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_LENGTH * 0.8;
+    
+    // Set spawn position
+    player.position = { x: spawnX, y: spawnY, z: spawnZ };
+  }
   
   // Reset QuickDraw-related state if not in a duel
   if (!player.inQuickDrawDuel) {
@@ -739,6 +799,11 @@ function cleanupPlayer(playerId) {
       }
     }
     
+    // Proper Shootout cleanup
+    if (player.inProperShootout && player.properShootoutLobbyId) {
+      removePlayerFromShootoutLobby(playerId, player.properShootoutLobbyId);
+    }
+    
     players.delete(playerId);
     
     // Anti-cheat: Clean up associated data
@@ -798,7 +863,7 @@ function handleQuickDrawJoin(playerId, arenaIndex) {
   console.log(`Player ${playerId} joined Quick Draw queue for arena ${arenaIndex + 1}`);
   const playerData = players.get(playerId);
   
-  if (!playerData || playerData.inQuickDrawQueue || playerData.inQuickDrawDuel) {
+  if (!playerData || playerData.inQuickDrawQueue || playerData.inQuickDrawDuel || playerData.inProperShootout) {
     return; // Invalid state
   }
   
@@ -1199,6 +1264,230 @@ function endQuickDrawDuel(duelId, winnerId) {
   
   // Remove the duel
   quickDrawDuels.delete(duelId);
+}
+
+/**
+ * Handle a player joining a Proper Shootout match
+ * @param {number} playerId - The player's ID
+ */
+function handleProperShootoutJoin(playerId) {
+  const player = players.get(playerId);
+  
+  if (!player) {
+    return; // Invalid player
+  }
+  
+  console.log(`Player ${playerId} requested to join Proper Shootout match`);
+  
+  // Check if player is already in a game mode
+  if (player.inQuickDrawQueue || player.inQuickDrawDuel || player.inProperShootout) {
+    return sendErrorToPlayer(playerId, "Already in a game mode", false);
+  }
+  
+  // Find a lobby with space or create a new one
+  let lobbyId = null;
+  let lobby = null;
+  
+  // Look for existing lobbies with space
+  for (const [id, existingLobby] of properShootoutLobbies.entries()) {
+    if (existingLobby.players.size < MAX_SHOOTOUT_PLAYERS) {
+      lobbyId = id;
+      lobby = existingLobby;
+      break;
+    }
+  }
+  
+  // Create a new lobby if none found
+  if (!lobbyId) {
+    lobbyId = `lobby_${nextLobbyId++}`;
+    lobby = {
+      id: lobbyId,
+      players: new Set(),
+      scores: new Map(), // playerId -> kills
+      startTime: Date.now()
+    };
+    properShootoutLobbies.set(lobbyId, lobby);
+    console.log(`Created new Proper Shootout lobby: ${lobbyId}`);
+  }
+  
+  // Add player to lobby
+  lobby.players.add(playerId);
+  lobby.scores.set(playerId, 0);
+  
+  // Update player state
+  player.inProperShootout = true;
+  player.properShootoutLobbyId = lobbyId;
+  
+  // Reset player health
+  player.health = 100;
+  
+  // Generate random spawn position
+  const spawnPos = generateRandomShootoutPosition();
+  
+  // Send join confirmation to player with spawn position
+  player.ws.send(JSON.stringify({
+    type: 'properShootoutJoin',
+    lobbyId: lobbyId,
+    position: spawnPos,
+    scores: getScoresArray(lobby)
+  }));
+  
+  // Notify other players in the lobby
+  notifyLobbyPlayers(lobbyId, {
+    type: 'properShootoutPlayerJoin',
+    playerId: playerId,
+    scores: getScoresArray(lobby)
+  }, playerId);
+  
+  console.log(`Player ${playerId} joined Proper Shootout lobby ${lobbyId}`);
+}
+
+/**
+ * Handle a player leaving a Proper Shootout match
+ * @param {number} playerId - The player's ID
+ */
+function handleProperShootoutLeave(playerId) {
+  const player = players.get(playerId);
+  
+  if (!player || !player.inProperShootout) {
+    return; // Invalid state
+  }
+  
+  const lobbyId = player.properShootoutLobbyId;
+  const lobby = properShootoutLobbies.get(lobbyId);
+  
+  if (lobby) {
+    removePlayerFromShootoutLobby(playerId, lobbyId);
+  }
+  
+  // Update player state
+  player.inProperShootout = false;
+  player.properShootoutLobbyId = null;
+  
+  // Send leave confirmation to player
+  player.ws.send(JSON.stringify({
+    type: 'properShootoutLeave'
+  }));
+  
+  console.log(`Player ${playerId} left Proper Shootout lobby ${lobbyId}`);
+}
+
+/**
+ * Remove a player from a Proper Shootout lobby and update lobby state
+ * @param {number} playerId - The player's ID
+ * @param {string} lobbyId - The lobby ID
+ */
+function removePlayerFromShootoutLobby(playerId, lobbyId) {
+  const lobby = properShootoutLobbies.get(lobbyId);
+  
+  if (!lobby) {
+    return;
+  }
+  
+  // Remove player from lobby
+  lobby.players.delete(playerId);
+  lobby.scores.delete(playerId);
+  
+  // Notify other players in the lobby
+  notifyLobbyPlayers(lobbyId, {
+    type: 'properShootoutPlayerLeave',
+    playerId: playerId,
+    scores: getScoresArray(lobby)
+  });
+  
+  // If lobby is empty, remove it
+  if (lobby.players.size === 0) {
+    properShootoutLobbies.delete(lobbyId);
+    console.log(`Removed empty Proper Shootout lobby: ${lobbyId}`);
+  }
+}
+
+/**
+ * Generate a random position within the Proper Shootout map
+ * @returns {Object} - Random position {x, y, z}
+ */
+function generateRandomShootoutPosition() {
+  const x = SHOOTOUT_MAP_CENTER.x + (Math.random() - 0.5) * (SHOOTOUT_MAP_DIMENSIONS.width - 5);
+  const y = 1.6; // Player height
+  const z = SHOOTOUT_MAP_CENTER.z + (Math.random() - 0.5) * (SHOOTOUT_MAP_DIMENSIONS.length - 5);
+  
+  return { x, y, z };
+}
+
+/**
+ * Notify all players in a lobby about an event
+ * @param {string} lobbyId - The lobby ID
+ * @param {Object} data - The message data to send
+ * @param {number} excludeId - Optional player ID to exclude
+ */
+function notifyLobbyPlayers(lobbyId, data, excludeId = null) {
+  const lobby = properShootoutLobbies.get(lobbyId);
+  
+  if (!lobby) {
+    return;
+  }
+  
+  for (const playerId of lobby.players) {
+    if (excludeId !== null && playerId === excludeId) {
+      continue;
+    }
+    
+    const player = players.get(playerId);
+    if (player && player.ws.readyState === WebSocket.OPEN) {
+      player.ws.send(JSON.stringify(data));
+    }
+  }
+}
+
+/**
+ * Convert lobby scores map to array for sending to clients
+ * @param {Object} lobby - The lobby object
+ * @returns {Array} - Array of {playerId, kills}
+ */
+function getScoresArray(lobby) {
+  const scores = [];
+  
+  for (const [playerId, kills] of lobby.scores.entries()) {
+    scores.push({
+      playerId,
+      kills
+    });
+  }
+  
+  return scores;
+}
+
+/**
+ * Reset a Proper Shootout lobby after a match ends
+ * @param {string} lobbyId - The lobby ID
+ */
+function resetProperShootoutLobby(lobbyId) {
+  const lobby = properShootoutLobbies.get(lobbyId);
+  
+  if (!lobby) {
+    return;
+  }
+  
+  // Create a new lobby with the same ID
+  const newLobby = {
+    id: lobbyId,
+    players: new Set(), // Start with no players
+    scores: new Map(),
+    startTime: Date.now()
+  };
+  
+  properShootoutLobbies.set(lobbyId, newLobby);
+  
+  // Remove players from the old lobby, they'll need to rejoin
+  for (const playerId of lobby.players) {
+    const player = players.get(playerId);
+    if (player) {
+      player.inProperShootout = false;
+      player.properShootoutLobbyId = null;
+    }
+  }
+  
+  console.log(`Reset Proper Shootout lobby: ${lobbyId}`);
 }
 
 // Anti-cheat: Server-side bullet physics update

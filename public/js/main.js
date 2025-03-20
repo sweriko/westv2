@@ -7,6 +7,7 @@ import { MultiplayerManager } from './multiplayerManager.js';
 import { Bullet } from './bullet.js';
 import { createMuzzleFlash, createSmokeEffect, createShockwaveRing, createImpactEffect, SmokeRingEffect } from './effects.js';
 import { QuickDraw } from './quickDraw.js';
+import { ProperShootout } from './properShootout.js'; // Import the new Proper Shootout class
 import { updateAmmoUI, updateHealthUI } from './ui.js';
 import { PhysicsSystem } from './physics.js';
 
@@ -25,6 +26,7 @@ let playersMap = new Map();     // Master map including local + remote
 let renderer, camera, npc;
 let multiplayerManager;
 let quickDraw;
+let properShootout; // Add properShootout reference
 let physics;
 let lastTime = 0;
 
@@ -108,8 +110,15 @@ function init() {
     // Initialize Quick Draw game mode after the local player is created
     quickDraw = new QuickDraw(scene, localPlayer, networkManager, soundManager);
     
-    // Share the main physics system with QuickDraw
+    // Initialize Proper Shootout game mode
+    properShootout = new ProperShootout(scene, localPlayer, networkManager, soundManager);
+    
+    // Share the main physics system with game modes
     quickDraw.physics = physics;
+    properShootout.physics = physics;
+    
+    // Make properShootout globally accessible
+    window.properShootout = properShootout;
     
     // Debug toggle for physics visualization (press P)
     window.addEventListener('keydown', (event) => {
@@ -276,6 +285,11 @@ function animate(time) {
   // Update Quick Draw game mode
   if (quickDraw) {
     quickDraw.update(deltaTime);
+  }
+  
+  // Update Proper Shootout game mode
+  if (properShootout) {
+    properShootout.update(deltaTime);
   }
 
   // Update smoke ring effects
@@ -511,6 +525,7 @@ function showGameInstructions() {
     <p>P: Toggle physics debug visualization</p>
     <p><strong>Click anywhere to start</strong></p>
     <p><strong>New:</strong> Find the Quick Draw portal near spawn to duel other players!</p>
+    <p><strong>New:</strong> Find the Shootout portal to join an all-vs-all match!</p>
     <p><strong>Town Boundary:</strong> You must stay within the town limits and can only access the duel arena through the portal.</p>
     <p><strong>Hit Zones:</strong> Headshots deal 100 damage, body shots 40, and limb shots 20.</p>`;
   
@@ -524,10 +539,14 @@ function showGameInstructions() {
   }, { once: true });
 }
 
-// Handle window unload to cleanup physics resources
+// Handle window unload to cleanup game mode resources
 window.addEventListener('beforeunload', () => {
-  if (quickDraw && quickDraw.physics) {
-    quickDraw.physics.cleanup();
+  if (quickDraw) {
+    quickDraw.cleanup();
+  }
+  
+  if (properShootout) {
+    properShootout.cleanup();
   }
   
   if (physics) {
