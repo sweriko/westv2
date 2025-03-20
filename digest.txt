@@ -26,6 +26,7 @@ Directory structure:
     │   │   ├── main.js
     │   │   ├── multiplayerManager.js
     │   │   ├── network.js
+    │   │   ├── physics.js
     │   │   ├── player.js
     │   │   ├── playerModel.js
     │   │   ├── quickDraw.js
@@ -83,10 +84,10 @@ File: /package.json
   "dependencies": {
     "express": "^4.18.2",
     "ws": "^8.13.0",
-    "ngrok": "^4.3.3"
+    "ngrok": "^4.3.3",
+    "cannon": "^0.6.2"
   }
 }
-
 
 ================================================
 File: /public/css/style.css
@@ -398,11 +399,12 @@ File: /public/index.html
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <!-- GLTFLoader for loading the GLB gun model -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <!-- Cannon.js for physics (non-ES module version) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
   <!-- Main JS as ES6 module -->
   <script type="module" src="js/main.js"></script>
 </body>
 </html>
-
 
 ================================================
 File: /public/js/bullet.js
@@ -431,6 +433,9 @@ export class Bullet {
 
     // Track which player fired this bullet
     this.sourcePlayerId = null;
+    
+    // Add collision detection raycaster
+    this.raycaster = new THREE.Raycaster(position.clone(), direction.clone(), 0, 0.1);
   }
 
   /**
@@ -461,34 +466,50 @@ export class Bullet {
     // Current bullet position
     const endPos = this.mesh.position.clone();
     
-    // NEW: Check if crossing Quick Draw arena boundary
-    if (window.quickDraw) {
+    // Check if crossing Quick Draw arena boundary using the physics system
+    if (window.quickDraw && window.quickDraw.physics) {
+      const physics = window.quickDraw.physics;
+      
+      // Check if bullet is crossing the arena boundary
       const bulletInArena = window.quickDraw.isPointInArena(endPos);
       const prevInArena = window.quickDraw.isPointInArena(this.lastPosition);
       
-      // Calculate if bullet is inside duel arena or crossing the boundary
+      // Calculate if bullet is crossing the boundary
       const bulletCrossingBoundary = bulletInArena !== prevInArena;
-      const playerInDuel = window.quickDraw.inDuel;
       
-      // Player in duel means bullet should stay in arena
-      // Player outside duel means bullet should stay outside arena
-      if (bulletCrossingBoundary && (
-          (playerInDuel && Number(this.sourcePlayerId) === Number(window.localPlayer.id) && !bulletInArena) || 
-          (!playerInDuel && Number(this.sourcePlayerId) === Number(window.localPlayer.id) && bulletInArena))) {
-        // Bullet hit arena boundary
-        console.log("Bullet hit arena boundary - destroying it");
-        createImpactEffect(endPos, this.direction, scene, 'ground');
-        return { active: false, hit: { type: 'arena', position: endPos } };
+      // If the bullet is crossing the boundary
+      if (bulletCrossingBoundary) {
+        const playerInDuel = window.quickDraw.inDuel;
+        const isLocalPlayerBullet = Number(this.sourcePlayerId) === Number(window.localPlayer.id);
+        
+        // Case 1: Player in duel and their bullet trying to exit
+        if (playerInDuel && isLocalPlayerBullet && !bulletInArena) {
+          console.log("Bullet hit arena boundary (exiting) - destroying it");
+          createImpactEffect(endPos, this.direction, scene, 'ground');
+          return { active: false, hit: { type: 'arena', position: endPos } };
+        }
+        
+        // Case 2: Player outside trying to shoot in
+        if (!playerInDuel && isLocalPlayerBullet && bulletInArena) {
+          console.log("Bullet from outside entering arena - destroying it");
+          createImpactEffect(endPos, this.direction, scene, 'ground');
+          return { active: false, hit: { type: 'arena', position: endPos } };
+        }
+        
+        // Case 3: Bullet from duel player hitting boundary from inside
+        if (playerInDuel && !isLocalPlayerBullet && !bulletInArena) {
+          console.log("Bullet from other duel player hitting boundary (exiting) - destroying it");
+          createImpactEffect(endPos, this.direction, scene, 'ground');
+          return { active: false, hit: { type: 'arena', position: endPos } };
+        }
+        
+        // Case 4: Bullet from outside player hitting boundary from outside
+        if (!playerInDuel && !isLocalPlayerBullet && bulletInArena) {
+          console.log("Bullet from outside player hitting boundary (entering) - destroying it");
+          createImpactEffect(endPos, this.direction, scene, 'ground');
+          return { active: false, hit: { type: 'arena', position: endPos } };
+        }
       }
-      
-      // If the bullet is coming from outside and entering the arena, destroy it
-      if (bulletCrossingBoundary && !playerInDuel && bulletInArena) {
-        console.log("Bullet from outside entering arena - destroying it");
-        createImpactEffect(endPos, this.direction, scene, 'ground');
-        return { active: false, hit: { type: 'arena', position: endPos } };
-      }
-      
-      // If the bullet is inside arena and coming from inside, let it continue
     }
 
     // 1) Check collision with NPC
@@ -529,6 +550,18 @@ export class Bullet {
         const playerBox = new THREE.Box3(boxMin, boxMax);
         if (playerBox.containsPoint(endPos)) {
           createImpactEffect(endPos, this.direction, scene, 'player');
+          
+          // Prevent hits across arena boundary
+          // Only allow hits if both players are in the same area (both in arena or both outside)
+          const bulletPlayerInArena = window.quickDraw && window.quickDraw.inDuel;
+          const targetPlayerInArena = window.quickDraw && 
+                                     window.quickDraw.duelOpponentId === Number(playerId);
+          
+          if (bulletPlayerInArena !== targetPlayerInArena) {
+            console.log("Bullet hit blocked - players in different areas");
+            return { active: false, hit: { type: 'arena', position: endPos } };
+          }
+          
           // Notify server we hit this player
           if (window.networkManager) {
             window.networkManager.sendPlayerHit(playerId, {
@@ -536,7 +569,7 @@ export class Bullet {
               sourcePlayerId: this.sourcePlayerId
             });
             
-            // ENHANCED: Add this section for Quick Draw duels with better logging
+            // Quick Draw duels with better logging
             if (window.quickDraw && window.quickDraw.inDuel && 
                 window.quickDraw.duelState === 'draw' && 
                 Number(playerId) === Number(window.quickDraw.duelOpponentId) && 
@@ -1378,9 +1411,23 @@ function init() {
 
     // Initialize input
     initInput(renderer, localPlayer, soundManager);
+    
+    // Make scene globally accessible for physics visualization
+    window.scene = scene;
 
     // Initialize Quick Draw game mode after the local player is created
     quickDraw = new QuickDraw(scene, localPlayer, networkManager, soundManager);
+    
+    // Debug toggle for physics visualization (press P)
+    window.addEventListener('keydown', (event) => {
+      if (event.code === 'KeyP') {
+        if (quickDraw && quickDraw.physics) {
+          const isDebugMode = !quickDraw.physics.debugMode;
+          quickDraw.physics.setDebugMode(isDebugMode);
+          console.log(`Physics debug mode: ${isDebugMode ? 'ENABLED' : 'DISABLED'}`);
+        }
+      }
+    });
     
     // Make updateHealthUI globally accessible for the Quick Draw mode to use
     window.updateHealthUI = updateHealthUI;
@@ -1576,8 +1623,10 @@ function showGameInstructions() {
     <p>Left-click (while aiming): Shoot</p>
     <p>R: Reload</p>
     <p>Space: Jump</p>
+    <p>P: Toggle physics debug visualization</p>
     <p><strong>Click anywhere to start</strong></p>
-    <p><strong>New:</strong> Find the Quick Draw portal near spawn to duel other players!</p>`;
+    <p><strong>New:</strong> Find the Quick Draw portal near spawn to duel other players!</p>
+    <p><strong>Arena boundaries:</strong> Players and bullets cannot cross between the main world and duel arena.</p>`;
   
   document.getElementById('game-container').appendChild(instructions);
   
@@ -1588,6 +1637,13 @@ function showGameInstructions() {
     }
   }, { once: true });
 }
+
+// Handle window unload to cleanup physics resources
+window.addEventListener('beforeunload', () => {
+  if (quickDraw && quickDraw.physics) {
+    quickDraw.physics.cleanup();
+  }
+});
 
 init();
 
@@ -2064,6 +2120,418 @@ export class NetworkManager {
   
 
 ================================================
+File: /public/js/physics.js
+================================================
+/**
+ * Physics system using cannon.js for collision detection and physics simulation.
+ * Focused on creating invisible boundaries for the QuickDraw arena.
+ */
+export class PhysicsSystem {
+    constructor() {
+      // Create a physics world with gravity
+      this.world = new CANNON.World();
+      this.world.gravity.set(0, -9.8, 0);
+      
+      // Set default contact material properties
+      this.defaultMaterial = new CANNON.Material('default');
+      const defaultContactMaterial = new CANNON.ContactMaterial(
+        this.defaultMaterial,
+        this.defaultMaterial,
+        {
+          friction: 0.3,
+          restitution: 0.3 // Slightly bouncy
+        }
+      );
+      this.world.addContactMaterial(defaultContactMaterial);
+      this.world.defaultContactMaterial = defaultContactMaterial;
+      
+      // Collection of bodies
+      this.bodies = [];
+      
+      // Debug helper for visualizing physics bodies
+      this.debugMeshes = [];
+      this.debugMode = false;
+      
+      // Initialize ground
+      this.initGround();
+    }
+    
+    /**
+     * Initialize the ground plane
+     */
+    initGround() {
+      const groundBody = new CANNON.Body({
+        mass: 0, // Static body
+        shape: new CANNON.Plane(),
+        material: this.defaultMaterial
+      });
+      groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2); // Rotate to be flat
+      this.world.addBody(groundBody);
+      this.bodies.push(groundBody);
+    }
+    
+    /**
+     * Creates an invisible cylindrical boundary for the QuickDraw arena
+     * @param {THREE.Vector3} center - Center position of the arena
+     * @param {number} radius - Radius of the cylindrical arena
+     * @param {number} height - Height of the cylindrical arena
+     */
+    createQuickDrawArenaBoundary(center, radius, height) {
+      // First remove any existing arena boundaries
+      this.removeQuickDrawArenaBoundary();
+      
+      // Create a physics body for the arena boundary
+      const arenaBody = new CANNON.Body({
+        mass: 0, // Static body
+        material: this.defaultMaterial
+      });
+      
+      // Position at the center
+      arenaBody.position.set(center.x, center.y + height/2, center.z);
+      
+      // Add a cylindrical shape for the arena
+      // Use a hollow cylinder (cylinder + inverted cylinder)
+      // We make the walls a bit thick (0.5 units) to ensure reliable collision detection
+      const wallThickness = 0.5;
+      
+      // Outer cylinder (pushing inward)
+      const outerRadius = radius + wallThickness;
+      const segments = 16; // Number of sides for the cylinder approximation
+      
+      // Create segments around the circle to approximate the cylinder
+      for (let i = 0; i < segments; i++) {
+        const angle1 = (i / segments) * Math.PI * 2;
+        const angle2 = ((i + 1) / segments) * Math.PI * 2;
+        
+        const x1 = Math.cos(angle1) * radius;
+        const z1 = Math.sin(angle1) * radius;
+        const x2 = Math.cos(angle2) * radius;
+        const z2 = Math.sin(angle2) * radius;
+        
+        // Calculate the position and orientation of this wall segment
+        const segCenter = {
+          x: (x1 + x2) / 2,
+          z: (z1 + z2) / 2
+        };
+        
+        const length = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(z2 - z1, 2));
+        
+        // Create a box shape for this wall segment
+        const halfExtents = new CANNON.Vec3(length/2, height/2, wallThickness/2);
+        const wallShape = new CANNON.Box(halfExtents);
+        
+        // Get the angle to rotate this wall segment
+        const rotationY = Math.atan2(z2 - z1, x2 - x1) + Math.PI/2;
+        
+        // Add the shape to the body with the appropriate offset and rotation
+        const offset = new CANNON.Vec3(segCenter.x, 0, segCenter.z);
+        const quaternion = new CANNON.Quaternion();
+        quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), rotationY);
+        
+        arenaBody.addShape(wallShape, offset, quaternion);
+      }
+      
+      // Bottom circle to prevent falling through
+      const bottomShape = new CANNON.Cylinder(radius, radius, wallThickness, segments);
+      const bottomOffset = new CANNON.Vec3(0, -height/2, 0);
+      const bottomQuaternion = new CANNON.Quaternion();
+      bottomQuaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI / 2);
+      arenaBody.addShape(bottomShape, bottomOffset, bottomQuaternion);
+      
+      arenaBody.arenaBoundary = true; // Tag this body as an arena boundary
+      arenaBody.collisionFilterGroup = 2; // Group 2 for arena boundaries
+      
+      // Add the arena body to the world
+      this.world.addBody(arenaBody);
+      this.bodies.push(arenaBody);
+      
+      // Create a reference to easily find this body later
+      this.arenaBoundaryBody = arenaBody;
+      
+      // If debug mode is enabled, create a visual representation
+      if (this.debugMode) {
+        this.createDebugMesh(arenaBody);
+      }
+      
+      console.log("Created QuickDraw arena boundary at", center, "with radius", radius, "and height", height);
+      
+      return arenaBody;
+    }
+    
+    /**
+     * Removes the QuickDraw arena boundary if it exists
+     */
+    removeQuickDrawArenaBoundary() {
+      if (this.arenaBoundaryBody) {
+        this.world.removeBody(this.arenaBoundaryBody);
+        
+        // Remove from our bodies array
+        const index = this.bodies.indexOf(this.arenaBoundaryBody);
+        if (index !== -1) {
+          this.bodies.splice(index, 1);
+        }
+        
+        // Clear the reference
+        this.arenaBoundaryBody = null;
+        console.log("Removed QuickDraw arena boundary");
+      }
+    }
+    
+    /**
+     * Create a physics body for a player
+     * @param {THREE.Vector3} position - Initial position
+     * @param {number} radius - Player collision radius
+     * @param {number} height - Player height
+     * @returns {CANNON.Body} - The created physics body
+     */
+    createPlayerBody(position, radius = 0.3, height = 1.8) {
+      // Create a capsule shape (cylinder with spheres at ends)
+      const playerBody = new CANNON.Body({
+        mass: 70, // Player mass in kg
+        material: this.defaultMaterial,
+        fixedRotation: true, // Don't rotate the player when colliding
+        linearDamping: 0.9 // Add some damping to prevent excessive sliding
+      });
+      
+      // Use a cylinder for the body
+      playerBody.addShape(new CANNON.Cylinder(radius, radius, height, 8));
+      
+      // Position the player body
+      playerBody.position.set(position.x, position.y, position.z);
+      
+      // Add to world
+      this.world.addBody(playerBody);
+      this.bodies.push(playerBody);
+      
+      // If debug mode is enabled, create a visual representation
+      if (this.debugMode) {
+        this.createDebugMesh(playerBody);
+      }
+      
+      return playerBody;
+    }
+    
+    /**
+     * Creates a debug mesh to visualize a physics body
+     * @param {CANNON.Body} body - The physics body to visualize
+     */
+    createDebugMesh(body) {
+      // Only used in debug mode
+      if (!this.debugMode) return;
+      
+      // For each shape in the body, create a wireframe mesh
+      body.shapes.forEach((shape, i) => {
+        let geometry;
+        let mesh;
+        
+        // Get the shape's offset and orientation
+        const offset = body.shapeOffsets[i];
+        const orientation = body.shapeOrientations[i];
+        
+        // Create different geometries based on shape type
+        if (shape instanceof CANNON.Box) {
+          geometry = new THREE.BoxGeometry(
+            shape.halfExtents.x * 2,
+            shape.halfExtents.y * 2,
+            shape.halfExtents.z * 2
+          );
+          
+          mesh = new THREE.Mesh(
+            geometry,
+            new THREE.MeshBasicMaterial({
+              color: 0x00ff00,
+              wireframe: true
+            })
+          );
+          
+          // Apply offset and orientation
+          mesh.position.set(offset.x, offset.y, offset.z);
+          mesh.quaternion.set(
+            orientation.x,
+            orientation.y,
+            orientation.z,
+            orientation.w
+          );
+        }
+        else if (shape instanceof CANNON.Sphere) {
+          geometry = new THREE.SphereGeometry(shape.radius, 16, 16);
+          
+          mesh = new THREE.Mesh(
+            geometry,
+            new THREE.MeshBasicMaterial({
+              color: 0x00ff00,
+              wireframe: true
+            })
+          );
+          
+          // Apply offset
+          mesh.position.set(offset.x, offset.y, offset.z);
+        }
+        else if (shape instanceof CANNON.Cylinder) {
+          geometry = new THREE.CylinderGeometry(
+            shape.radiusTop,
+            shape.radiusBottom,
+            shape.height,
+            shape.numSegments
+          );
+          
+          mesh = new THREE.Mesh(
+            geometry,
+            new THREE.MeshBasicMaterial({
+              color: 0x00ff00,
+              wireframe: true
+            })
+          );
+          
+          // Rotate to match cannon.js cylinders
+          mesh.rotation.x = Math.PI / 2;
+          
+          // Apply offset and orientation
+          mesh.position.set(offset.x, offset.y, offset.z);
+          const quat = new THREE.Quaternion(
+            orientation.x,
+            orientation.y,
+            orientation.z,
+            orientation.w
+          );
+          mesh.quaternion.multiply(quat);
+        }
+        
+        if (mesh) {
+          // Add to the body's group
+          const group = new THREE.Group();
+          group.add(mesh);
+          
+          // Store reference for updating
+          this.debugMeshes.push({
+            mesh: group,
+            body: body
+          });
+          
+          // Add to scene
+          window.scene.add(group);
+        }
+      });
+    }
+    
+    /**
+     * Update the physics world
+     * @param {number} deltaTime - Time step in seconds
+     */
+    update(deltaTime) {
+      // Limit delta time to prevent large jumps
+      const timeStep = Math.min(deltaTime, 0.1);
+      
+      // Update physics world
+      this.world.step(timeStep);
+      
+      // Update debug meshes if in debug mode
+      if (this.debugMode) {
+        this.updateDebugMeshes();
+      }
+    }
+    
+    /**
+     * Update debug mesh positions to match their physics bodies
+     */
+    updateDebugMeshes() {
+      if (!this.debugMode) return;
+      
+      this.debugMeshes.forEach(item => {
+        // Update position
+        item.mesh.position.set(
+          item.body.position.x,
+          item.body.position.y,
+          item.body.position.z
+        );
+        
+        // Update orientation
+        item.mesh.quaternion.set(
+          item.body.quaternion.x,
+          item.body.quaternion.y,
+          item.body.quaternion.z,
+          item.body.quaternion.w
+        );
+      });
+    }
+    
+    /**
+     * Checks if a point is inside the arena boundary
+     * @param {THREE.Vector3} point - The point to check
+     * @returns {boolean} - True if inside, false if outside
+     */
+    isPointInArenaBoundary(point) {
+      // If no arena boundary exists, return false
+      if (!this.arenaBoundaryBody) return false;
+      
+      // Get arena position and create a CANNON vector for the point
+      const arenaPos = this.arenaBoundaryBody.position;
+      const pointVec = new CANNON.Vec3(point.x, point.y, point.z);
+      
+      // Calculate horizontal distance (ignoring Y) from arena center
+      const dx = pointVec.x - arenaPos.x;
+      const dz = pointVec.z - arenaPos.z;
+      const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+      
+      // Get the radius from the first shape (assuming it's a cylinder or shape with radius property)
+      const radius = 15; // Default from QuickDraw.js
+      
+      // Check if point is inside the cylinder horizontally and vertically
+      return horizontalDist < radius;
+    }
+    
+    /**
+     * Enables or disables debug visualization
+     * @param {boolean} enabled - Whether debug mode should be enabled
+     */
+    setDebugMode(enabled) {
+      this.debugMode = enabled;
+      
+      // If enabling, create meshes for existing bodies
+      if (enabled) {
+        this.bodies.forEach(body => {
+          this.createDebugMesh(body);
+        });
+      }
+      // If disabling, remove all debug meshes
+      else {
+        this.debugMeshes.forEach(item => {
+          window.scene.remove(item.mesh);
+          item.mesh.traverse(child => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) child.material.dispose();
+          });
+        });
+        this.debugMeshes = [];
+      }
+    }
+    
+    /**
+     * Cleans up all physics resources
+     */
+    cleanup() {
+      // Remove all bodies
+      this.bodies.forEach(body => {
+        this.world.removeBody(body);
+      });
+      
+      // Remove all debug meshes
+      if (this.debugMode) {
+        this.debugMeshes.forEach(item => {
+          window.scene.remove(item.mesh);
+          item.mesh.traverse(child => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) child.material.dispose();
+          });
+        });
+      }
+      
+      this.bodies = [];
+      this.debugMeshes = [];
+    }
+  }
+
+================================================
 File: /public/js/player.js
 ================================================
 import { Revolver } from './revolver.js';
@@ -2133,6 +2601,9 @@ export class Player {
 
     // Quick Draw mode
     this.canAim = true; // Whether the player is allowed to aim (used by Quick Draw)
+    
+    // Store previous position to detect collision with arena boundary
+    this.previousPosition = new THREE.Vector3();
 
     // Initialize network & UI
     this.initNetworking();
@@ -2153,6 +2624,9 @@ export class Player {
   }
 
   update(deltaTime) {
+    // Store previous position before movement for collision detection
+    this.previousPosition.copy(this.group.position);
+    
     // Smoothly interpolate the gun offset & FOV
     const targetOffset = this.isAiming && this.canAim ? this.aimOffset : this.holsterOffset;
     this.currentGunOffset.lerp(targetOffset, 0.1);
@@ -2188,6 +2662,24 @@ export class Player {
     if (this.moveBackward) this.group.position.add(forward.clone().multiplyScalar(-moveSpeed * deltaTime));
     if (this.moveLeft) this.group.position.add(right.clone().multiplyScalar(-moveSpeed * deltaTime));
     if (this.moveRight) this.group.position.add(right.clone().multiplyScalar(moveSpeed * deltaTime));
+
+    // Arena boundary collision detection
+    if (window.quickDraw) {
+      const inArena = window.quickDraw.isPointInArena(this.group.position);
+      const wasInArena = window.quickDraw.isPointInArena(this.previousPosition);
+      
+      // If player is in a duel, they must stay inside
+      if (window.quickDraw.inDuel && !inArena && wasInArena) {
+        // Player tried to leave the arena - move them back inside
+        this.group.position.copy(this.previousPosition);
+      }
+      
+      // If player is not in a duel, they must stay outside
+      if (!window.quickDraw.inDuel && inArena && !wasInArena) {
+        // Player tried to enter the arena from outside - move them back outside
+        this.group.position.copy(this.previousPosition);
+      }
+    }
 
     // Send periodic network updates
     const now = performance.now();
@@ -2894,6 +3386,9 @@ File: /public/js/quickDraw.js
  * Players face off in a wild west duel where they must wait for the "draw" signal
  * before pulling their revolvers and shooting at each other.
  */
+
+import { PhysicsSystem } from './physics.js';
+
 export class QuickDraw {
     constructor(scene, localPlayer, networkManager, soundManager) {
         this.scene = scene;
@@ -2911,6 +3406,11 @@ export class QuickDraw {
         
         // Duel area position
         this.duelCenter = new THREE.Vector3(50, 0, 50); // Far from main spawn
+        this.arenaRadius = 15;
+        this.arenaHeight = 5;
+        
+        // Initialize physics system for collision detection
+        this.physics = new PhysicsSystem();
         
         // Initialize portal, duel area, and network handlers
         this.initPortal();
@@ -3122,7 +3622,7 @@ export class QuickDraw {
         this.duelArea = new THREE.Group();
         
         // Ground platform
-        const groundGeometry = new THREE.CircleGeometry(15, 32);
+        const groundGeometry = new THREE.CircleGeometry(this.arenaRadius, 32);
         const groundMaterial = new THREE.MeshStandardMaterial({
             color: 0xCD853F, // Sandy color
             roughness: 0.9,
@@ -3135,42 +3635,8 @@ export class QuickDraw {
         ground.receiveShadow = true;
         this.duelArea.add(ground);
         
-        // Invisible boundary walls
-        const wallHeight = 3;
-        const wallRadius = 15;
-        const wallSegments = 16;
-        
-        for (let i = 0; i < wallSegments; i++) {
-            const angle1 = (i / wallSegments) * Math.PI * 2;
-            const angle2 = ((i + 1) / wallSegments) * Math.PI * 2;
-            
-            const x1 = this.duelCenter.x + Math.cos(angle1) * wallRadius;
-            const z1 = this.duelCenter.z + Math.sin(angle1) * wallRadius;
-            const x2 = this.duelCenter.x + Math.cos(angle2) * wallRadius;
-            const z2 = this.duelCenter.z + Math.sin(angle2) * wallRadius;
-            
-            const wallGeometry = new THREE.BoxGeometry(
-                Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(z2 - z1, 2)),
-                wallHeight,
-                0.1
-            );
-            
-            const wallMaterial = new THREE.MeshBasicMaterial({
-                color: 0xFFFFFF,
-                transparent: true,
-                opacity: 0.0 // Invisible
-            });
-            
-            const wall = new THREE.Mesh(wallGeometry, wallMaterial);
-            wall.position.set(
-                (x1 + x2) / 2,
-                wallHeight / 2,
-                (z1 + z2) / 2
-            );
-            
-            wall.lookAt(this.duelCenter.x, wallHeight / 2, this.duelCenter.z);
-            this.duelArea.add(wall);
-        }
+        // Create the physics boundary with cannon.js
+        // This will be activated when the duel begins
         
         // Add western-themed props
         this.addDuelProps();
@@ -3318,22 +3784,28 @@ export class QuickDraw {
     }
     
     /**
-     * Check if a point is inside the duel arena
+     * Check if a point is inside the duel arena using the physics system
      * @param {THREE.Vector3} point - The point to check
      * @returns {boolean} - True if the point is inside the arena
      */
     isPointInArena(point) {
+        // First check if the arena is active
         if (!this.duelArea || !this.duelArea.visible) {
             return false;
         }
         
-        // The arena is a cylinder, so check if the point is within radius and height
+        // Use the physics system to check if the point is inside the arena boundary
+        if (this.physics && this.physics.isPointInArenaBoundary) {
+            return this.physics.isPointInArenaBoundary(point);
+        }
+        
+        // Fallback to simple cylindrical check if physics is not available
         const dx = point.x - this.duelCenter.x;
         const dz = point.z - this.duelCenter.z;
         const distanceFromCenter = Math.sqrt(dx * dx + dz * dz);
         
         // Check if within radius (15 units) and height (0 to 5 units)
-        return distanceFromCenter <= 15 && point.y >= 0 && point.y <= 5;
+        return distanceFromCenter <= this.arenaRadius && point.y >= 0 && point.y <= this.arenaHeight;
     }
     
     /**
@@ -3343,6 +3815,30 @@ export class QuickDraw {
         // Skip if player not loaded
         if (!this.localPlayer || !this.localPlayer.group) {
             return;
+        }
+        
+        // Update physics system
+        if (this.physics) {
+            this.physics.update(deltaTime);
+            
+            // If the player is in the arena, enforce arena boundary collision
+            if (this.inDuel && this.physics.arenaBoundaryBody) {
+                const playerPos = this.localPlayer.group.position.clone();
+                const isInArena = this.isPointInArena(playerPos);
+                
+                if (!isInArena) {
+                    // If player is outside the arena but should be inside, push them back in
+                    const dirToCenter = new THREE.Vector3(
+                        this.duelCenter.x - playerPos.x,
+                        0,
+                        this.duelCenter.z - playerPos.z
+                    ).normalize();
+                    
+                    // Move player back inside
+                    this.localPlayer.group.position.x += dirToCenter.x * 0.1;
+                    this.localPlayer.group.position.z += dirToCenter.z * 0.1;
+                }
+            }
         }
         
         // Check for portal collision when not in lobby or duel
@@ -3459,6 +3955,13 @@ export class QuickDraw {
         
         // Make duel area visible
         this.duelArea.visible = true;
+        
+        // Create the arena physics boundary
+        this.physics.createQuickDrawArenaBoundary(
+            this.duelCenter, 
+            this.arenaRadius,
+            this.arenaHeight
+        );
         
         // Disable weapon drawing immediately and forcefully
         this.originalCanAim = this.localPlayer.canAim !== false;
@@ -3696,6 +4199,11 @@ export class QuickDraw {
         this.duelOpponentId = null;
         this.updateStatusIndicator();
         
+        // Clean up the physics boundary
+        if (this.physics) {
+            this.physics.removeQuickDrawArenaBoundary();
+        }
+        
         // Clear any timers
         if (this.countdownTimer) clearTimeout(this.countdownTimer);
         if (this.drawTimer) clearTimeout(this.drawTimer);
@@ -3775,6 +4283,11 @@ export class QuickDraw {
                     }
                 }
             });
+        }
+        
+        // Clean up physics
+        if (this.physics) {
+            this.physics.cleanup();
         }
         
         // Remove UI elements
