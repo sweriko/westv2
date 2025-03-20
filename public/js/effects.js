@@ -223,6 +223,71 @@ export function createSmokeEffect(position, direction, scene) {
 }
 
 /**
+ * Preloads the shockwave ring effect by creating a disposable instance
+ * This forces Three.js to compile the shaders and cache resources
+ * @param {THREE.Scene} scene - The scene where the preloaded effect will be created
+ */
+export function preloadShockwaveRing(scene) {
+  // Skip on mobile devices
+  if (window.isMobile) {
+    return;
+  }
+  
+  // Create a dummy position and direction
+  const dummyPosition = new THREE.Vector3(0, -1000, 0); // Far below the scene
+  const dummyDirection = new THREE.Vector3(0, 1, 0);
+  
+  // Create all the geometries and materials that would be used
+  const ringGroup = new THREE.Group();
+  ringGroup.position.copy(dummyPosition);
+  scene.add(ringGroup);
+  
+  // Create all the same geometries and materials as the real effect
+  const ringGeometry = new THREE.TorusGeometry(0.1, 0.01, 8, 16);
+  const ringMaterial = new THREE.MeshBasicMaterial({
+    color: 0xFF8C00,
+    transparent: true,
+    opacity: 0,  // Make it invisible
+    side: THREE.DoubleSide
+  });
+  const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+  ringGroup.add(ring);
+  
+  const outerRingGeometry = new THREE.TorusGeometry(0.15, 0.005, 8, 16);
+  const outerRingMaterial = new THREE.MeshBasicMaterial({
+    color: 0xFF4500,
+    transparent: true,
+    opacity: 0,  // Make it invisible
+    side: THREE.DoubleSide
+  });
+  const outerRing = new THREE.Mesh(outerRingGeometry, outerRingMaterial);
+  ringGroup.add(outerRing);
+  
+  const innerRingGeometry = new THREE.TorusGeometry(0.05, 0.01, 8, 16);
+  const innerRingMaterial = new THREE.MeshBasicMaterial({
+    color: 0xFFFFFF,
+    transparent: true,
+    opacity: 0,  // Make it invisible
+    side: THREE.DoubleSide
+  });
+  const innerRing = new THREE.Mesh(innerRingGeometry, innerRingMaterial);
+  ringGroup.add(innerRing);
+  
+  // Remove and dispose after a short delay
+  setTimeout(() => {
+    scene.remove(ringGroup);
+    
+    // Dispose geometries and materials
+    ringGeometry.dispose();
+    ringMaterial.dispose();
+    outerRingGeometry.dispose();
+    outerRingMaterial.dispose();
+    innerRingGeometry.dispose();
+    innerRingMaterial.dispose();
+  }, 100);
+}
+
+/**
  * Creates a shockwave ring effect in the shooting direction.
  * @param {THREE.Vector3} position - Effect start position.
  * @param {THREE.Vector3} direction - Firing direction.
@@ -609,6 +674,98 @@ export function ejectShell(player, scene, soundManager) {
     }
   }
   requestAnimationFrame(animateShell);
+}
+
+/**
+ * Preloads the smoke effect by creating a disposable instance
+ * This forces Three.js to compile shaders and cache necessary resources
+ * @param {THREE.Scene} scene - The scene where the preloaded effect will be created
+ */
+export function preloadSmokeEffect(scene) {
+  // Skip on mobile devices
+  if (window.isMobile) {
+    return;
+  }
+  
+  // Create a dummy position and direction far below the scene
+  const dummyPosition = new THREE.Vector3(0, -1000, 0);
+  const dummyDirection = new THREE.Vector3(0, 1, 0);
+  
+  // Create a smoke group
+  const smokeGroup = new THREE.Group();
+  smokeGroup.position.copy(dummyPosition);
+  scene.add(smokeGroup);
+  
+  // Create particles with 0 opacity
+  const numParticles = 5;
+  const particles = [];
+  
+  for (let i = 0; i < numParticles; i++) {
+    const particleGeometry = new THREE.IcosahedronGeometry(0.01 + Math.random() * 0.02, 0);
+    const particleMaterial = new THREE.MeshBasicMaterial({
+      color: 0xCCCCCC,
+      transparent: true,
+      opacity: 0 // Make it invisible
+    });
+    
+    const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+    smokeGroup.add(particle);
+    
+    // Store particle properties
+    particles.push({
+      mesh: particle,
+      velocity: dummyDirection.clone().multiplyScalar(0.5),
+      life: 0,
+      maxLife: 0.5
+    });
+  }
+  
+  // Remove and dispose after a short delay
+  setTimeout(() => {
+    // Clean up
+    particles.forEach(p => {
+      smokeGroup.remove(p.mesh);
+      p.mesh.geometry.dispose();
+      p.mesh.material.dispose();
+    });
+    scene.remove(smokeGroup);
+  }, 100);
+}
+
+/**
+ * Preloads the muzzle flash effect by creating an invisible instance
+ * @param {THREE.Scene} scene - The scene to add the preloaded effect
+ */
+export function preloadMuzzleFlash(scene) {
+  // Skip on mobile devices
+  if (window.isMobile) {
+    return;
+  }
+  
+  // Create a dummy position far below the scene
+  const dummyPosition = new THREE.Vector3(0, -1000, 0);
+  
+  // Create flash group
+  const flashGroup = new THREE.Group();
+  flashGroup.position.copy(dummyPosition);
+  scene.add(flashGroup);
+  
+  // Create core flash
+  const flashGeometry = new THREE.IcosahedronGeometry(0.1, 0);
+  const flashMaterial = new THREE.MeshBasicMaterial({
+    color: 0xFFF7D6,
+    transparent: true,
+    opacity: 0 // Make it invisible
+  });
+  const flash = new THREE.Mesh(flashGeometry, flashMaterial);
+  flashGroup.add(flash);
+  
+  // Remove and dispose after a short delay
+  setTimeout(() => {
+    scene.remove(flashGroup);
+    flashGeometry.dispose();
+    flashMaterial.dispose();
+  }, 100);
 }
 
 // Export the SmokeRingEffect class

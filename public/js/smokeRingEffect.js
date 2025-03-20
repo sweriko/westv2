@@ -22,6 +22,40 @@ export class SmokeRingEffect {
     }
     
     /**
+     * Preload all resources needed for the smoke ring effect
+     * Call this during initialization to avoid FPS drops on first use
+     */
+    preload() {
+        // Create and cache particles
+        const numToPreload = 25; // Slightly more than used in a single effect
+        
+        for (let i = 0; i < numToPreload; i++) {
+            // Create standard particles
+            this._getParticle(false);
+            
+            // Create a few muzzle particles too
+            if (i < 5) {
+                this._getParticle(true);
+            }
+        }
+        
+        // Make them all invisible and return to pool
+        for (let i = 0; i < this.group.children.length; i++) {
+            const mesh = this.group.children[i];
+            mesh.visible = false;
+            this.particlePool.push(mesh);
+        }
+        
+        // Create a dummy smoke ring to warm up all the logic
+        this._createSmokeRing();
+        
+        // Reset everything
+        this.puffs = [];
+        
+        return this; // For chaining
+    }
+    
+    /**
      * Create a smoke ring effect at the specified position and direction
      * @param {THREE.Vector3} position - The position to create the smoke ring
      * @param {THREE.Vector3} direction - The direction the weapon is firing

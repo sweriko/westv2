@@ -5,7 +5,7 @@ import { Player } from './player.js';
 import { networkManager } from './network.js';
 import { MultiplayerManager } from './multiplayerManager.js';
 import { Bullet } from './bullet.js';
-import { createMuzzleFlash, createSmokeEffect, createShockwaveRing, createImpactEffect, SmokeRingEffect } from './effects.js';
+import { createMuzzleFlash, createSmokeEffect, createShockwaveRing, createImpactEffect, preloadMuzzleFlash, preloadSmokeEffect, preloadShockwaveRing, SmokeRingEffect } from './effects.js';
 import { QuickDraw } from './quickDraw.js';
 import { ProperShootout } from './properShootout.js'; // Import the new Proper Shootout class
 import { updateAmmoUI, updateHealthUI } from './ui.js';
@@ -87,11 +87,22 @@ function init() {
       );
     }
     
-    // Initialize a smoke ring effect pool for reuse - but only if not mobile
+    // Preload all visual effects to prevent FPS drops on first use
     if (!window.isMobile) {
+      console.log("Preloading visual effects...");
+      // Preload muzzle flash effect
+      preloadMuzzleFlash(scene);
+      // Preload smoke effect
+      preloadSmokeEffect(scene);
+      // Preload shockwave ring effect
+      preloadShockwaveRing(scene);
+      
+      // Initialize a smoke ring effect pool for reuse
       for (let i = 0; i < 3; i++) {
         const smokeRing = new SmokeRingEffect(scene);
         smokeRing.active = false;
+        // Preload resources to prevent fps drop on first use
+        smokeRing.preload();
         smokeRings.push(smokeRing);
       }
     }
