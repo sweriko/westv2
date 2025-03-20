@@ -535,6 +535,12 @@ export class PhysicsSystem {
       // This is important for making bullet.js know it should show hitboxes
       window.showHitZoneDebug = true;
       
+      // Special handling for Proper Shootout mode - ensure boundary is visualized
+      if (window.properShootout && window.properShootout.inLobby && window.properShootout.mapBoundaryBody) {
+        this.createDebugMesh(window.properShootout.mapBoundaryBody);
+        console.log("Created debug visualization for Proper Shootout map boundary");
+      }
+      
       console.log("Physics debug mode enabled - hit zones visible");
     }
     // If disabling and we were previously in debug mode
@@ -635,6 +641,23 @@ export class PhysicsSystem {
           dummyBullet.checkPlayerHitZones(player, new THREE.Vector3(0, 0, 0));
         }
       });
+    }
+    
+    // Also make sure the Proper Shootout map boundary is visualized if in that mode
+    if (window.properShootout && window.properShootout.inLobby && window.properShootout.mapBoundaryBody) {
+      // Create debug mesh for Proper Shootout map boundary if it doesn't exist yet
+      let hasDebugMesh = false;
+      for (const debugMesh of this.debugMeshes) {
+        if (debugMesh.body === window.properShootout.mapBoundaryBody) {
+          hasDebugMesh = true;
+          break;
+        }
+      }
+      
+      if (!hasDebugMesh) {
+        this.createDebugMesh(window.properShootout.mapBoundaryBody);
+        console.log("Created missing debug visualization for Proper Shootout map boundary");
+      }
     }
   }
   

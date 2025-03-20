@@ -487,68 +487,43 @@ function handlePlayerHit(playerId, data) {
   
   if (!sourcePlayer || !targetPlayer) return;
   
-  // Anti-cheat: Validate the hit using server-side bullets
-  let validHit = false;
-  let bulletId = null;
+  // Validate that players are in compatible game modes
+  const sourceInQuickDraw = sourcePlayer.inQuickDrawDuel;
+  const targetInQuickDraw = targetPlayer.inQuickDrawDuel;
+  const sourceInShootout = sourcePlayer.inProperShootout;
+  const targetInShootout = targetPlayer.inProperShootout;
   
-  // If bulletId is provided, validate against that specific bullet
-  if (data.bulletId) {
-    const bullet = activeBullets.get(data.bulletId);
-    if (bullet && bullet.sourcePlayerId === playerId && bullet.active) {
-      // Check if the bullet is close enough to the target
-      validHit = isPlayerHitByBullet(targetPlayer, bullet);
-      if (validHit) {
-        bulletId = data.bulletId;
-      }
-    }
-  } else {
-    // Otherwise, check all active bullets from this player
-    for (const [bid, bullet] of activeBullets.entries()) {
-      if (bullet.sourcePlayerId === playerId && bullet.active) {
-        if (isPlayerHitByBullet(targetPlayer, bullet)) {
-          validHit = true;
-          bulletId = bid;
-          break;
-        }
-      }
-    }
+  // Verify that players are either both in QuickDraw, both in Shootout, or both in regular mode
+  const bothInQuickDraw = sourceInQuickDraw && targetInQuickDraw && 
+                         sourcePlayer.quickDrawDuelId === targetPlayer.quickDrawDuelId;
+  const bothInShootout = sourceInShootout && targetInShootout &&
+                         sourcePlayer.properShootoutLobbyId === targetPlayer.properShootoutLobbyId;
+  const bothInRegularMode = !sourceInQuickDraw && !targetInQuickDraw && 
+                           !sourceInShootout && !targetInShootout;
+  
+  if (!(bothInQuickDraw || bothInShootout || bothInRegularMode)) {
+    console.log(`Rejecting hit claim from player ${playerId} on ${targetId}: incompatible game modes`);
+    console.log(`Source: QuickDraw=${sourceInQuickDraw}, Shootout=${sourceInShootout}`);
+    console.log(`Target: QuickDraw=${targetInQuickDraw}, Shootout=${targetInShootout}`);
+    return sendErrorToPlayer(playerId, "Invalid hit: players in different game modes", false);
   }
   
-  // If no valid hit was found, reject the hit claim
-  if (!validHit) {
-    console.log(`Rejecting invalid hit claim from player ${playerId} on ${targetId}`);
-    return sendErrorToPlayer(playerId, "Invalid hit claim", false);
-  }
+  // Get hit data
+  const hitZone = data.hitData && data.hitData.hitZone ? data.hitData.hitZone : 'body';
+  const damage = data.hitData && data.hitData.damage ? data.hitData.damage : 40;
   
-  console.log(`Player ${targetId} was hit by player ${playerId}'s bullet ${bulletId}`);
-  
-  // Mark the bullet as inactive
-  if (bulletId !== null) {
-    const bullet = activeBullets.get(bulletId);
-    if (bullet) {
-      bullet.active = false;
-    }
-  }
-  
-  // Calculate damage based on hit zone if provided
-  let damage = GAME_CONSTANTS.DAMAGE_PER_HIT; // Default damage
-  const hitZone = data.hitData && data.hitData.hitZone ? data.hitData.hitZone : null;
-  
-  if (hitZone) {
-    if (hitZone === 'head') {
-      damage = 100; // Headshot is always lethal
-    } else if (hitZone === 'body') {
-      damage = 40; // Body shot deals 40 damage
-    } else if (hitZone === 'limbs') {
-      damage = 20; // Limb shot deals 20 damage
-    }
-  } else if (data.hitData && data.hitData.damage) {
-    // If explicit damage is provided, use that
-    damage = data.hitData.damage;
+  // Validate hit zone and damage
+  let finalDamage = damage;
+  if (hitZone === 'head') {
+    finalDamage = 100; // Headshot is always lethal
+  } else if (hitZone === 'body') {
+    finalDamage = 40; // Body shot deals 40 damage
+  } else if (hitZone === 'limbs') {
+    finalDamage = 20; // Limb shot deals 20 damage
   }
   
   // Apply hit effects: reduce health
-  targetPlayer.health = Math.max(targetPlayer.health - damage, 0);
+  targetPlayer.health = Math.max(targetPlayer.health - finalDamage, 0);
   
   // Inform the target
   if (targetPlayer.ws.readyState === WebSocket.OPEN) {
@@ -568,9 +543,9 @@ function handlePlayerHit(playerId, data) {
     sourceId: playerId,
     hitPosition: data.hitData ? data.hitData.position : null,
     health: targetPlayer.health,
-    bulletId: bulletId,
+    bulletId: data.bulletId,
     hitZone: hitZone,
-    damage: damage
+    damage: finalDamage
   });
   
   // Check for player death
@@ -582,7 +557,7 @@ function handlePlayerHit(playerId, data) {
 // Anti-cheat: Bullet-player collision detection
 function isPlayerHitByBullet(player, bullet) {
   // Calculate player hitbox (simple cylinder)
-  const playerRadius = 0.5;  // horizontal radius
+  const playerRadius = 0.6;  // Increased horizontal radius to match client's bodyWidth
   const playerHeight = 2.0;  // vertical height
   
   // Calculate distance from bullet to player (horizontal only)
@@ -600,7 +575,9 @@ function isPlayerHitByBullet(player, bullet) {
   const playerBottom = player.position.y - 1.6; // Adjust based on your coordinate system
   const playerTop = playerBottom + playerHeight;
   
-  if (bulletY < playerBottom || bulletY > playerTop) {
+  // Add some tolerance to vertical bounds
+  const tolerance = 0.2;
+  if (bulletY < playerBottom - tolerance || bulletY > playerTop + tolerance) {
     return false;
   }
   

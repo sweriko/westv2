@@ -80,6 +80,19 @@ export class Bullet {
       }
     }
     
+    // Similar check for Proper Shootout - only allow bullets from players in the same shootout match
+    if (window.properShootout && window.properShootout.inLobby && window.properShootout.isPointInMap(this.mesh.position)) {
+      const isLocalPlayerBullet = Number(this.sourcePlayerId) === Number(window.localPlayer.id);
+      const isPlayerInShootout = window.properShootout && window.properShootout.inLobby;
+      
+      // If bullet is inside shootout map but player is not in shootout, destroy it
+      if (!isPlayerInShootout && isLocalPlayerBullet) {
+        console.log("Destroying unauthorized bullet inside shootout map from player " + this.sourcePlayerId);
+        createImpactEffect(this.mesh.position, this.direction, scene, 'ground');
+        return { active: false, hit: { type: 'boundary', position: this.mesh.position } };
+      }
+    }
+    
     // Move the bullet
     const displacement = this.direction.clone().multiplyScalar(this.speed * deltaTime);
     this.mesh.position.add(displacement);
@@ -201,26 +214,54 @@ export class Bullet {
         if (Number(playerId) === Number(this.sourcePlayerId)) continue;
         if (!playerObj || !playerObj.group) continue;
 
-        // Prevent hits across arena boundary
-        // Only allow hits if both players are in the same area (both in arena or both outside)
-        const bulletPlayerInArena = window.quickDraw && window.quickDraw.inDuel;
-        const targetPlayerInArena = window.quickDraw && 
-                                   window.quickDraw.duelOpponentId === Number(playerId);
+        // Prevent hits across arena boundary or between different game modes
+        // Only allow hits if players are in compatible states:
+        // 1. Both in the same QuickDraw duel
+        // 2. Both in the same Proper Shootout match
+        // 3. Both in the regular town area (not in any game mode)
         
-        if (bulletPlayerInArena !== targetPlayerInArena) {
-          continue; // Skip collision check if players are in different areas
+        const sourcePlayerId = Number(this.sourcePlayerId);
+        const targetPlayerId = Number(playerId);
+        
+        // Check if source and target are in QuickDraw duel
+        const bulletPlayerInDuel = window.quickDraw && window.quickDraw.inDuel;
+        const targetPlayerInDuel = window.quickDraw && 
+                                   window.quickDraw.duelOpponentId === targetPlayerId;
+        
+        // Check if source and target are in Proper Shootout
+        const bulletPlayerInShootout = window.properShootout && window.properShootout.inLobby;
+        const targetPlayerInShootout = window.properShootout && 
+                                      window.localPlayer && 
+                                      window.localPlayer.id !== targetPlayerId; // Any non-local player in shootout mode
+        
+        // Make sure players are in the same game mode to allow hits
+        const bothInDuel = bulletPlayerInDuel && targetPlayerInDuel;
+        const bothInShootout = bulletPlayerInShootout && targetPlayerInShootout;
+        const bothInRegularTown = !bulletPlayerInDuel && !bulletPlayerInShootout && 
+                                 !targetPlayerInDuel && !targetPlayerInShootout;
+        
+        if (!(bothInDuel || bothInShootout || bothInRegularTown)) {
+          continue; // Skip collision check if players are in different areas/modes
         }
         
         // Detect which hit zone was hit (head, body, limbs)
         const hitResult = this.checkPlayerHitZones(playerObj, endPos);
         
         if (hitResult.hit) {
-          // Create the impact effect
-          createImpactEffect(endPos, this.direction, scene, 'player');
+          // Check that this isn't a hit on the local player's own model
+          const isHitOnLocalPlayer = window.localPlayer && 
+                                   Number(window.localPlayer.id) === Number(playerId);
           
-          // Play headshot sound if it was a headshot
-          if (hitResult.zone === 'head' && window.localPlayer && window.localPlayer.soundManager) {
-            window.localPlayer.soundManager.playSound("headshotmarker", 100);
+          if (!isHitOnLocalPlayer) {
+            // Create the impact effect
+            createImpactEffect(endPos, this.direction, scene, 'player');
+            
+            // Play headshot sound if it was a headshot
+            if (hitResult.zone === 'head' && window.localPlayer && window.localPlayer.soundManager) {
+              window.localPlayer.soundManager.playSound("headshotmarker", 100);
+            }
+          } else {
+            console.log("Prevented impact effect on local player's own model");
           }
           
           // Anti-cheat: For local bullets, send hit to server and let server decide

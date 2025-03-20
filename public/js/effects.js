@@ -364,7 +364,17 @@ export function createImpactEffect(position, direction, scene, hitType) {
     if (hitType === 'ground') {
       window.localPlayer.soundManager.playSoundAt("woodimpact", position);
     } else if (hitType === 'player') {
-      window.localPlayer.soundManager.playSoundAt("fleshimpact", position);
+      // Calculate distance to local player to avoid playing impact on own body
+      const localPlayerPos = window.localPlayer.group.position;
+      const distToLocalPlayer = Math.sqrt(
+        Math.pow(position.x - localPlayerPos.x, 2) + 
+        Math.pow(position.z - localPlayerPos.z, 2)
+      );
+      
+      // Only play flesh impact if not too close to local player (prevents self-impacts)
+      if (distToLocalPlayer > 0.5) {
+        window.localPlayer.soundManager.playSoundAt("fleshimpact", position);
+      }
     }
   }
 

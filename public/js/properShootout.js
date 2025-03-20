@@ -830,87 +830,88 @@ export class ProperShootout {
     }
     
     /**
-     * Create a physics boundary for the shootout map
-     */
-    createMapBoundary() {
-        if (!this.physics) return;
-        
-        // Remove any existing boundary first
-        this.removeMapBoundary();
-        
-        // Create a box boundary around the map
-        const boundaryBody = new CANNON.Body({
-            mass: 0, // Static body
-            material: this.physics.defaultMaterial
-        });
-        
-        // Add a box shape for each border
-        const halfWidth = this.mapWidth / 2;
-        const halfLength = this.mapLength / 2;
-        const borderThickness = 1;
-        const wallHeight = 5;
-        
-        // Left border (negative X)
-        const leftBorderShape = new CANNON.Box(new CANNON.Vec3(
-            borderThickness / 2, 
-            wallHeight / 2, 
-            halfLength
-        ));
-        boundaryBody.addShape(
-            leftBorderShape, 
-            new CANNON.Vec3(this.mapCenter.x - halfWidth, wallHeight / 2, this.mapCenter.z)
-        );
-        
-        // Right border (positive X)
-        const rightBorderShape = new CANNON.Box(new CANNON.Vec3(
-            borderThickness / 2, 
-            wallHeight / 2, 
-            halfLength
-        ));
-        boundaryBody.addShape(
-            rightBorderShape, 
-            new CANNON.Vec3(this.mapCenter.x + halfWidth, wallHeight / 2, this.mapCenter.z)
-        );
-        
-        // Front border (negative Z)
-        const frontBorderShape = new CANNON.Box(new CANNON.Vec3(
-            halfWidth, 
-            wallHeight / 2, 
-            borderThickness / 2
-        ));
-        boundaryBody.addShape(
-            frontBorderShape, 
-            new CANNON.Vec3(this.mapCenter.x, wallHeight / 2, this.mapCenter.z - halfLength)
-        );
-        
-        // Back border (positive Z)
-        const backBorderShape = new CANNON.Box(new CANNON.Vec3(
-            halfWidth, 
-            wallHeight / 2, 
-            borderThickness / 2
-        ));
-        boundaryBody.addShape(
-            backBorderShape, 
-            new CANNON.Vec3(this.mapCenter.x, wallHeight / 2, this.mapCenter.z + halfLength)
-        );
-        
-        boundaryBody.mapBoundary = true; // Tag this body as a map boundary
-        boundaryBody.collisionFilterGroup = 2; // Group 2 for boundaries
-        
-        // Add the boundary body to the world
-        this.physics.world.addBody(boundaryBody);
-        this.physics.bodies.push(boundaryBody);
-        
-        // Store a reference to easily find this body later
-        this.mapBoundaryBody = boundaryBody;
-        
-        // If debug mode is enabled, create a visual representation
-        if (this.physics.debugMode) {
-            this.physics.createDebugMesh(boundaryBody);
-        }
-        
-        console.log("Created shootout map boundary");
+   * Create a physics boundary for the shootout map
+   */
+  createMapBoundary() {
+    if (!this.physics) return;
+    
+    // Remove any existing boundary first
+    this.removeMapBoundary();
+    
+    // Create a box boundary around the map
+    const boundaryBody = new CANNON.Body({
+      mass: 0, // Static body
+      material: this.physics.defaultMaterial
+    });
+    
+    // Add a box shape for each border
+    const halfWidth = this.mapWidth / 2;
+    const halfLength = this.mapLength / 2;
+    const borderThickness = 1;
+    const wallHeight = 5;
+    
+    // Left border (negative X)
+    const leftBorderShape = new CANNON.Box(new CANNON.Vec3(
+      borderThickness / 2, 
+      wallHeight / 2, 
+      halfLength
+    ));
+    boundaryBody.addShape(
+      leftBorderShape, 
+      new CANNON.Vec3(this.mapCenter.x - halfWidth, wallHeight / 2, this.mapCenter.z)
+    );
+    
+    // Right border (positive X)
+    const rightBorderShape = new CANNON.Box(new CANNON.Vec3(
+      borderThickness / 2, 
+      wallHeight / 2, 
+      halfLength
+    ));
+    boundaryBody.addShape(
+      rightBorderShape, 
+      new CANNON.Vec3(this.mapCenter.x + halfWidth, wallHeight / 2, this.mapCenter.z)
+    );
+    
+    // Front border (negative Z)
+    const frontBorderShape = new CANNON.Box(new CANNON.Vec3(
+      halfWidth, 
+      wallHeight / 2, 
+      borderThickness / 2
+    ));
+    boundaryBody.addShape(
+      frontBorderShape, 
+      new CANNON.Vec3(this.mapCenter.x, wallHeight / 2, this.mapCenter.z - halfLength)
+    );
+    
+    // Back border (positive Z)
+    const backBorderShape = new CANNON.Box(new CANNON.Vec3(
+      halfWidth, 
+      wallHeight / 2, 
+      borderThickness / 2
+    ));
+    boundaryBody.addShape(
+      backBorderShape, 
+      new CANNON.Vec3(this.mapCenter.x, wallHeight / 2, this.mapCenter.z + halfLength)
+    );
+    
+    boundaryBody.mapBoundary = true; // Tag this body as a map boundary
+    boundaryBody.collisionFilterGroup = 2; // Group 2 for boundaries
+    
+    // Add the boundary body to the world
+    this.physics.world.addBody(boundaryBody);
+    this.physics.bodies.push(boundaryBody);
+    
+    // Store a reference to easily find this body later
+    this.mapBoundaryBody = boundaryBody;
+    
+    // If debug mode is enabled, create a visual representation
+    if (this.physics.debugMode) {
+      this.physics.createDebugMesh(boundaryBody);
+      console.log("Creating debug visualization for shootout map boundary");
     }
+    
+    console.log("Created shootout map boundary");
+  }
     
     /**
      * Remove the map boundary
@@ -994,51 +995,65 @@ export class ProperShootout {
     }
     
     /**
-     * Update method called from main animation loop.
-     */
-    update(deltaTime) {
-        // Skip if player not loaded
-        if (!this.localPlayer || !this.localPlayer.group) {
-            return;
-        }
-        
-        // Check for portal collision when not in lobby
-        if (!this.inLobby) {
-            const playerPos = this.localPlayer.group.position.clone();
-            
-            // Check if player is colliding with the portal
-            if (this.portalCollider && this.portalCollider.containsPoint(playerPos)) {
-                this.joinMatch();
-            }
-        }
-        
-        // Update physics system
-        if (this.physics) {
-            this.physics.update(deltaTime);
-            
-            // If the player is in the shootout map, enforce map boundary collision
-            if (this.inLobby && this.mapBoundaryBody) {
-                const playerPos = this.localPlayer.group.position.clone();
-                const isInMap = this.isPointInMap(playerPos);
-                
-                if (!isInMap) {
-                    // If player is outside the map, push them back in
-                    const dirToCenter = new THREE.Vector3(
-                        this.mapCenter.x - playerPos.x,
-                        0,
-                        this.mapCenter.z - playerPos.z
-                    ).normalize();
-                    
-                    // Move player back inside
-                    this.localPlayer.group.position.x += dirToCenter.x * 0.1;
-                    this.localPlayer.group.position.z += dirToCenter.z * 0.1;
-                }
-            }
-        }
-        
-        // Update portal instruction visibility
-        this.updatePortalInstructions();
+   * Update method called from main animation loop.
+   */
+  update(deltaTime) {
+    // Skip if player not loaded
+    if (!this.localPlayer || !this.localPlayer.group) {
+      return;
     }
+    
+    // Update physics system
+    if (this.physics) {
+      this.physics.update(deltaTime);
+      
+      // If the player is in the shootout map, enforce map boundary collision
+      if (this.inLobby && this.mapBoundaryBody) {
+        const playerPos = this.localPlayer.group.position.clone();
+        const isInMap = this.isPointInMap(playerPos);
+        
+        if (!isInMap) {
+          // If player is outside the map, push them back in
+          const dirToCenter = new THREE.Vector3(
+            this.mapCenter.x - playerPos.x,
+            0,
+            this.mapCenter.z - playerPos.z
+          ).normalize();
+          
+          // Move player back inside
+          this.localPlayer.group.position.x += dirToCenter.x * 0.1;
+          this.localPlayer.group.position.z += dirToCenter.z * 0.1;
+        }
+        
+        // Make sure map boundary is visualized in debug mode - with proper null checking
+        if (this.physics.debugMode && this.mapBoundaryBody) {
+          // Check if debugMeshes array exists and has items
+          let hasDebugMesh = false;
+          if (this.physics.debugMeshes && Array.isArray(this.physics.debugMeshes)) {
+            hasDebugMesh = this.physics.debugMeshes.some(item => item && item.body === this.mapBoundaryBody);
+          }
+          
+          if (!hasDebugMesh) {
+            this.physics.createDebugMesh(this.mapBoundaryBody);
+            console.log("Recreating debug visualization for shootout map boundary");
+          }
+        }
+      }
+    }
+    
+    // Update portal instruction visibility
+    this.updatePortalInstructions();
+
+    // Check for portal collision when not in lobby
+    if (!this.inLobby) {
+        const playerPos = this.localPlayer.group.position.clone();
+        
+        // Check if player is colliding with the portal
+        if (this.portalCollider && this.portalCollider.containsPoint(playerPos)) {
+            this.joinMatch();
+        }
+    }
+  }
     
     /**
      * Check if a point is inside the map
