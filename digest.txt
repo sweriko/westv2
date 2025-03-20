@@ -32,6 +32,7 @@ Directory structure:
     │   │   ├── quickDraw.js
     │   │   ├── revolver.js
     │   │   ├── scene.js
+    │   │   ├── smokeRingEffect.js
     │   │   ├── soundManager.js
     │   │   └── ui.js
     │   ├── models/
@@ -526,6 +527,38 @@ export class Bullet {
       }
     }
 
+    // Check if crossing town boundary using the physics system
+    if (window.physics && typeof window.physics.isPointInTown === 'function') {
+      const bulletInTown = window.physics.isPointInTown(endPos);
+      const prevInTown = window.physics.isPointInTown(this.lastPosition);
+      
+      // Calculate if bullet is crossing the boundary
+      const bulletCrossingBoundary = bulletInTown !== prevInTown;
+      
+      // If the bullet is crossing the boundary, destroy it
+      if (bulletCrossingBoundary) {
+        console.log("Bullet hit town boundary - destroying it");
+        createImpactEffect(endPos, this.direction, scene, 'ground');
+        return { active: false, hit: { type: 'boundary', position: endPos } };
+      }
+    } else if (window.townDimensions) {
+      // Fallback if physics isn't available but town dimensions are
+      const width = window.townDimensions.width;
+      const length = window.townDimensions.length;
+      
+      // Check if bullet is outside town boundary
+      if (
+        endPos.x < -width / 2 || 
+        endPos.x > width / 2 || 
+        endPos.z < -length / 2 || 
+        endPos.z > length / 2
+      ) {
+        console.log("Bullet hit town boundary - destroying it");
+        createImpactEffect(endPos, this.direction, scene, 'ground');
+        return { active: false, hit: { type: 'boundary', position: endPos } };
+      }
+    }
+
     // 1) Check collision with NPC
     if (npc) {
       const npcBox = new THREE.Box3().setFromObject(npc);
@@ -618,6 +651,9 @@ export class Bullet {
 ================================================
 File: /public/js/effects.js
 ================================================
+// Import the SmokeRingEffect class 
+import { SmokeRingEffect } from './smokeRingEffect.js';
+
 /**
  * Recursively disposes geometry and material for the given object.
  * @param {THREE.Object3D} object - The object to dispose.
@@ -962,6 +998,10 @@ export function createShockwaveRing(position, direction, scene) {
  *
  * The particle velocities have been reduced so that they stay near the impact point.
  *
+ * Additionally, this function now plays an impact sound:
+ * - If hitType is 'ground', "woodimpact.mp3" is played.
+ * - If hitType is 'player', "fleshimpact.mp3" is played at the impact position.
+ *
  * @param {THREE.Vector3} position - Impact position.
  * @param {THREE.Vector3} direction - Impact (bullet) direction.
  * @param {THREE.Scene} scene - The scene to add the effect.
@@ -971,6 +1011,15 @@ export function createImpactEffect(position, direction, scene, hitType) {
   const effectGroup = new THREE.Group();
   effectGroup.position.copy(position);
   scene.add(effectGroup);
+  
+  // Play impact sound based on hit type using positional audio
+  if (window.localPlayer && window.localPlayer.soundManager) {
+    if (hitType === 'ground') {
+      window.localPlayer.soundManager.playSoundAt("woodimpact", position);
+    } else if (hitType === 'player') {
+      window.localPlayer.soundManager.playSoundAt("fleshimpact", position);
+    }
+  }
 
   // Choose color: red for body impacts, brown for ground.
   const color = (hitType === 'ground') ? 0x8B4513 : 0xFF0000;
@@ -1225,6 +1274,8 @@ export function ejectShell(player, scene, soundManager) {
   requestAnimationFrame(animateShell);
 }
 
+// Export the SmokeRingEffect class
+export { SmokeRingEffect };
 
 ================================================
 File: /public/js/input.js
@@ -1281,13 +1332,19 @@ export function initInput(renderer, player, soundManager) {
         break;
       case 'Space':
         if (player.canJump) {
-          player.velocity.y = 10;
+          // If sprinting, jump higher
+          player.velocity.y = player.isSprinting ? 15 : 10;
           player.canJump = false;
         }
         break;
       case 'KeyR':
         // Start reload
         player.startReload();
+        break;
+      case 'ShiftLeft':
+      case 'ShiftRight':
+        // Enable sprinting
+        player.isSprinting = true;
         break;
       default:
         break;
@@ -1308,6 +1365,11 @@ export function initInput(renderer, player, soundManager) {
         break;
       case 'KeyD':
         player.moveRight = false;
+        break;
+      case 'ShiftLeft':
+      case 'ShiftRight':
+        // Disable sprinting
+        player.isSprinting = false;
         break;
       default:
         break;
@@ -1376,9 +1438,10 @@ import { Player } from './player.js';
 import { networkManager } from './network.js';
 import { MultiplayerManager } from './multiplayerManager.js';
 import { Bullet } from './bullet.js';
-import { createMuzzleFlash, createSmokeEffect, createShockwaveRing } from './effects.js';
+import { createMuzzleFlash, createSmokeEffect, createShockwaveRing, createImpactEffect, SmokeRingEffect } from './effects.js';
 import { QuickDraw } from './quickDraw.js';
-import { updateAmmoUI, updateHealthUI } from './ui.js'; // Added import for updateHealthUI
+import { updateAmmoUI, updateHealthUI } from './ui.js';
+import { PhysicsSystem } from './physics.js';
 
 // Keep track of all bullets in the game, both local and remote
 let bullets = [];
@@ -1392,7 +1455,12 @@ let playersMap = new Map();     // Master map including local + remote
 let renderer, camera, npc;
 let multiplayerManager;
 let quickDraw;
+let physics;
 let lastTime = 0;
+
+// Smoke ring effects
+let smokeRings = [];
+let maxSmokeRings = 10; // Limit to prevent performance issues
 
 function init() {
   try {
@@ -1401,13 +1469,38 @@ function init() {
     renderer = sceneSetup.renderer;
 
     const soundManager = new SoundManager();
-    soundManager.loadSound("shot1", "sounds/shot1.mp3");
+    // Load shot sounds
     soundManager.loadSound("shot2", "sounds/shot2.mp3");
+    soundManager.loadSound("shot3", "sounds/shot3.mp3");
+    soundManager.loadSound("shot5", "sounds/shot5.mp3");
     soundManager.loadSound("aimclick", "sounds/aimclick.mp3");
     soundManager.loadSound("shellejection", "sounds/shellejection.mp3");
     soundManager.loadSound("reloading", "sounds/reloading.mp3");
     // Load the bell start sound for Quick Draw start signal
     soundManager.loadSound("bellstart", "sounds/bellstart.mp3");
+    // Load impact sounds
+    soundManager.loadSound("woodimpact", "sounds/woodimpact.mp3");
+    soundManager.loadSound("fleshimpact", "sounds/fleshimpact.mp3");
+    
+    // Initialize physics system
+    physics = new PhysicsSystem();
+    window.physics = physics; // Make physics globally accessible
+
+    // Create town boundary if dimensions are available
+    if (window.townDimensions) {
+      physics.createTownBoundary(
+        window.townDimensions.width,
+        window.townDimensions.length,
+        5 // Height of the barrier
+      );
+    }
+    
+    // Initialize a smoke ring effect pool for reuse
+    for (let i = 0; i < 3; i++) {
+      const smokeRing = new SmokeRingEffect(scene);
+      smokeRing.active = false;
+      smokeRings.push(smokeRing);
+    }
     
     // Initialize multiplayer manager
     multiplayerManager = new MultiplayerManager(scene, soundManager, remotePlayers);
@@ -1434,12 +1527,15 @@ function init() {
     // Initialize Quick Draw game mode after the local player is created
     quickDraw = new QuickDraw(scene, localPlayer, networkManager, soundManager);
     
+    // Share the main physics system with QuickDraw
+    quickDraw.physics = physics;
+    
     // Debug toggle for physics visualization (press P)
     window.addEventListener('keydown', (event) => {
       if (event.code === 'KeyP') {
-        if (quickDraw && quickDraw.physics) {
-          const isDebugMode = !quickDraw.physics.debugMode;
-          quickDraw.physics.setDebugMode(isDebugMode);
+        if (physics) {
+          const isDebugMode = !physics.debugMode;
+          physics.setDebugMode(isDebugMode);
           console.log(`Physics debug mode: ${isDebugMode ? 'ENABLED' : 'DISABLED'}`);
         }
       }
@@ -1501,6 +1597,11 @@ function animate(time) {
   const deltaTime = (time - lastTime) / 1000;
   lastTime = time;
 
+  // Update physics system
+  if (physics) {
+    physics.update(deltaTime);
+  }
+
   // Update local player
   localPlayer.update(deltaTime);
 
@@ -1513,6 +1614,16 @@ function animate(time) {
   // Update Quick Draw game mode
   if (quickDraw) {
     quickDraw.update(deltaTime);
+  }
+
+  // Update smoke ring effects
+  for (let i = smokeRings.length - 1; i >= 0; i--) {
+    // If the smoke ring is inactive after update, we can remove it
+    // But keep at least 3 in the pool for reuse
+    if (!smokeRings[i].update(deltaTime) && smokeRings.length > 3) {
+      smokeRings[i].dispose();
+      smokeRings.splice(i, 1);
+    }
   }
 
   // Update bullets (both local & remote)
@@ -1594,10 +1705,34 @@ function spawnBullet(sourcePlayerId, position, direction) {
   createMuzzleFlash(position, scene);
   createSmokeEffect(position, direction, scene);
   createShockwaveRing(position, direction, scene);
+  
+  // Add smoke ring effect
+  let smokeRing = null;
+  
+  // Try to reuse an inactive smoke ring first
+  for (let i = 0; i < smokeRings.length; i++) {
+    if (!smokeRings[i].active) {
+      smokeRing = smokeRings[i];
+      break;
+    }
+  }
+  
+  // If no inactive smoke ring found, create a new one if under the limit
+  if (!smokeRing && smokeRings.length < maxSmokeRings) {
+    smokeRing = new SmokeRingEffect(scene);
+    smokeRings.push(smokeRing);
+  }
+  
+  // Activate the smoke ring
+  if (smokeRing) {
+    smokeRing.create(position, direction);
+  }
 
-  // Sound
+  // Sound: randomly choose one of the three shot sounds
   if (localPlayer.soundManager) {
-    const shotSound = Math.random() < 0.5 ? "shot1" : "shot2";
+    const shotSounds = ["shot2", "shot3", "shot5"];
+    const randomIndex = Math.floor(Math.random() * shotSounds.length);
+    const shotSound = shotSounds[randomIndex];
     localPlayer.soundManager.playSound(shotSound);
   }
 
@@ -1635,6 +1770,7 @@ function showGameInstructions() {
   instructions.innerHTML = `
     <h2>Wild Western Shooter - Multiplayer</h2>
     <p>WASD: Move</p>
+    <p>Shift: Sprint</p>
     <p>Right-click: Aim</p>
     <p>Left-click (while aiming): Shoot</p>
     <p>R: Reload</p>
@@ -1642,7 +1778,7 @@ function showGameInstructions() {
     <p>P: Toggle physics debug visualization</p>
     <p><strong>Click anywhere to start</strong></p>
     <p><strong>New:</strong> Find the Quick Draw portal near spawn to duel other players!</p>
-    <p><strong>Arena boundaries:</strong> Players and bullets cannot cross between the main world and duel arena.</p>`;
+    <p><strong>Town Boundary:</strong> You must stay within the town limits and can only access the duel arena through the portal.</p>`;
   
   document.getElementById('game-container').appendChild(instructions);
   
@@ -1659,10 +1795,19 @@ window.addEventListener('beforeunload', () => {
   if (quickDraw && quickDraw.physics) {
     quickDraw.physics.cleanup();
   }
+  
+  if (physics) {
+    physics.cleanup();
+  }
+  
+  // Clean up smoke rings
+  for (let i = 0; i < smokeRings.length; i++) {
+    smokeRings[i].dispose();
+  }
+  smokeRings = [];
 });
 
 init();
-
 
 ================================================
 File: /public/js/multiplayerManager.js
@@ -2188,6 +2333,111 @@ export class PhysicsSystem {
     }
     
     /**
+     * Creates an invisible boundary for the town to prevent players from leaving
+     * @param {number} width - Width of the town
+     * @param {number} length - Length of the town
+     * @param {number} height - Height of the barrier
+     * @returns {CANNON.Body} - The created physics body
+     */
+    createTownBoundary(width, length, height) {
+      // First remove any existing town boundaries
+      this.removeTownBoundary();
+      
+      // Create a physics body for the town boundary
+      const boundaryBody = new CANNON.Body({
+        mass: 0, // Static body
+        material: this.defaultMaterial
+      });
+      
+      // Add a box shape for each border
+      const halfWidth = width / 2;
+      const halfLength = length / 2;
+      const borderThickness = 0.5;
+      
+      // Left border (negative X)
+      const leftBorderShape = new CANNON.Box(new CANNON.Vec3(
+        borderThickness / 2, 
+        height / 2, 
+        length / 2
+      ));
+      boundaryBody.addShape(
+        leftBorderShape, 
+        new CANNON.Vec3(-halfWidth, height / 2, 0)
+      );
+      
+      // Right border (positive X)
+      const rightBorderShape = new CANNON.Box(new CANNON.Vec3(
+        borderThickness / 2, 
+        height / 2, 
+        length / 2
+      ));
+      boundaryBody.addShape(
+        rightBorderShape, 
+        new CANNON.Vec3(halfWidth, height / 2, 0)
+      );
+      
+      // Front border (negative Z)
+      const frontBorderShape = new CANNON.Box(new CANNON.Vec3(
+        width / 2, 
+        height / 2, 
+        borderThickness / 2
+      ));
+      boundaryBody.addShape(
+        frontBorderShape, 
+        new CANNON.Vec3(0, height / 2, -halfLength)
+      );
+      
+      // Back border (positive Z)
+      const backBorderShape = new CANNON.Box(new CANNON.Vec3(
+        width / 2, 
+        height / 2, 
+        borderThickness / 2
+      ));
+      boundaryBody.addShape(
+        backBorderShape, 
+        new CANNON.Vec3(0, height / 2, halfLength)
+      );
+      
+      boundaryBody.townBoundary = true; // Tag this body as a town boundary
+      boundaryBody.collisionFilterGroup = 2; // Group 2 for boundaries
+      
+      // Add the boundary body to the world
+      this.world.addBody(boundaryBody);
+      this.bodies.push(boundaryBody);
+      
+      // Create a reference to easily find this body later
+      this.townBoundaryBody = boundaryBody;
+      
+      // If debug mode is enabled, create a visual representation
+      if (this.debugMode) {
+        this.createDebugMesh(boundaryBody);
+      }
+      
+      console.log("Created town boundary with width", width, "and length", length);
+      
+      return boundaryBody;
+    }
+    
+    /**
+     * Removes the town boundary if it exists
+     */
+    removeTownBoundary() {
+      if (this.townBoundaryBody) {
+        this.world.removeBody(this.townBoundaryBody);
+        
+        // Remove from our bodies array
+        const index = this.bodies.indexOf(this.townBoundaryBody);
+        if (index !== -1) {
+          this.bodies.splice(index, 1);
+        }
+        
+        // Clear the reference
+        this.townBoundaryBody = null;
+        console.log("Removed town boundary");
+      }
+    }
+    
+    /**
      * Creates an invisible cylindrical boundary for the QuickDraw arena
      * @param {THREE.Vector3} center - Center position of the arena
      * @param {number} radius - Radius of the cylindrical arena
@@ -2326,6 +2576,53 @@ export class PhysicsSystem {
       }
       
       return playerBody;
+    }
+    
+    /**
+     * Checks if a point is inside the arena boundary
+     * @param {THREE.Vector3} point - The point to check
+     * @returns {boolean} - True if inside, false if outside
+     */
+    isPointInArenaBoundary(point) {
+      // If no arena boundary exists, return false
+      if (!this.arenaBoundaryBody) return false;
+      
+      // Get arena position and create a CANNON vector for the point
+      const arenaPos = this.arenaBoundaryBody.position;
+      const pointVec = new CANNON.Vec3(point.x, point.y, point.z);
+      
+      // Calculate horizontal distance (ignoring Y) from arena center
+      const dx = pointVec.x - arenaPos.x;
+      const dz = pointVec.z - arenaPos.z;
+      const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+      
+      // Get the radius from the first shape (assuming it's a cylinder or shape with radius property)
+      const radius = 15; // Default from QuickDraw.js
+      
+      // Check if point is inside the cylinder horizontally and vertically
+      return horizontalDist < radius;
+    }
+
+    /**
+     * Checks if a point is inside the town boundary
+     * @param {THREE.Vector3} point - The point to check
+     * @returns {boolean} - True if inside, false if outside
+     */
+    isPointInTown(point) {
+      // If no town boundary exists, return true (no restriction)
+      if (!window.townDimensions) return true;
+      
+      // Get town dimensions
+      const width = window.townDimensions.width;
+      const length = window.townDimensions.length;
+      
+      // Check if the point is within the town boundaries
+      return (
+        point.x > -width / 2 && 
+        point.x < width / 2 && 
+        point.z > -length / 2 && 
+        point.z < length / 2
+      );
     }
     
     /**
@@ -2473,31 +2770,6 @@ export class PhysicsSystem {
     }
     
     /**
-     * Checks if a point is inside the arena boundary
-     * @param {THREE.Vector3} point - The point to check
-     * @returns {boolean} - True if inside, false if outside
-     */
-    isPointInArenaBoundary(point) {
-      // If no arena boundary exists, return false
-      if (!this.arenaBoundaryBody) return false;
-      
-      // Get arena position and create a CANNON vector for the point
-      const arenaPos = this.arenaBoundaryBody.position;
-      const pointVec = new CANNON.Vec3(point.x, point.y, point.z);
-      
-      // Calculate horizontal distance (ignoring Y) from arena center
-      const dx = pointVec.x - arenaPos.x;
-      const dz = pointVec.z - arenaPos.z;
-      const horizontalDist = Math.sqrt(dx * dx + dz * dz);
-      
-      // Get the radius from the first shape (assuming it's a cylinder or shape with radius property)
-      const radius = 15; // Default from QuickDraw.js
-      
-      // Check if point is inside the cylinder horizontally and vertically
-      return horizontalDist < radius;
-    }
-    
-    /**
      * Enables or disables debug visualization
      * @param {boolean} enabled - Whether debug mode should be enabled
      */
@@ -2574,7 +2846,10 @@ export class Player {
     this.onShootCallback = onShoot;
 
     this.group = new THREE.Group();
-    this.group.position.set(0, 1.6, 0); // Start near eye level
+    
+    // Start at a random spawn point in the town street
+    this.spawnPlayerRandomly();
+    
     this.scene.add(this.group);
     this.camera.position.set(0, 0, 0);
     this.group.add(this.camera);
@@ -2588,11 +2863,24 @@ export class Player {
     this.moveBackward = false;
     this.moveLeft = false;
     this.moveRight = false;
+    
+    // Sprinting flag - new addition
+    this.isSprinting = false;
+    this.normalSpeed = 5; // Default movement speed
+    this.sprintSpeed = 12; // Faster sprint speed
+    this.sprintJumpBoost = 1.5; // Jump boost factor when sprinting
 
     // Aiming
     this.isAiming = false;
     this.defaultFOV = 75;
     this.aimFOV = 65;
+    
+    // Camera effects for sprinting - with smoothing parameters
+    this.defaultCameraHeight = 0;
+    this.bobPhase = 0; // Phase accumulator for bob effect
+    this.bobIntensity = 0; // Current intensity of bobbing (interpolates)
+    this.targetBobIntensity = 0; // Target bobbing intensity
+    this.bobTransitionSpeed = 3; // Speed of transition to new bob intensity
     
     // Gun
     this.revolver = new Revolver();
@@ -2600,6 +2888,11 @@ export class Player {
     this.aimOffset = new THREE.Vector3(0.3, -0.3, -0.5);
     this.currentGunOffset = this.holsterOffset.clone();
     this.camera.add(this.revolver.group);
+
+    // FOV transition smoothing
+    this.currentFOV = this.defaultFOV;
+    this.targetFOV = this.defaultFOV;
+    this.fovTransitionSpeed = 5; // Speed of FOV transitions
 
     // Reload
     this.isReloading = false;
@@ -2628,6 +2921,33 @@ export class Player {
     updateHealthUI(this);
   }
 
+  /**
+   * Spawn the player at a random position along the main street
+   */
+  spawnPlayerRandomly() {
+    // Default position if town dimensions aren't available
+    let spawnX = 0;
+    let spawnY = 1.6;
+    let spawnZ = 0;
+
+    // If town dimensions are available, use them for spawn positioning
+    if (window.townDimensions) {
+      const streetWidth = window.townDimensions.streetWidth;
+      const townLength = window.townDimensions.length;
+      
+      // Random position within the street area
+      spawnX = (Math.random() - 0.5) * streetWidth * 0.8; // 80% of street width to avoid edges
+      spawnZ = (Math.random() - 0.5) * townLength * 0.8; // 80% of town length
+    }
+
+    this.group.position.set(spawnX, spawnY, spawnZ);
+    
+    // Random rotation (facing any direction)
+    this.group.rotation.y = Math.random() * Math.PI * 2;
+    
+    console.log(`Player spawned at: X=${spawnX.toFixed(2)}, Z=${spawnZ.toFixed(2)}`);
+  }
+
   initNetworking() {
     // Start the WebSocket
     networkManager.connect();
@@ -2649,12 +2969,31 @@ export class Player {
     this.currentGunOffset.lerp(targetOffset, 0.1);
     this.revolver.group.position.copy(this.currentGunOffset);
 
-    this.camera.fov = THREE.MathUtils.lerp(
-      this.camera.fov,
-      this.isAiming && this.canAim ? this.aimFOV : this.defaultFOV,
-      0.1
+    // Adjust FOV based on sprinting and aiming with smoother transitions
+    if (this.isAiming && this.canAim) {
+      this.targetFOV = this.aimFOV;
+    } else if (this.isSprinting && this.isMoving() && !window.quickDraw?.inDuel) {
+      // FOV effect when sprinting, but not in QuickDraw duel
+      this.targetFOV = this.defaultFOV + 7; // Less extreme FOV increase (was 10)
+    } else {
+      this.targetFOV = this.defaultFOV;
+    }
+    
+    // Smooth FOV transition
+    this.currentFOV = THREE.MathUtils.lerp(
+      this.currentFOV, 
+      this.targetFOV, 
+      deltaTime * this.fovTransitionSpeed
     );
-    this.camera.updateProjectionMatrix();
+    
+    // Only update camera FOV if it has changed enough to be noticeable
+    if (Math.abs(this.camera.fov - this.currentFOV) > 0.01) {
+      this.camera.fov = this.currentFOV;
+      this.camera.updateProjectionMatrix();
+    }
+
+    // Handle head bob effect when moving - with improvements
+    this.updateHeadBob(deltaTime);
 
     // Gravity
     this.velocity.y -= 20 * deltaTime;
@@ -2665,8 +3004,8 @@ export class Player {
       this.canJump = true;
     }
 
-    // Movement
-    const moveSpeed = 5;
+    // Movement - now with sprint capability
+    const moveSpeed = this.getMoveSpeed();
     const forward = new THREE.Vector3();
     this.camera.getWorldDirection(forward);
     forward.y = 0;
@@ -2675,26 +3014,36 @@ export class Player {
     const right = new THREE.Vector3();
     right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
 
-    if (this.moveForward) this.group.position.add(forward.clone().multiplyScalar(moveSpeed * deltaTime));
-    if (this.moveBackward) this.group.position.add(forward.clone().multiplyScalar(-moveSpeed * deltaTime));
-    if (this.moveLeft) this.group.position.add(right.clone().multiplyScalar(-moveSpeed * deltaTime));
-    if (this.moveRight) this.group.position.add(right.clone().multiplyScalar(moveSpeed * deltaTime));
+    // Calculate new position based on movement input
+    const newPosition = this.group.position.clone();
+    
+    if (this.moveForward) newPosition.add(forward.clone().multiplyScalar(moveSpeed * deltaTime));
+    if (this.moveBackward) newPosition.add(forward.clone().multiplyScalar(-moveSpeed * deltaTime));
+    if (this.moveLeft) newPosition.add(right.clone().multiplyScalar(-moveSpeed * deltaTime));
+    if (this.moveRight) newPosition.add(right.clone().multiplyScalar(moveSpeed * deltaTime));
 
-    // Arena boundary collision detection
-    if (window.quickDraw) {
-      const inArena = window.quickDraw.isPointInArena(this.group.position);
-      const wasInArena = window.quickDraw.isPointInArena(this.previousPosition);
-      
-      // If player is in a duel, they must stay inside
-      if (window.quickDraw.inDuel && !inArena && wasInArena) {
-        // Player tried to leave the arena - move them back inside
-        this.group.position.copy(this.previousPosition);
+    // Check for boundary collisions before applying the new position
+    const canMove = this.checkBoundaryCollision(newPosition);
+    
+    if (canMove) {
+      this.group.position.copy(newPosition);
+    } else {
+      // If can't move to the new position, try to slide along the boundary
+      // This gives a better feeling than just stopping
+      if (this.moveForward || this.moveBackward) {
+        const slideX = this.group.position.clone();
+        slideX.x = newPosition.x;
+        if (this.checkBoundaryCollision(slideX)) {
+          this.group.position.copy(slideX);
+        }
       }
       
-      // If player is not in a duel, they must stay outside
-      if (!window.quickDraw.inDuel && inArena && !wasInArena) {
-        // Player tried to enter the arena from outside - move them back outside
-        this.group.position.copy(this.previousPosition);
+      if (this.moveLeft || this.moveRight) {
+        const slideZ = this.group.position.clone();
+        slideZ.z = newPosition.z;
+        if (this.checkBoundaryCollision(slideZ)) {
+          this.group.position.copy(slideZ);
+        }
       }
     }
 
@@ -2704,6 +3053,133 @@ export class Player {
       this.lastNetworkUpdate = now;
       this.sendNetworkUpdate();
     }
+  }
+
+  /**
+   * Updates camera head bobbing effect for walking/running with much smoother transitions
+   * @param {number} deltaTime - Time elapsed since last frame
+   */
+  updateHeadBob(deltaTime) {
+    // Update target bobbing intensity based on movement
+    if (this.isMoving() && this.canJump) {
+      // Very subtle bobbing values
+      this.targetBobIntensity = this.isSprinting ? 0.02 : 0.01;
+    } else {
+      this.targetBobIntensity = 0;
+    }
+    
+    // Smoothly transition bob intensity
+    this.bobIntensity = THREE.MathUtils.lerp(
+      this.bobIntensity,
+      this.targetBobIntensity,
+      Math.min(1, deltaTime * this.bobTransitionSpeed)
+    );
+    
+    // Only calculate bob if intensity is significant
+    if (this.bobIntensity > 0.001) {
+      // Update phase at a speed proportional to movement
+      // Use different frequencies for vertical and horizontal to create more natural movement
+      this.bobPhase += deltaTime * (this.isSprinting ? 10 : 6);
+      
+      // Calculate vertical and horizontal components
+      const verticalBob = Math.sin(this.bobPhase * 2) * this.bobIntensity;
+      // Much smaller horizontal component
+      const horizontalBob = Math.cos(this.bobPhase) * this.bobIntensity * 0.3;
+      
+      // Apply to camera position smoothly
+      this.camera.position.y = THREE.MathUtils.lerp(
+        this.camera.position.y,
+        this.defaultCameraHeight + verticalBob,
+        Math.min(1, deltaTime * 8)
+      );
+      
+      // Extremely subtle horizontal movement
+      this.camera.position.x = THREE.MathUtils.lerp(
+        this.camera.position.x,
+        horizontalBob,
+        Math.min(1, deltaTime * 3)
+      );
+    } else {
+      // Smoothly return to default position when not moving
+      this.camera.position.y = THREE.MathUtils.lerp(
+        this.camera.position.y,
+        this.defaultCameraHeight,
+        Math.min(1, deltaTime * 4)
+      );
+      
+      this.camera.position.x = THREE.MathUtils.lerp(
+        this.camera.position.x,
+        0,
+        Math.min(1, deltaTime * 3)
+      );
+    }
+  }
+
+  /**
+   * Returns the current movement speed based on sprint state and location
+   * @returns {number} The current movement speed
+   */
+  getMoveSpeed() {
+    // Disable sprinting in QuickDraw duels
+    if (window.quickDraw && window.quickDraw.inDuel) {
+      return this.normalSpeed;
+    }
+    
+    // Apply sprint speed if sprint key is pressed
+    return this.isSprinting ? this.sprintSpeed : this.normalSpeed;
+  }
+  
+  /**
+   * Checks if the player is currently moving
+   * @returns {boolean} True if any movement key is pressed
+   */
+  isMoving() {
+    return this.moveForward || this.moveBackward || this.moveLeft || this.moveRight;
+  }
+
+  /**
+   * Check if a position is valid regarding boundaries
+   * @param {THREE.Vector3} position - The position to check
+   * @returns {boolean} - True if the position is valid
+   */
+  checkBoundaryCollision(position) {
+    // First check Quick Draw arena boundary
+    if (window.quickDraw) {
+      const inArena = window.quickDraw.isPointInArena(position);
+      const wasInArena = window.quickDraw.isPointInArena(this.previousPosition);
+      
+      // If player is in a duel, they must stay inside
+      if (window.quickDraw.inDuel && !inArena && wasInArena) {
+        return false; // Can't leave arena during duel
+      }
+      
+      // If player is not in a duel, they must stay outside
+      if (!window.quickDraw.inDuel && inArena && !wasInArena) {
+        return false; // Can't enter arena from outside (except via the portal)
+      }
+    }
+    
+    // Check town boundary
+    if (window.physics && typeof window.physics.isPointInTown === 'function') {
+      if (!window.physics.isPointInTown(position)) {
+        return false; // Can't leave town
+      }
+    } else if (window.townDimensions) {
+      // Fallback if physics isn't available but town dimensions are
+      const width = window.townDimensions.width;
+      const length = window.townDimensions.length;
+      
+      if (
+        position.x < -width / 2 || 
+        position.x > width / 2 || 
+        position.z < -length / 2 || 
+        position.z > length / 2
+      ) {
+        return false; // Can't leave town
+      }
+    }
+    
+    return true; // No collision
   }
 
   /**
@@ -2785,7 +3261,32 @@ export class Player {
     if (this.health === 0) {
       console.log('Game Over');
       // Optionally, disable input or show a Game Over screen.
+      this.respawn();
     }
+  }
+
+  /**
+   * Respawn the player after death
+   */
+  respawn() {
+    // Reset health
+    this.health = 100;
+    updateHealthUI(this);
+    
+    // Spawn at a random position
+    this.spawnPlayerRandomly();
+    
+    // Reset weapon state
+    this.bullets = this.maxBullets;
+    this.isReloading = false;
+    this.canAim = true;
+    this.isAiming = false;
+    updateAmmoUI(this);
+    
+    // Reset vertical velocity
+    this.velocity.y = 0;
+    
+    console.log('Player respawned');
   }
 
   startReload() {
@@ -3423,8 +3924,8 @@ export class QuickDraw {
         // Record the time (in ms) until which the gun remains locked
         this.penaltyEndTime = 0;
         
-        // Duel area position
-        this.duelCenter = new THREE.Vector3(50, 0, 50); // Far from main spawn
+        // Duel area position - positioned outside town boundary
+        this.duelCenter = new THREE.Vector3(0, 0, 0); // Will be updated based on town dimensions
         this.arenaRadius = 15;
         this.arenaHeight = 5;
         
@@ -3510,7 +4011,23 @@ export class QuickDraw {
             opacity: 0.8
         });
         this.portal = new THREE.Mesh(portalGeometry, portalMaterial);
-        this.portal.position.set(5, 1.5, 5); // Near the spawn point
+        
+        // Position the portal within the town street
+        // If town dimensions are available, use them for positioning
+        if (window.townDimensions) {
+            const streetWidth = window.townDimensions.streetWidth;
+            const townLength = window.townDimensions.length;
+            
+            // Position the portal near the center of the street
+            this.portal.position.set(0, 1.5, townLength * 0.3); // 30% down the street
+            
+            // Update the duel center position to be outside town boundary
+            this.duelCenter = new THREE.Vector3(0, 0, townLength + 30);
+        } else {
+            // Default position if town dimensions aren't available
+            this.portal.position.set(0, 1.5, 10); // Further down the street from spawn
+        }
+        
         this.portal.rotation.y = Math.PI / 2; // Make it vertical
         this.scene.add(this.portal);
         
@@ -3535,14 +4052,16 @@ export class QuickDraw {
         
         const textGeometry = new THREE.PlaneGeometry(2, 0.5);
         this.portalText = new THREE.Mesh(textGeometry, textMaterial);
-        this.portalText.position.set(5, 2.5, 5);
+        this.portalText.position.copy(this.portal.position);
+        this.portalText.position.y += 1.0; // Position above the portal
         this.portalText.rotation.y = Math.PI / 2;
         this.scene.add(this.portalText);
         
-        // Create collision detector for the portal
+        // Create collision detector for the portal - adjust based on portal position
+        const portalPos = this.portal.position;
         this.portalCollider = new THREE.Box3(
-            new THREE.Vector3(4.5, 0, 4.5),
-            new THREE.Vector3(5.5, 3, 5.5)
+            new THREE.Vector3(portalPos.x - 0.5, portalPos.y - 1.5, portalPos.z - 0.5),
+            new THREE.Vector3(portalPos.x + 0.5, portalPos.y + 1.5, portalPos.z + 0.5)
         );
         
         // Animate the portal
@@ -3587,9 +4106,11 @@ export class QuickDraw {
         document.getElementById('game-container').appendChild(this.instructionsElement);
         
         // Show instructions when player gets close to portal
+        // Adjust the proximity box based on portal position
+        const portalPos = this.portal.position;
         this.portalProximityBox = new THREE.Box3(
-            new THREE.Vector3(3, 0, 3),
-            new THREE.Vector3(7, 3, 7)
+            new THREE.Vector3(portalPos.x - 2, portalPos.y - 2, portalPos.z - 2),
+            new THREE.Vector3(portalPos.x + 2, portalPos.y + 2, portalPos.z + 2)
         );
     }
     
@@ -3804,6 +4325,106 @@ export class QuickDraw {
     }
     
     /**
+     * Creates an invisible cylindrical boundary for the QuickDraw arena
+     * @param {THREE.Vector3} center - Center position of the arena
+     * @param {number} radius - Radius of the cylindrical arena
+     * @param {number} height - Height of the cylindrical arena
+     */
+    createQuickDrawArenaBoundary(center, radius, height) {
+        // First remove any existing arena boundaries
+        this.removeQuickDrawArenaBoundary();
+        
+        // Create a physics body for the arena boundary
+        const arenaBody = new CANNON.Body({
+            mass: 0, // Static body
+            material: this.defaultMaterial
+        });
+        
+        // Position at the center
+        arenaBody.position.set(center.x, center.y + height/2, center.z);
+        
+        // Add a cylindrical shape for the arena
+        // Use segments to approximate the cylinder
+        const segments = 16; // Number of sides for the cylinder approximation
+        const wallThickness = 0.5;
+        
+        // Create segments around the circle to approximate the cylinder
+        for (let i = 0; i < segments; i++) {
+            const angle1 = (i / segments) * Math.PI * 2;
+            const angle2 = ((i + 1) / segments) * Math.PI * 2;
+            
+            const x1 = Math.cos(angle1) * radius;
+            const z1 = Math.sin(angle1) * radius;
+            const x2 = Math.cos(angle2) * radius;
+            const z2 = Math.sin(angle2) * radius;
+            
+            // Calculate the position and orientation of this wall segment
+            const segCenter = {
+                x: (x1 + x2) / 2,
+                z: (z1 + z2) / 2
+            };
+            
+            const length = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(z2 - z1, 2));
+            
+            // Create a box shape for this wall segment
+            // Position the wall so it doesn't intrude into the arena
+            const halfExtents = new CANNON.Vec3(length/2, height/2, wallThickness/2);
+            const wallShape = new CANNON.Box(halfExtents);
+            
+            // Get the angle to rotate this wall segment
+            const rotationY = Math.atan2(z2 - z1, x2 - x1) + Math.PI/2;
+            
+            // Position the walls at exactly the arena radius, not inside it
+            const offsetDistance = radius;
+            const offset = new CANNON.Vec3(
+                segCenter.x * (offsetDistance / Math.sqrt(segCenter.x * segCenter.x + segCenter.z * segCenter.z)),
+                0,
+                segCenter.z * (offsetDistance / Math.sqrt(segCenter.x * segCenter.x + segCenter.z * segCenter.z))
+            );
+            
+            const quaternion = new CANNON.Quaternion();
+            quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), rotationY);
+            
+            arenaBody.addShape(wallShape, offset, quaternion);
+        }
+        
+        // Bottom circle to prevent falling through
+        const bottomShape = new CANNON.Cylinder(radius, radius, wallThickness, segments);
+        const bottomOffset = new CANNON.Vec3(0, -height/2, 0);
+        const bottomQuaternion = new CANNON.Quaternion();
+        bottomQuaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI / 2);
+        arenaBody.addShape(bottomShape, bottomOffset, bottomQuaternion);
+        
+        arenaBody.arenaBoundary = true; // Tag this body as an arena boundary
+        arenaBody.collisionFilterGroup = 2; // Group 2 for arena boundaries
+        
+        // Add the arena body to the world
+        this.world.addBody(arenaBody);
+        this.bodies.push(arenaBody);
+        
+        // Create a reference to easily find this body later
+        this.arenaBoundaryBody = arenaBody;
+        
+        // If debug mode is enabled, create a visual representation
+        if (this.debugMode) {
+            this.createDebugMesh(arenaBody);
+        }
+        
+        console.log("Created QuickDraw arena boundary at", center, "with radius", radius, "and height", height);
+        
+        return arenaBody;
+    }
+    
+    /**
+     * Removes the QuickDraw arena boundary if it exists
+     */
+    removeQuickDrawArenaBoundary() {
+        if (this.physics && this.physics.arenaBoundaryBody) {
+            this.physics.removeQuickDrawArenaBoundary();
+        }
+    }
+    
+    /**
      * Check if a point is inside the duel arena using the physics system
      * @param {THREE.Vector3} point - The point to check
      * @returns {boolean} - True if the point is inside the arena
@@ -3888,7 +4509,7 @@ export class QuickDraw {
             this.localPlayer.revolver.group.visible = false;
         }
         
-        // (Additional portal instruction update)
+        // Update portal instruction visibility
         this.updatePortalInstructions();
     }
     
@@ -3981,11 +4602,13 @@ export class QuickDraw {
         this.duelArea.visible = true;
         
         // Create the arena physics boundary
-        this.physics.createQuickDrawArenaBoundary(
-            this.duelCenter, 
-            this.arenaRadius,
-            this.arenaHeight
-        );
+        if (this.physics) {
+            this.physics.createQuickDrawArenaBoundary(
+                this.duelCenter, 
+                this.arenaRadius,
+                this.arenaHeight
+            );
+        }
         
         // Disable weapon drawing immediately and forcefully
         this.originalCanAim = this.localPlayer.canAim !== false;
@@ -4235,7 +4858,7 @@ export class QuickDraw {
             this.duelArea.visible = false;
             
             // Teleport back to normal spawn
-            this.localPlayer.group.position.set(0, 1.6, 0);
+            this.localPlayer.spawnPlayerRandomly();
             
             // Re-enable normal controls
             this.localPlayer.canAim = this.originalCanAim;
@@ -4335,7 +4958,6 @@ export class QuickDraw {
     }
 }
 
-
 ================================================
 File: /public/js/revolver.js
 ================================================
@@ -4420,6 +5042,7 @@ export class Revolver {
 ================================================
 File: /public/js/scene.js
 ================================================
+// /public/js/scene.js
 export let scene;
 
 /**
@@ -4429,7 +5052,7 @@ export let scene;
 export function initScene() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87CEEB);
-  scene.fog = new THREE.Fog(0x87CEEB, 10, 750);
+  scene.fog = new THREE.Fog(0x87CEEB, 10, 100); // Reduced fog distance for smaller world
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -4460,9 +5083,25 @@ export function initScene() {
   directionalLight.shadow.mapSize.height = 2048;
   scene.add(directionalLight);
 
-  const groundGeometry = new THREE.PlaneGeometry(1000, 1000);
+  // Create the western town instead of just a ground plane
+  createWesternTown();
+
+  return { camera, renderer };
+}
+
+/**
+ * Creates a western town with a main street and buildings
+ */
+function createWesternTown() {
+  // Town dimensions
+  const TOWN_WIDTH = 60;  // Width of the town (X-axis)
+  const TOWN_LENGTH = 100; // Length of the town (Z-axis)
+  const STREET_WIDTH = 15; // Width of the main street
+
+  // Create the ground (smaller than the original 1000x1000)
+  const groundGeometry = new THREE.PlaneGeometry(TOWN_WIDTH, TOWN_LENGTH);
   const groundMaterial = new THREE.MeshStandardMaterial({
-    color: 0xCD853F,
+    color: 0xCD853F, // Sandy color
     roughness: 0.8,
     metalness: 0.2
   });
@@ -4471,7 +5110,231 @@ export function initScene() {
   ground.receiveShadow = true;
   scene.add(ground);
 
-  return { camera, renderer };
+  // Create the main street
+  const streetGeometry = new THREE.PlaneGeometry(STREET_WIDTH, TOWN_LENGTH);
+  const streetMaterial = new THREE.MeshStandardMaterial({
+    color: 0xA0522D, // Brown street
+    roughness: 0.9,
+    metalness: 0.1
+  });
+  const street = new THREE.Mesh(streetGeometry, streetMaterial);
+  street.rotation.x = -Math.PI / 2;
+  street.position.y = 0.01; // Slightly above ground to prevent z-fighting
+  street.receiveShadow = true;
+  scene.add(street);
+
+  // Add buildings on both sides of the street
+  const buildingCount = 5; // Number of buildings on each side
+  const buildingSpacing = TOWN_LENGTH / (buildingCount + 1);
+  
+  // Left side buildings (negative X)
+  for (let i = 1; i <= buildingCount; i++) {
+    const offset = i * buildingSpacing - TOWN_LENGTH / 2 + buildingSpacing / 2;
+    createWesternBuilding(-STREET_WIDTH / 2 - 5, 0, offset);
+  }
+  
+  // Right side buildings (positive X)
+  for (let i = 1; i <= buildingCount; i++) {
+    const offset = i * buildingSpacing - TOWN_LENGTH / 2 + buildingSpacing / 2;
+    createWesternBuilding(STREET_WIDTH / 2 + 5, 0, offset);
+  }
+
+  // Create a visible border around the town
+  createTownBorder(TOWN_WIDTH, TOWN_LENGTH);
+  
+  // Store these values in a global variable for access in other files
+  window.townDimensions = {
+    width: TOWN_WIDTH,
+    length: TOWN_LENGTH,
+    streetWidth: STREET_WIDTH
+  };
+}
+
+/**
+ * Creates a simple western-style building
+ * @param {number} x - X position
+ * @param {number} y - Y position
+ * @param {number} z - Z position
+ */
+function createWesternBuilding(x, y, z) {
+  // Randomize building dimensions
+  const width = 8 + Math.random() * 4;
+  const height = 5 + Math.random() * 3;
+  const depth = 6 + Math.random() * 4;
+  
+  const buildingGroup = new THREE.Group();
+  
+  // Building body
+  const buildingGeometry = new THREE.BoxGeometry(width, height, depth);
+  const buildingMaterial = new THREE.MeshStandardMaterial({
+    color: Math.random() > 0.5 ? 0x8B4513 : 0xA0522D, // Brown variations
+    roughness: 0.8,
+    metalness: 0.2
+  });
+  const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
+  building.position.set(0, height / 2, 0);
+  building.castShadow = true;
+  building.receiveShadow = true;
+  buildingGroup.add(building);
+  
+  // Roof (simple triangular prism)
+  const roofHeight = 2;
+  const roofGeometry = new THREE.BufferGeometry();
+  
+  const vertices = new Float32Array([
+    // Front triangle
+    -width/2, height, -depth/2,
+    width/2, height, -depth/2,
+    0, height + roofHeight, -depth/2,
+    
+    // Back triangle
+    -width/2, height, depth/2,
+    width/2, height, depth/2,
+    0, height + roofHeight, depth/2,
+    
+    // Left side
+    -width/2, height, -depth/2,
+    -width/2, height, depth/2,
+    0, height + roofHeight, -depth/2,
+    0, height + roofHeight, depth/2,
+    
+    // Right side
+    width/2, height, -depth/2,
+    width/2, height, depth/2,
+    0, height + roofHeight, -depth/2,
+    0, height + roofHeight, depth/2
+  ]);
+  
+  const indices = [
+    // Front triangle
+    0, 1, 2,
+    
+    // Back triangle
+    3, 5, 4,
+    
+    // Left side
+    6, 8, 7,
+    7, 8, 9,
+    
+    // Right side
+    10, 11, 12,
+    11, 13, 12
+  ];
+  
+  roofGeometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+  roofGeometry.setIndex(indices);
+  roofGeometry.computeVertexNormals();
+  
+  const roofMaterial = new THREE.MeshStandardMaterial({
+    color: 0x8B4513, // Dark brown
+    roughness: 0.9,
+    metalness: 0.1
+  });
+  
+  const roof = new THREE.Mesh(roofGeometry, roofMaterial);
+  roof.castShadow = true;
+  buildingGroup.add(roof);
+  
+  // Door
+  const doorWidth = 1.5;
+  const doorHeight = 3;
+  const doorGeometry = new THREE.PlaneGeometry(doorWidth, doorHeight);
+  const doorMaterial = new THREE.MeshStandardMaterial({
+    color: 0x4d2600, // Dark brown
+    roughness: 0.8,
+    metalness: 0.2
+  });
+  const door = new THREE.Mesh(doorGeometry, doorMaterial);
+  door.position.set(0, doorHeight / 2, depth / 2 + 0.01);
+  buildingGroup.add(door);
+  
+  // Windows (1-3 random windows)
+  const windowCount = 1 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < windowCount; i++) {
+    const windowWidth = 1;
+    const windowHeight = 1;
+    const windowGeometry = new THREE.PlaneGeometry(windowWidth, windowHeight);
+    const windowMaterial = new THREE.MeshStandardMaterial({
+      color: 0xECF0F1, // White-ish
+      roughness: 0.4,
+      metalness: 0.6
+    });
+    const windowMesh = new THREE.Mesh(windowGeometry, windowMaterial);
+    
+    // Position windows randomly on the front face
+    let wxPos = -width / 3 + i * width / 3;
+    if (windowCount === 1) wxPos = 0;
+    
+    windowMesh.position.set(
+      wxPos,
+      height / 2 + 0.5,
+      depth / 2 + 0.01
+    );
+    buildingGroup.add(windowMesh);
+  }
+  
+  // Position the whole building
+  buildingGroup.position.set(x, y, z);
+  
+  // Rotate the building to face the street
+  if (x < 0) {
+    buildingGroup.rotation.y = Math.PI / 2;
+  } else {
+    buildingGroup.rotation.y = -Math.PI / 2;
+  }
+  
+  scene.add(buildingGroup);
+}
+
+/**
+ * Creates a visible border around the town
+ * @param {number} width - Width of the town
+ * @param {number} length - Length of the town
+ */
+function createTownBorder(width, length) {
+  const borderHeight = 0.5;
+  const borderWidth = 0.5;
+  
+  // Border material
+  const borderMaterial = new THREE.MeshStandardMaterial({
+    color: 0x8B4513, // Brown
+    roughness: 0.8,
+    metalness: 0.2
+  });
+  
+  // Create four border segments
+  const createBorderSegment = (x, z, sizeX, sizeZ) => {
+    const geometry = new THREE.BoxGeometry(sizeX, borderHeight, sizeZ);
+    const border = new THREE.Mesh(geometry, borderMaterial);
+    border.position.set(x, borderHeight / 2, z);
+    border.castShadow = true;
+    border.receiveShadow = true;
+    scene.add(border);
+    return border;
+  };
+  
+  // Left border (negative X)
+  const leftBorder = createBorderSegment(-width / 2, 0, borderWidth, length);
+  
+  // Right border (positive X)
+  const rightBorder = createBorderSegment(width / 2, 0, borderWidth, length);
+  
+  // Front border (negative Z)
+  const frontBorder = createBorderSegment(0, -length / 2, width, borderWidth);
+  
+  // Back border (positive Z)
+  const backBorder = createBorderSegment(0, length / 2, width, borderWidth);
+  
+  // Store border references in a global variable
+  window.townBorders = {
+    left: leftBorder,
+    right: rightBorder,
+    front: frontBorder,
+    back: backBorder,
+    width: width,
+    length: length,
+    height: borderHeight
+  };
 }
 
 /**
@@ -4497,24 +5360,41 @@ export function createNPC(scene) {
   hat.position.y = 2.0;
   npcGroup.add(hat);
 
-  npcGroup.position.set(0, 0, -10);
+  // Position the NPC within the town instead of at (0, 0, -10)
+  if (window.townDimensions) {
+    // Place NPC at a random position in the town
+    const x = (Math.random() - 0.5) * window.townDimensions.streetWidth * 0.8;
+    const z = -window.townDimensions.length * 0.3; // Towards the front of the town
+    npcGroup.position.set(x, 0, z);
+  } else {
+    // Default position as fallback
+    npcGroup.position.set(0, 0, -10);
+  }
+  
   scene.add(npcGroup);
   return npcGroup;
 }
 
 /**
- * Updates the NPC’s position.
+ * Updates the NPC's position.
  * @param {THREE.Group} npc - The NPC group.
  * @param {number} deltaTime - Time elapsed since last frame.
  */
 export function updateNPC(npc, deltaTime) {
   if (npc) {
     npc.userData.direction = npc.userData.direction || 1;
+    
+    // Adjust the movement range to be appropriate for the town size
+    const movementRange = window.townDimensions ? 
+      window.townDimensions.streetWidth * 0.4 : // 40% of street width if town exists
+      15; // Original value as fallback
+    
     npc.position.x += npc.userData.direction * 2 * deltaTime;
-    if (npc.position.x > 15) {
+    
+    if (npc.position.x > movementRange) {
       npc.userData.direction = -1;
       npc.rotation.y = Math.PI / 2;
-    } else if (npc.position.x < -15) {
+    } else if (npc.position.x < -movementRange) {
       npc.userData.direction = 1;
       npc.rotation.y = -Math.PI / 2;
     }
@@ -4535,67 +5415,373 @@ export function updateFPS(renderer, camera, deltaTime) {
   }
 }
 
+================================================
+File: /public/js/smokeRingEffect.js
+================================================
+/**
+ * Smoke Ring Effect implementation for the Western Shooter game
+ * Creates a stylized low-poly smoke ring when firing
+ */
+export class SmokeRingEffect {
+    constructor(scene) {
+        this.scene = scene;
+        this.group = new THREE.Group();
+        this.scene.add(this.group);
+        
+        this.puffs = [];
+        this.active = false;
+        
+        // Create smoke material - using PhongMaterial with flatShading
+        this.smokeMaterial = new THREE.MeshPhongMaterial({
+            color: 0xCCCCCC, // Light gray
+            flatShading: true,
+            shininess: 0,
+            transparent: true
+        });
+    }
+    
+    /**
+     * Create a smoke ring effect at the specified position and direction
+     * @param {THREE.Vector3} position - The position to create the smoke ring
+     * @param {THREE.Vector3} direction - The direction the weapon is firing
+     */
+    create(position, direction) {
+        // Clear any existing puffs
+        while(this.group.children.length > 0) {
+            let mesh = this.group.children[0];
+            this.group.remove(mesh);
+            if (mesh.geometry) mesh.geometry.dispose();
+            if (mesh.material) mesh.material.dispose();
+        }
+        this.puffs = [];
+        
+        // Position the smoke ring at the muzzle
+        this.group.position.copy(position);
+        this.group.lookAt(position.clone().add(direction));
+        
+        // Create the smoke ring effect
+        this._createSmokeRing();
+        
+        this.active = true;
+    }
+    
+    /**
+     * Create a smoke ring with proper radial particles
+     * @private
+     */
+    _createSmokeRing() {
+        // Main ring particles
+        const numRingParticles = 20; // Adjusted for revolver (smaller than blunderbuss)
+        const initialRingRadius = 0.15; // Smaller initial radius for revolver
+        
+        for (let i = 0; i < numRingParticles; i++) {
+            const angle = (i / numRingParticles) * Math.PI * 2;
+            
+            // Slightly randomize the ring radius for a less perfect circle
+            const radiusVariation = initialRingRadius * (0.9 + Math.random() * 0.2);
+            
+            // Create puff with low-poly icosahedron
+            const geometry = new THREE.IcosahedronGeometry(0.05 + Math.random() * 0.03, 0);
+            const material = this.smokeMaterial.clone();
+            
+            // Compute normals for flat shading
+            geometry.computeVertexNormals();
+            
+            const puffMesh = new THREE.Mesh(geometry, material);
+            
+            // Position in ring formation
+            puffMesh.position.x = Math.cos(angle) * radiusVariation;
+            puffMesh.position.y = Math.sin(angle) * radiusVariation;
+            puffMesh.position.z = 0.05 + Math.random() * 0.1; // Slight forward offset
+            
+            // Random rotation
+            puffMesh.rotation.x = Math.random() * Math.PI * 2;
+            puffMesh.rotation.y = Math.random() * Math.PI * 2;
+            puffMesh.rotation.z = Math.random() * Math.PI * 2;
+            
+            // Start with small scale
+            puffMesh.scale.set(0.05, 0.05, 0.05);
+            
+            this.group.add(puffMesh);
+            
+            // Outward velocity along the ring angle
+            const outwardSpeed = 1.8 + Math.random() * 0.7; // Slightly slower for revolver
+            
+            this.puffs.push({
+                mesh: puffMesh,
+                age: 0,
+                lifespan: 0.6 + Math.random() * 0.3, // Shorter lifespan for revolver
+                velocity: new THREE.Vector3(
+                    Math.cos(angle) * outwardSpeed,
+                    Math.sin(angle) * outwardSpeed,
+                    0.2 + Math.random() * 0.4 // Slight forward movement
+                ),
+                rotationSpeed: new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.05,
+                    (Math.random() - 0.5) * 0.05,
+                    (Math.random() - 0.5) * 0.05
+                ),
+                initialSize: 0.05 + Math.random() * 0.03
+            });
+        }
+        
+        // Add just a few particles near origin for muzzle blast effect
+        for (let i = 0; i < 3; i++) {
+            const geometry = new THREE.IcosahedronGeometry(0.06 + Math.random() * 0.04, 0);
+            const material = this.smokeMaterial.clone();
+            geometry.computeVertexNormals();
+            
+            const puffMesh = new THREE.Mesh(geometry, material);
+            
+            // Position very close to origin with minimal spread
+            const smallOffset = 0.08;
+            puffMesh.position.set(
+                (Math.random() - 0.5) * smallOffset,
+                (Math.random() - 0.5) * smallOffset,
+                0
+            );
+            
+            // Random rotation
+            puffMesh.rotation.x = Math.random() * Math.PI * 2;
+            puffMesh.rotation.y = Math.random() * Math.PI * 2;
+            puffMesh.rotation.z = Math.random() * Math.PI * 2;
+            
+            puffMesh.scale.set(0.05, 0.05, 0.05);
+            
+            this.group.add(puffMesh);
+            
+            // Random outward direction
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 1.5 + Math.random() * 0.6;
+            
+            this.puffs.push({
+                mesh: puffMesh,
+                age: 0,
+                lifespan: 0.4 + Math.random() * 0.2, // Shorter lifespan
+                velocity: new THREE.Vector3(
+                    Math.cos(angle) * speed,
+                    Math.sin(angle) * speed,
+                    0.3 + Math.random() * 0.3
+                ),
+                rotationSpeed: new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.05,
+                    (Math.random() - 0.5) * 0.05,
+                    (Math.random() - 0.5) * 0.05
+                ),
+                initialSize: 0.06 + Math.random() * 0.04
+            });
+        }
+    }
+    
+    /**
+     * Update the smoke ring effect
+     * @param {number} deltaTime - Time elapsed since last frame
+     * @returns {boolean} - Whether the effect is still active
+     */
+    update(deltaTime) {
+        if (!this.active) return false;
+        
+        let allExpired = true;
+        
+        for (let i = 0; i < this.puffs.length; i++) {
+            const puff = this.puffs[i];
+            puff.age += deltaTime;
+            
+            if (puff.age < puff.lifespan) {
+                allExpired = false;
+                
+                // Calculate life ratio
+                const lifeRatio = puff.age / puff.lifespan;
+                
+                // Update position based on velocity
+                puff.mesh.position.x += puff.velocity.x * deltaTime;
+                puff.mesh.position.y += puff.velocity.y * deltaTime;
+                puff.mesh.position.z += puff.velocity.z * deltaTime;
+                
+                // Update rotation
+                puff.mesh.rotation.x += puff.rotationSpeed.x;
+                puff.mesh.rotation.y += puff.rotationSpeed.y;
+                puff.mesh.rotation.z += puff.rotationSpeed.z;
+                
+                // Modified scale curve - quick growth, plateau, then fade
+                let scaleFactor;
+                
+                if (lifeRatio < 0.2) {
+                    // Quick growth phase - 0 to 0.2
+                    scaleFactor = lifeRatio / 0.2;
+                } else if (lifeRatio < 0.7) {
+                    // Maintain size with slight growth - 0.2 to 0.7
+                    scaleFactor = 1.0 + (lifeRatio - 0.2) * 0.3;
+                } else {
+                    // Shrink phase - 0.7 to 1.0
+                    scaleFactor = 1.3 - (lifeRatio - 0.7) * (1.3 / 0.3);
+                }
+                
+                puff.mesh.scale.set(scaleFactor, scaleFactor, scaleFactor);
+                
+                // Handle transparency in final phase
+                if (lifeRatio > 0.7) {
+                    const opacity = 1 - ((lifeRatio - 0.7) / 0.3);
+                    puff.mesh.material.opacity = opacity;
+                }
+                
+                // Adjust drag based on life stage
+                const dragFactor = lifeRatio < 0.5 ? 0.98 : 0.96;
+                puff.velocity.multiplyScalar(dragFactor);
+            } else {
+                // Make expired puffs invisible
+                puff.mesh.visible = false;
+            }
+        }
+        
+        // If all puffs have expired, clean up and set active to false
+        if (allExpired) {
+            // Clean up
+            while(this.group.children.length > 0) {
+                let mesh = this.group.children[0];
+                this.group.remove(mesh);
+                if (mesh.geometry) mesh.geometry.dispose();
+                if (mesh.material) mesh.material.dispose();
+            }
+            this.puffs = [];
+            this.active = false;
+            return false;
+        }
+        
+        return true;
+    }
+    
+    /**
+     * Clean up resources
+     */
+    dispose() {
+        // Clean up all meshes and materials
+        while(this.group.children.length > 0) {
+            let mesh = this.group.children[0];
+            this.group.remove(mesh);
+            if (mesh.geometry) mesh.geometry.dispose();
+            if (mesh.material) mesh.material.dispose();
+        }
+        this.puffs = [];
+        
+        // Remove group from scene
+        if (this.group.parent) {
+            this.group.parent.remove(this.group);
+        }
+    }
+}
 
 ================================================
 File: /public/js/soundManager.js
 ================================================
 export class SoundManager {
-    constructor() {
-      this.sounds = {};
+  constructor() {
+    // For non-positional playback
+    this.sounds = {};
+    // For positional playback using Web Audio API
+    this.buffers = {};
+    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  
+  /**
+   * Loads an audio file and caches it.
+   * Loads both as an HTMLAudioElement (for simple playback)
+   * and as an AudioBuffer (for positional audio).
+   * @param {string} name - Sound key.
+   * @param {string} url - Audio file URL.
+   */
+  loadSound(name, url) {
+    try {
+      // Load using HTMLAudioElement for non-positional playback
+      const audio = new Audio();
+      audio.src = url;
+      audio.load();
+      this.sounds[name] = audio;
+    } catch (error) {
+      console.error(`Error loading sound "${name}" from ${url}:`, error);
     }
     
-    /**
-     * Loads an audio file and caches it.
-     * @param {string} name - Sound key.
-     * @param {string} url - Audio file URL.
-     */
-    loadSound(name, url) {
-      try {
-        const audio = new Audio();
-        audio.src = url;
-        audio.load();
-        this.sounds[name] = audio;
-      } catch (error) {
-        console.error(`Error loading sound "${name}" from ${url}:`, error);
-      }
-    }
-    
-    /**
-     * Plays a cached sound by cloning the node.
-     * @param {string} name - Sound key.
-     */
-    playSound(name) {
-      if (this.sounds[name]) {
-        const audioClone = this.sounds[name].cloneNode();
-        audioClone.play().catch(error => {
-          console.error(`Error playing sound "${name}":`, error);
-        });
-      } else {
-        console.error(`Sound "${name}" not found in cache.`);
-      }
-    }
-    
-    /**
-     * Plays a sequence: after sound1 ends, sound2 plays.
-     * @param {string} sound1 - First sound key.
-     * @param {string} sound2 - Second sound key.
-     */
-    playSoundSequence(sound1, sound2) {
-      if (this.sounds[sound1]) {
-        const audioClone = this.sounds[sound1].cloneNode();
-        audioClone.play().then(() => {
-          audioClone.addEventListener('ended', () => {
-            this.playSound(sound2);
-          });
-        }).catch(error => {
-          console.error(`Error playing sound "${sound1}":`, error);
-        });
-      } else {
-        console.error(`Sound "${sound1}" not found in cache.`);
-      }
+    // Also load using fetch for positional audio
+    fetch(url)
+      .then(response => response.arrayBuffer())
+      .then(arrayBuffer => this.audioContext.decodeAudioData(arrayBuffer))
+      .then(audioBuffer => {
+        this.buffers[name] = audioBuffer;
+      })
+      .catch(error => {
+        console.error(`Error loading sound buffer "${name}" from ${url}:`, error);
+      });
+  }
+  
+  /**
+   * Plays a cached sound by cloning the HTMLAudioElement.
+   * @param {string} name - Sound key.
+   */
+  playSound(name) {
+    if (this.sounds[name]) {
+      const audioClone = this.sounds[name].cloneNode();
+      audioClone.play().catch(error => {
+        console.error(`Error playing sound "${name}":`, error);
+      });
+    } else {
+      console.error(`Sound "${name}" not found in cache.`);
     }
   }
   
+  /**
+   * Plays a sound at a given 3D position using the Web Audio API.
+   * @param {string} name - Sound key.
+   * @param {THREE.Vector3} position - 3D position for the sound.
+   */
+  playSoundAt(name, position) {
+    if (!this.buffers[name]) {
+      console.error(`Positional sound "${name}" not found in buffers.`);
+      return;
+    }
+    try {
+      const source = this.audioContext.createBufferSource();
+      source.buffer = this.buffers[name];
+      
+      const panner = this.audioContext.createPanner();
+      panner.panningModel = 'HRTF';
+      panner.distanceModel = 'inverse';
+      panner.refDistance = 1;
+      panner.maxDistance = 10000;
+      panner.rolloffFactor = 1;
+      panner.coneInnerAngle = 360;
+      panner.coneOuterAngle = 0;
+      panner.coneOuterGain = 0;
+      panner.setPosition(position.x, position.y, position.z);
+      
+      source.connect(panner);
+      panner.connect(this.audioContext.destination);
+      source.start(0);
+    } catch (error) {
+      console.error(`Error playing positional sound "${name}":`, error);
+    }
+  }
+  
+  /**
+   * Plays a sequence: after sound1 ends, sound2 plays.
+   * @param {string} sound1 - First sound key.
+   * @param {string} sound2 - Second sound key.
+   */
+  playSoundSequence(sound1, sound2) {
+    if (this.sounds[sound1]) {
+      const audioClone = this.sounds[sound1].cloneNode();
+      audioClone.play().then(() => {
+        audioClone.addEventListener('ended', () => {
+          this.playSound(sound2);
+        });
+      }).catch(error => {
+        console.error(`Error playing sound "${sound1}":`, error);
+      });
+    } else {
+      console.error(`Sound "${sound1}" not found in cache.`);
+    }
+  }
+}
+
 
 ================================================
 File: /public/js/ui.js
