@@ -25,6 +25,32 @@ const MAX_ARENAS = 5;
 const quickDrawQueues = Array(MAX_ARENAS).fill(null).map(() => []);  // Array of queues for each arena
 const quickDrawDuels = new Map(); // Map of duelId -> { player1Id, player2Id, state, arenaIndex, ... }
 
+// Anti-cheat: Game physics constants
+const GAME_CONSTANTS = {
+  // Weapon constraints
+  BULLET_SPEED: 80,           // Bullet speed units/second
+  MAX_BULLET_DISTANCE: 100,   // Maximum distance a bullet can travel
+  WEAPON_COOLDOWN: 250,       // Minimum time between shots in ms
+  RELOAD_TIME: 4000,          // Time required to reload in ms
+  DAMAGE_PER_HIT: 20,         // Health points reduced per hit
+  // Town boundaries
+  TOWN_WIDTH: 60,             // Width of the town
+  TOWN_LENGTH: 100,           // Length of the town
+  // Physics update rate
+  PHYSICS_UPDATE_INTERVAL: 16 // ms (approx 60fps)
+};
+
+// Anti-cheat: Active bullets map
+const activeBullets = new Map(); // bulletId -> {sourcePlayerId, position, direction, timeCreated, etc}
+let nextBulletId = 1;
+
+// Anti-cheat: Timeout tracking (for rate limiting and cooldowns)
+const playerTimeouts = new Map(); // playerId -> { lastShot, lastReload, lastTeleport, etc }
+
+// Anti-cheat: Nonce tracking (for anti-replay protection)
+const playerNonces = new Map(); // playerId -> Set of used nonces
+const playerSequences = new Map(); // playerId -> last sequence number
+
 // On new connection
 wss.on('connection', (ws, req) => {
   // Parse sessionId from query string
@@ -63,8 +89,26 @@ wss.on('connection', (ws, req) => {
     quickDrawLobbyIndex: -1, // -1 means not in any lobby
     inQuickDrawQueue: false,
     inQuickDrawDuel: false,
-    quickDrawDuelId: null
+    quickDrawDuelId: null,
+    // Additional player state
+    bullets: 6,
+    maxBullets: 6,
+    lastUpdateTime: Date.now()
   });
+
+  // Anti-cheat: Initialize timeout tracking
+  playerTimeouts.set(playerId, {
+    lastShot: 0,
+    lastMovement: 0,
+    lastReload: 0,
+    lastPositionUpdate: 0,
+    reloadStartTime: 0,
+    isReloading: false
+  });
+
+  // Anti-cheat: Initialize nonce/sequence tracking
+  playerNonces.set(playerId, new Set());
+  playerSequences.set(playerId, 0);
 
   // Send init data to this client (their ID + existing players)
   ws.send(JSON.stringify({
@@ -101,73 +145,63 @@ wss.on('connection', (ws, req) => {
 
       // Update lastActivity
       const player = players.get(playerId);
-      if (player) {
-        player.lastActivity = Date.now();
+      if (!player) return;
+      
+      player.lastActivity = Date.now();
+
+      // Anti-cheat: Sequence number validation
+      if (data.sequenceNumber !== undefined) {
+        const lastSequence = playerSequences.get(playerId) || 0;
+        
+        // Reject if sequence number is not greater than the last one
+        if (data.sequenceNumber <= lastSequence) {
+          console.log(`Rejecting message with old sequence number: ${data.sequenceNumber} (last: ${lastSequence})`);
+          return sendErrorToPlayer(playerId, "Invalid sequence number", false);
+        }
+        
+        // Update the last sequence number
+        playerSequences.set(playerId, data.sequenceNumber);
+      }
+
+      // Anti-cheat: Nonce validation for critical actions
+      if ((data.type === 'shoot' || data.type === 'playerHit') && data.nonce) {
+        const playerNonceSet = playerNonces.get(playerId);
+        
+        // Check if nonce has been used before
+        if (playerNonceSet && playerNonceSet.has(data.nonce)) {
+          console.log(`Rejecting repeated nonce: ${data.nonce} from player ${playerId}`);
+          return sendErrorToPlayer(playerId, "Duplicate nonce detected", false);
+        }
+        
+        // Store the nonce
+        if (playerNonceSet) {
+          playerNonceSet.add(data.nonce);
+          
+          // Limit nonce set size to prevent memory issues
+          if (playerNonceSet.size > 1000) {
+            // Keep only the most recent 500 nonces
+            const nonceArray = Array.from(playerNonceSet);
+            const newNonceSet = new Set(nonceArray.slice(nonceArray.length - 500));
+            playerNonces.set(playerId, newNonceSet);
+          }
+        }
       }
 
       switch (data.type) {
         case 'update':
-          // Update local state (do not allow client to change health directly)
-          if (player) {
-            player.position = data.position || player.position;
-            player.rotation = data.rotation || player.rotation;
-            player.isAiming = data.isAiming !== undefined ? data.isAiming : player.isAiming;
-            player.isShooting = data.isShooting !== undefined ? data.isShooting : player.isShooting;
-            player.isReloading = data.isReloading !== undefined ? data.isReloading : player.isReloading;
-            
-            // Update QuickDraw lobby index if provided
-            if (data.quickDrawLobbyIndex !== undefined) {
-              player.quickDrawLobbyIndex = data.quickDrawLobbyIndex;
-            }
-            
-            // Broadcast to others including current health and Quick Draw info
-            broadcastToOthers(playerId, {
-              type: 'playerUpdate',
-              id: playerId,
-              position: player.position,
-              rotation: player.rotation,
-              isAiming: player.isAiming,
-              isShooting: player.isShooting,
-              isReloading: player.isReloading,
-              health: player.health,
-              quickDrawLobbyIndex: player.quickDrawLobbyIndex
-            });
-          }
+          handlePlayerUpdate(playerId, data);
           break;
 
         case 'shoot':
-          // Notify others that this player fired
-          broadcastToOthers(playerId, {
-            type: 'playerShoot',
-            id: playerId,
-            bulletData: data.bulletData
-          });
+          handlePlayerShoot(playerId, data);
           break;
 
         case 'playerHit':
-          // data.targetId, data.hitData
-          const targetId = parseInt(data.targetId);
-          console.log(`Player ${targetId} was hit by player ${playerId}`);
-          const targetPlayer = players.get(targetId);
-          if (targetPlayer && targetPlayer.ws.readyState === WebSocket.OPEN) {
-            // Reduce health by a fixed amount (e.g., 20)
-            targetPlayer.health = Math.max(targetPlayer.health - 20, 0);
-            // Inform the target
-            targetPlayer.ws.send(JSON.stringify({
-              type: 'hit',
-              sourceId: playerId,
-              hitData: data.hitData,
-              health: targetPlayer.health
-            }));
-          }
-          // Broadcast a "playerHit" to everyone with updated health
-          broadcastToAll({
-            type: 'playerHit',
-            targetId: data.targetId,
-            sourceId: playerId,
-            hitPosition: data.hitData.position,
-            health: targetPlayer ? targetPlayer.health : 0
-          });
+          handlePlayerHit(playerId, data);
+          break;
+
+        case 'reload':
+          handlePlayerReload(playerId, data);
           break;
 
         case 'ping':
@@ -214,6 +248,438 @@ wss.on('connection', (ws, req) => {
   updatePlayerCount();
 });
 
+// Handle player updates - removed speed/position validation
+function handlePlayerUpdate(playerId, data) {
+  const player = players.get(playerId);
+  const timeouts = playerTimeouts.get(playerId);
+  
+  if (!player || !timeouts) return;
+  
+  const now = Date.now();
+  
+  // Anti-cheat: Basic rate limit for position updates only
+  if (now - timeouts.lastPositionUpdate < 16) { // Max 60 updates per second
+    return; // Silently ignore too frequent updates
+  }
+  timeouts.lastPositionUpdate = now;
+  
+  // Update player data
+  if (data.position) {
+    player.position = data.position;
+  }
+  
+  // Update other player properties
+  player.rotation = data.rotation || player.rotation;
+  player.isAiming = data.isAiming !== undefined ? data.isAiming : player.isAiming;
+  player.isReloading = data.isReloading !== undefined ? data.isReloading : player.isReloading;
+  
+  // Update QuickDraw lobby index if provided
+  if (data.quickDrawLobbyIndex !== undefined) {
+    player.quickDrawLobbyIndex = data.quickDrawLobbyIndex;
+  }
+  
+  if (data.isSprinting !== undefined) {
+    player.isSprinting = data.isSprinting;
+  }
+  
+  // Broadcast valid update to others
+  broadcastToOthers(playerId, {
+    type: 'playerUpdate',
+    id: playerId,
+    position: player.position,
+    rotation: player.rotation,
+    isAiming: player.isAiming,
+    isShooting: player.isShooting,
+    isReloading: player.isReloading,
+    health: player.health,
+    quickDrawLobbyIndex: player.quickDrawLobbyIndex
+  });
+}
+
+// Anti-cheat: Handle player shooting with validation and server-side trajectory
+function handlePlayerShoot(playerId, data) {
+  const player = players.get(playerId);
+  const timeouts = playerTimeouts.get(playerId);
+  
+  if (!player || !timeouts) return;
+  
+  const now = Date.now();
+  
+  // Anti-cheat: Check if player has bullets
+  if (player.bullets <= 0) {
+    return sendErrorToPlayer(playerId, "Cannot shoot: out of ammo", false);
+  }
+  
+  // Anti-cheat: Check if player is reloading
+  if (player.isReloading) {
+    return sendErrorToPlayer(playerId, "Cannot shoot while reloading", false);
+  }
+  
+  // Anti-cheat: Enforce weapon cooldown
+  if (now - timeouts.lastShot < GAME_CONSTANTS.WEAPON_COOLDOWN) {
+    console.log(`Rate limit exceeded: Player ${playerId} attempted to shoot too quickly`);
+    return sendErrorToPlayer(playerId, "Shooting too fast", false);
+  }
+  
+  // Quick Draw gun lock validation
+  if (player.inQuickDrawDuel && player.quickDrawDuelId) {
+    const duel = quickDrawDuels.get(player.quickDrawDuelId);
+    if (duel && duel.state !== 'draw') {
+      return sendErrorToPlayer(playerId, "Cannot shoot before draw signal", false);
+    }
+  }
+  
+  // Validate bullet data
+  if (!data.bulletData || !data.bulletData.position || !data.bulletData.direction) {
+    return sendErrorToPlayer(playerId, "Invalid bullet data", false);
+  }
+  
+  // Validate bullet direction (must be normalized)
+  const direction = data.bulletData.direction;
+  const dirMagnitude = Math.sqrt(direction.x*direction.x + direction.y*direction.y + direction.z*direction.z);
+  
+  if (Math.abs(dirMagnitude - 1) > 0.01) {
+    console.log(`Invalid bullet direction: not normalized for player ${playerId} (magnitude: ${dirMagnitude.toFixed(2)})`);
+    
+    // Normalize the direction
+    direction.x /= dirMagnitude;
+    direction.y /= dirMagnitude;
+    direction.z /= dirMagnitude;
+  }
+  
+  // All validations passed, decrement bullet count
+  player.bullets--;
+  
+  // Update lastShot timestamp
+  timeouts.lastShot = now;
+  
+  // Create a server-side bullet
+  const bulletId = nextBulletId++;
+  
+  const bullet = {
+    id: bulletId,
+    sourcePlayerId: playerId,
+    position: data.bulletData.position,
+    direction: direction,
+    distanceTraveled: 0,
+    maxDistance: GAME_CONSTANTS.MAX_BULLET_DISTANCE,
+    speed: GAME_CONSTANTS.BULLET_SPEED,
+    timeCreated: now,
+    active: true
+  };
+  
+  // Add to active bullets
+  activeBullets.set(bulletId, bullet);
+  
+  // Notify clients of the shot
+  broadcastToAll({
+    type: 'playerShoot',
+    id: playerId,
+    bulletId: bulletId,
+    bulletData: {
+      position: data.bulletData.position,
+      direction: direction
+    }
+  });
+  
+  // Update the player's shooting state
+  player.isShooting = true;
+  
+  // Reset shooting state after a short delay
+  setTimeout(() => {
+    if (players.has(playerId)) {
+      players.get(playerId).isShooting = false;
+    }
+  }, 100);
+}
+
+// Anti-cheat: Handle player reload with validation
+function handlePlayerReload(playerId, data) {
+  const player = players.get(playerId);
+  const timeouts = playerTimeouts.get(playerId);
+  
+  if (!player || !timeouts) return;
+  
+  const now = Date.now();
+  
+  // Check if player is already reloading
+  if (player.isReloading) {
+    return sendErrorToPlayer(playerId, "Already reloading", false);
+  }
+  
+  // Check if player has full ammo
+  if (player.bullets >= player.maxBullets) {
+    return sendErrorToPlayer(playerId, "Ammo already full", false);
+  }
+  
+  // Start reload process
+  player.isReloading = true;
+  timeouts.isReloading = true;
+  timeouts.reloadStartTime = now;
+  
+  // Notify all players about reload start
+  broadcastToAll({
+    type: 'playerUpdate',
+    id: playerId,
+    isReloading: true
+  });
+  
+  // Schedule reload completion
+  setTimeout(() => {
+    if (!players.has(playerId)) return;
+    
+    const timeouts = playerTimeouts.get(playerId);
+    if (!timeouts) return;
+    
+    // Check if player is still reloading (could have been cancelled)
+    if (timeouts.isReloading) {
+      const player = players.get(playerId);
+      
+      // Complete reload
+      player.bullets = player.maxBullets;
+      player.isReloading = false;
+      timeouts.isReloading = false;
+      
+      // Notify all players about reload completion
+      broadcastToAll({
+        type: 'playerUpdate',
+        id: playerId,
+        isReloading: false,
+        bullets: player.maxBullets
+      });
+    }
+  }, GAME_CONSTANTS.RELOAD_TIME);
+}
+
+// Anti-cheat: Handle player hit validation
+function handlePlayerHit(playerId, data) {
+  if (!data.targetId) return;
+  
+  const targetId = parseInt(data.targetId);
+  const sourcePlayer = players.get(playerId);
+  const targetPlayer = players.get(targetId);
+  
+  if (!sourcePlayer || !targetPlayer) return;
+  
+  // Anti-cheat: Validate the hit using server-side bullets
+  let validHit = false;
+  let bulletId = null;
+  
+  // If bulletId is provided, validate against that specific bullet
+  if (data.bulletId) {
+    const bullet = activeBullets.get(data.bulletId);
+    if (bullet && bullet.sourcePlayerId === playerId && bullet.active) {
+      // Check if the bullet is close enough to the target
+      validHit = isPlayerHitByBullet(targetPlayer, bullet);
+      if (validHit) {
+        bulletId = data.bulletId;
+      }
+    }
+  } else {
+    // Otherwise, check all active bullets from this player
+    for (const [bid, bullet] of activeBullets.entries()) {
+      if (bullet.sourcePlayerId === playerId && bullet.active) {
+        if (isPlayerHitByBullet(targetPlayer, bullet)) {
+          validHit = true;
+          bulletId = bid;
+          break;
+        }
+      }
+    }
+  }
+  
+  // If no valid hit was found, reject the hit claim
+  if (!validHit) {
+    console.log(`Rejecting invalid hit claim from player ${playerId} on ${targetId}`);
+    return sendErrorToPlayer(playerId, "Invalid hit claim", false);
+  }
+  
+  console.log(`Player ${targetId} was hit by player ${playerId}'s bullet ${bulletId}`);
+  
+  // Mark the bullet as inactive
+  if (bulletId !== null) {
+    const bullet = activeBullets.get(bulletId);
+    if (bullet) {
+      bullet.active = false;
+    }
+  }
+  
+  // Apply hit effects: reduce health
+  targetPlayer.health = Math.max(targetPlayer.health - GAME_CONSTANTS.DAMAGE_PER_HIT, 0);
+  
+  // Inform the target
+  if (targetPlayer.ws.readyState === WebSocket.OPEN) {
+    targetPlayer.ws.send(JSON.stringify({
+      type: 'hit',
+      sourceId: playerId,
+      hitData: data.hitData,
+      health: targetPlayer.health
+    }));
+  }
+  
+  // Broadcast the hit to everyone
+  broadcastToAll({
+    type: 'playerHit',
+    targetId: targetId,
+    sourceId: playerId,
+    hitPosition: data.hitData.position,
+    health: targetPlayer.health,
+    bulletId: bulletId
+  });
+  
+  // Check for player death
+  if (targetPlayer.health <= 0) {
+    handlePlayerDeath(targetId, playerId);
+  }
+}
+
+// Anti-cheat: Bullet-player collision detection
+function isPlayerHitByBullet(player, bullet) {
+  // Calculate player hitbox (simple cylinder)
+  const playerRadius = 0.5;  // horizontal radius
+  const playerHeight = 2.0;  // vertical height
+  
+  // Calculate distance from bullet to player (horizontal only)
+  const dx = bullet.position.x - player.position.x;
+  const dz = bullet.position.z - player.position.z;
+  const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+  
+  // Check if bullet is within player's horizontal radius
+  if (horizontalDist > playerRadius) {
+    return false;
+  }
+  
+  // Check if bullet is within player's vertical bounds
+  const bulletY = bullet.position.y;
+  const playerBottom = player.position.y - 1.6; // Adjust based on your coordinate system
+  const playerTop = playerBottom + playerHeight;
+  
+  if (bulletY < playerBottom || bulletY > playerTop) {
+    return false;
+  }
+  
+  // Bullet is inside player's hitbox
+  return true;
+}
+
+// Anti-cheat: Handle player death
+function handlePlayerDeath(playerId, killedById) {
+  const player = players.get(playerId);
+  if (!player) return;
+  
+  console.log(`Player ${playerId} was killed by player ${killedById}`);
+  
+  // If player is in Quick Draw duel, end the duel
+  if (player.inQuickDrawDuel && player.quickDrawDuelId) {
+    const duel = quickDrawDuels.get(player.quickDrawDuelId);
+    if (duel) {
+      endQuickDrawDuel(player.quickDrawDuelId, killedById);
+    }
+  }
+  
+  // Respawn the player
+  respawnPlayer(playerId);
+}
+
+// Anti-cheat: Respawn a player
+function respawnPlayer(playerId) {
+  const player = players.get(playerId);
+  if (!player) return;
+  
+  // Reset player state
+  player.health = 100;
+  player.bullets = player.maxBullets;
+  player.isReloading = false;
+  player.isAiming = false;
+  player.isShooting = false;
+  
+  // Generate random spawn position within town
+  const spawnX = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_WIDTH * 0.8;
+  const spawnY = 1.6;
+  const spawnZ = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_LENGTH * 0.8;
+  
+  // Set spawn position
+  player.position = { x: spawnX, y: spawnY, z: spawnZ };
+  
+  // Reset QuickDraw-related state if not in a duel
+  if (!player.inQuickDrawDuel) {
+    player.quickDrawLobbyIndex = -1;
+  }
+  
+  // Notify the player they're respawning
+  if (player.ws.readyState === WebSocket.OPEN) {
+    player.ws.send(JSON.stringify({
+      type: 'respawn',
+      position: player.position,
+      health: player.health,
+      bullets: player.bullets
+    }));
+  }
+  
+  // Broadcast the respawn to all players
+  broadcastToAll({
+    type: 'playerUpdate',
+    id: playerId,
+    position: player.position,
+    health: player.health,
+    isReloading: false,
+    isAiming: false
+  });
+}
+
+// Anti-cheat: Check if position is within town boundaries
+function isPositionInTown(position) {
+  return (
+    position.x >= -GAME_CONSTANTS.TOWN_WIDTH / 2 &&
+    position.x <= GAME_CONSTANTS.TOWN_WIDTH / 2 &&
+    position.z >= -GAME_CONSTANTS.TOWN_LENGTH / 2 &&
+    position.z <= GAME_CONSTANTS.TOWN_LENGTH / 2
+  );
+}
+
+// Anti-cheat: Check if position is in arena
+function isPositionInArena(position, arenaIndex) {
+  // Define arena positions and radius
+  const arenaRadius = 15;
+  
+  // Calculate arena center position based on index
+  const spacingX = 50;
+  const baseZ = GAME_CONSTANTS.TOWN_LENGTH + 50;
+  
+  const offsetX = (arenaIndex - 2) * spacingX; // Center on zero, spread outward
+  const arenaCenter = { x: offsetX, y: 0, z: baseZ };
+  
+  // Check if point is inside arena (horizontally)
+  const dx = position.x - arenaCenter.x;
+  const dz = position.z - arenaCenter.z;
+  const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+  
+  return horizontalDist < arenaRadius;
+}
+
+// Anti-cheat: Send position correction to player
+function sendPositionCorrection(playerId, correctPosition) {
+  const player = players.get(playerId);
+  if (!player || player.ws.readyState !== WebSocket.OPEN) return;
+  
+  player.ws.send(JSON.stringify({
+    type: 'positionCorrection',
+    position: correctPosition
+  }));
+}
+
+// Anti-cheat: Send error message to player
+function sendErrorToPlayer(playerId, message, fatal = false) {
+  const player = players.get(playerId);
+  if (!player || player.ws.readyState !== WebSocket.OPEN) return;
+  
+  player.ws.send(JSON.stringify({
+    type: 'error',
+    message: message,
+    fatal: fatal
+  }));
+}
+
 // Cleanup a disconnected or stale player
 function cleanupPlayer(playerId) {
   const player = players.get(playerId);
@@ -247,6 +713,11 @@ function cleanupPlayer(playerId) {
     }
     
     players.delete(playerId);
+    
+    // Anti-cheat: Clean up associated data
+    playerTimeouts.delete(playerId);
+    playerNonces.delete(playerId);
+    playerSequences.delete(playerId);
 
     // Notify all that the player left
     broadcastToAll({
@@ -639,6 +1110,115 @@ function endQuickDrawDuel(duelId, winnerId) {
   quickDrawDuels.delete(duelId);
 }
 
+// Anti-cheat: Server-side bullet physics update
+function updateBullets() {
+  const now = Date.now();
+  
+  // Update each active bullet
+  for (const [bulletId, bullet] of activeBullets.entries()) {
+    if (!bullet.active) continue;
+    
+    // Calculate time since last update
+    const deltaTime = (now - bullet.timeCreated) / 1000;
+    
+    // Calculate new position
+    const distanceThisFrame = bullet.speed * deltaTime;
+    bullet.position.x += bullet.direction.x * distanceThisFrame;
+    bullet.position.y += bullet.direction.y * distanceThisFrame;
+    bullet.position.z += bullet.direction.z * distanceThisFrame;
+    
+    // Update total distance traveled
+    bullet.distanceTraveled += distanceThisFrame;
+    
+    // Check if bullet has traveled too far
+    if (bullet.distanceTraveled >= bullet.maxDistance) {
+      bullet.active = false;
+      continue;
+    }
+    
+    // Check for collisions with terrain (ground or town boundary)
+    if (bullet.position.y <= 0.1) {
+      // Hit ground
+      bullet.active = false;
+      broadcastBulletImpact(bulletId, 'ground', null, bullet.position);
+      continue;
+    }
+    
+    // Check town boundaries (if not in a Quick Draw arena)
+    if (!isPositionInTown(bullet.position)) {
+      // Only check arena boundaries if source player is in a duel
+      const sourcePlayer = players.get(bullet.sourcePlayerId);
+      if (!sourcePlayer || !sourcePlayer.inQuickDrawDuel) {
+        bullet.active = false;
+        broadcastBulletImpact(bulletId, 'boundary', null, bullet.position);
+        continue;
+      }
+    }
+    
+    // Check for collisions with players
+    for (const [playerId, player] of players.entries()) {
+      // Skip collision with bullet owner
+      if (playerId === bullet.sourcePlayerId) continue;
+      
+      // Skip collisions across arena boundary
+      const bulletSourcePlayer = players.get(bullet.sourcePlayerId);
+      const targetInDuel = player.inQuickDrawDuel;
+      const sourceInDuel = bulletSourcePlayer ? bulletSourcePlayer.inQuickDrawDuel : false;
+      
+      // Only allow hits if both in same state (both in arena or both outside)
+      if (targetInDuel !== sourceInDuel) {
+        continue;
+      }
+      
+      // Check for collision
+      if (isPlayerHitByBullet(player, bullet)) {
+        bullet.active = false;
+        
+        // Handle the hit
+        player.health = Math.max(player.health - GAME_CONSTANTS.DAMAGE_PER_HIT, 0);
+        
+        // Notify the hit player
+        if (player.ws.readyState === WebSocket.OPEN) {
+          player.ws.send(JSON.stringify({
+            type: 'hit',
+            sourceId: bullet.sourcePlayerId,
+            bulletId: bulletId,
+            health: player.health
+          }));
+        }
+        
+        // Broadcast hit to all players
+        broadcastBulletImpact(bulletId, 'player', playerId, bullet.position);
+        
+        // Check for player death
+        if (player.health <= 0) {
+          handlePlayerDeath(playerId, bullet.sourcePlayerId);
+        }
+        
+        break;
+      }
+    }
+  }
+  
+  // Clean up inactive bullets
+  for (const [bulletId, bullet] of activeBullets.entries()) {
+    if (!bullet.active) {
+      activeBullets.delete(bulletId);
+    }
+  }
+}
+
+// Anti-cheat: Broadcast bullet impact to all players
+function broadcastBulletImpact(bulletId, hitType, targetId, position) {
+  broadcastToAll({
+    type: 'bulletImpact',
+    bulletId: bulletId,
+    hitType: hitType,
+    targetId: targetId,
+    position: position
+  });
+}
+
 // Heartbeat to remove stale connections
 const HEARTBEAT_INTERVAL = 30000; // 30s
 const CONNECTION_TIMEOUT = 60000; // 60s
@@ -658,6 +1238,9 @@ setInterval(() => {
     }
   }
 }, HEARTBEAT_INTERVAL);
+
+// Anti-cheat: Run physics update loop
+setInterval(updateBullets, GAME_CONSTANTS.PHYSICS_UPDATE_INTERVAL);
 
 // Start server
 server.listen(PORT, () => {

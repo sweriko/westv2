@@ -293,7 +293,7 @@ export class ThirdPersonModel {
   }
 
   /**
-   * Smoothly updates the model’s position and rotation toward target values.
+   * Smoothly updates the model's position and rotation toward target values.
    * @param {number} deltaTime - Time elapsed since last frame.
    */
   animateMovement(deltaTime) {
@@ -308,31 +308,35 @@ export class ThirdPersonModel {
    * @param {Object} playerData
    */
   update(playerData) {
+    if (!playerData) return;
+    
     // Update target position from network data (shifting from eye-level to model base)
-    const newPos = new THREE.Vector3(
-      playerData.position.x,
-      playerData.position.y - 1.6,
-      playerData.position.z
-    );
-    this.targetPosition.copy(newPos);
+    if (playerData.position) {
+      const newPos = new THREE.Vector3(
+        playerData.position.x,
+        playerData.position.y - 1.6,
+        playerData.position.z
+      );
+      this.targetPosition.copy(newPos);
+
+      // Check if walking based on movement
+      this.isWalking = newPos.distanceTo(this.lastPosition) > 0.01;
+      this.lastPosition.copy(newPos);
+    }
 
     // Update target rotation with a 180° offset for proper facing
     if (playerData.rotation && playerData.rotation.y !== undefined) {
       this.targetRotation = playerData.rotation.y + Math.PI;
     }
 
-    // Check if walking based on movement.
-    this.isWalking = newPos.distanceTo(this.lastPosition) > 0.01;
-    this.lastPosition.copy(newPos);
-
-    // Set pose based on whether the player is aiming.
+    // Set pose based on whether the player is aiming
     if (playerData.isAiming) {
       this.setAimingPose();
     } else {
       this.setNormalPose();
     }
 
-    // If reloading, play the reload animation.
+    // If reloading, play the reload animation
     if (playerData.isReloading) {
       this.playReloadAnimation();
     }
@@ -544,6 +548,6 @@ export class ThirdPersonModel {
   takeDamage(amount) {
     this.health = Math.max(this.health - amount, 0);
     console.log(`Remote player ${this.playerId} took ${amount} damage. Health: ${this.health}`);
-    // Optionally, you could change the model’s appearance or remove it on death.
+    // Optionally, you could change the model's appearance or remove it on death.
   }
 }

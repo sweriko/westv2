@@ -30,7 +30,7 @@ export class MultiplayerManager {
     // When we get the "init" message, set local player ID and add any existing players
     networkManager.onInit = (initData) => {
       this.localPlayerId = initData.id;
-      console.log(`Local player ID: ${this.localPlayerId}`);
+      console.log(`Local player initialized with ID: ${this.localPlayerId}`);
 
       // Add all existing players (these are remote from our POV)
       initData.players.forEach(playerData => {
@@ -63,24 +63,37 @@ export class MultiplayerManager {
 
     // We no longer handle bullets here (onPlayerShoot) – that's handled in main.js
 
-    // Player got hit (local player)
-    networkManager.onPlayerHit = (sourceId, hitData) => {
+    // Anti-cheat: Player got hit (local player) - server validated
+    networkManager.onPlayerHit = (sourceId, hitData, newHealth) => {
       console.log(`I was hit by player ${sourceId}!`);
       this.showHitFeedback();
-      // Reduce local player's health (assumes window.localPlayer is set)
-      if (window.localPlayer && typeof window.localPlayer.takeDamage === 'function') {
-         window.localPlayer.takeDamage(20);
+      
+      // Reduce local player's health (using value from server)
+      if (window.localPlayer) {
+        if (newHealth !== undefined) {
+          window.localPlayer.health = newHealth;
+        } else {
+          // Fallback to default damage amount if server didn't provide health
+          window.localPlayer.takeDamage(20);
+        }
       }
     };
 
-    // Broadcast that some player was hit (for visual effects and health updates)
-    networkManager.onPlayerHitBroadcast = (targetId, sourceId, hitPos) => {
+    // Anti-cheat: Broadcast that some player was hit (server validated)
+    networkManager.onPlayerHitBroadcast = (targetId, sourceId, hitPos, newHealth) => {
       console.log(`Player ${targetId} was hit by ${sourceId}`);
       const tPlayer = this.remotePlayers.get(parseInt(targetId));
       if (tPlayer) {
         tPlayer.showHitFeedback();
-        if (typeof tPlayer.takeDamage === 'function') {
-          tPlayer.takeDamage(20);
+        
+        // Update health directly from server value if provided
+        if (newHealth !== undefined) {
+          tPlayer.health = newHealth;
+        } else {
+          // Fallback to default damage amount
+          if (typeof tPlayer.takeDamage === 'function') {
+            tPlayer.takeDamage(20);
+          }
         }
       }
     };

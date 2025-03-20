@@ -92,6 +92,11 @@ export class Player {
 
     // Quick Draw lobby information
     this.quickDrawLobbyIndex = -1; // -1 means not in a lobby
+    
+    // Anti-cheat: Server reconciliation
+    this.serverPosition = new THREE.Vector3();
+    this.isReconciling = false;
+    this.reconciliationLerpFactor = 0.3; // How quickly to move to server position
 
     // Initialize network & UI
     this.initNetworking();
@@ -134,13 +139,56 @@ export class Player {
       this.id = initData.id;
       console.log(`Local player initialized with ID: ${this.id}`);
     };
-
-    // We also do not handle remote players here. That is done in the MultiplayerManager.
+    
+    // Anti-cheat: Handle position corrections from server
+    networkManager.onPositionCorrection = (correctedPosition) => {
+      console.log("Received position correction from server:", correctedPosition);
+      this.serverPosition.set(
+        correctedPosition.x,
+        correctedPosition.y,
+        correctedPosition.z
+      );
+      this.isReconciling = true;
+    };
+    
+    // Anti-cheat: Handle respawn from server
+    networkManager.onRespawn = (position, health, bullets) => {
+      console.log("Server-initiated respawn");
+      
+      // Set position
+      this.group.position.copy(position);
+      this.previousPosition.copy(position);
+      
+      // Update health and bullets
+      this.health = health || 100;
+      this.bullets = bullets || this.maxBullets;
+      
+      // Reset states
+      this.isReloading = false;
+      this.isAiming = false;
+      this.velocity.y = 0;
+      this.canAim = true;
+      
+      // Update UI
+      updateHealthUI(this);
+      updateAmmoUI(this);
+    };
   }
 
   update(deltaTime) {
     // Store previous position before movement for collision detection
     this.previousPosition.copy(this.group.position);
+    
+    // Anti-cheat: Handle server reconciliation
+    if (this.isReconciling) {
+      // Smoothly move to server-corrected position
+      this.group.position.lerp(this.serverPosition, this.reconciliationLerpFactor);
+      
+      // Stop reconciling when close enough
+      if (this.group.position.distanceTo(this.serverPosition) < 0.1) {
+        this.isReconciling = false;
+      }
+    }
     
     // Smoothly interpolate the gun offset & FOV
     const targetOffset = this.isAiming && this.canAim ? this.aimOffset : this.holsterOffset;
@@ -379,6 +427,7 @@ export class Player {
       },
       isAiming: this.isAiming,
       isReloading: this.isReloading,
+      isSprinting: this.isSprinting,
       health: this.health,
       quickDrawLobbyIndex: this.quickDrawLobbyIndex
     });
@@ -492,6 +541,9 @@ export class Player {
         ejectShell(this, this.scene, this.soundManager);
       }, i * 200);
     }
+    
+    // Anti-cheat: Notify server about reload start
+    networkManager.sendReload();
 
     const startTime = performance.now();
     const updateReload = (currentTime) => {

@@ -21,6 +21,11 @@ export class NetworkManager {
     this.onClose = null;
     this.onError = null;
 
+    // Anti-cheat callbacks
+    this.onPositionCorrection = null;// When server corrects client position
+    this.onBulletImpact = null;      // When a bullet hits something
+    this.onRespawn = null;           // When player respawns
+
     // Automatic reconnect attempts
     this.connectionAttempts = 0;
     this.maxConnectionAttempts = 5;
@@ -28,6 +33,12 @@ export class NetworkManager {
 
     // Unique sessionId to prevent multiple tabs from colliding
     this.sessionId = this._generateSessionId();
+    
+    // Anti-cheat: Sequence number for message ordering
+    this.sequenceNumber = 0;
+    
+    // Anti-cheat: Map to track outgoing messages that need nonces
+    this.pendingMessages = new Map();
   }
 
   /**
@@ -35,6 +46,15 @@ export class NetworkManager {
    */
   _generateSessionId() {
     return Date.now().toString(36) + Math.random().toString(36).substring(2);
+  }
+  
+  /**
+   * Generates a unique nonce for secure actions.
+   * @returns {string} A unique nonce
+   */
+  _generateNonce() {
+    return Date.now().toString(36) + Math.random().toString(36).substring(2) + 
+           Math.random().toString(36).substring(2);
   }
 
   /**
@@ -191,6 +211,8 @@ export class NetworkManager {
               message.isReloading !== undefined ? message.isReloading : existing.isReloading;
             existing.quickDrawLobbyIndex =
               message.quickDrawLobbyIndex !== undefined ? message.quickDrawLobbyIndex : existing.quickDrawLobbyIndex;
+            existing.health =
+              message.health !== undefined ? message.health : existing.health;
           }
           if (this.onPlayerUpdate) {
             this.onPlayerUpdate(message.id, existing);
@@ -201,7 +223,7 @@ export class NetworkManager {
       // Remote player fired
       case 'playerShoot':
         if (this.onPlayerShoot) {
-          this.onPlayerShoot(message.id, message.bulletData);
+          this.onPlayerShoot(message.id, message.bulletData, message.bulletId);
         }
         break;
 
@@ -216,7 +238,7 @@ export class NetworkManager {
       case 'hit':
         console.log(`I was hit by player ${message.sourceId}`);
         if (this.onPlayerHit) {
-          this.onPlayerHit(message.sourceId, message.hitData);
+          this.onPlayerHit(message.sourceId, message.hitData, message.health);
         }
         break;
 
@@ -227,8 +249,37 @@ export class NetworkManager {
           this.onPlayerHitBroadcast(
             message.targetId,
             message.sourceId,
-            message.hitPosition
+            message.hitPosition,
+            message.health
           );
+        }
+        break;
+
+      // Anti-cheat: Server correction of client position
+      case 'positionCorrection':
+        console.log(`Received position correction:`, message.position);
+        if (this.onPositionCorrection) {
+          this.onPositionCorrection(message.position);
+        }
+        break;
+        
+      // Anti-cheat: Bullet impact notification
+      case 'bulletImpact':
+        if (this.onBulletImpact) {
+          this.onBulletImpact(
+            message.bulletId, 
+            message.hitType, 
+            message.targetId, 
+            message.position
+          );
+        }
+        break;
+        
+      // Anti-cheat: Player respawn notification
+      case 'respawn':
+        console.log(`Respawning at:`, message.position);
+        if (this.onRespawn) {
+          this.onRespawn(message.position, message.health, message.bullets);
         }
         break;
 
@@ -249,13 +300,17 @@ export class NetworkManager {
 
   /**
    * Sends local player position/rotation etc. to the server.
-   * @param {Object} playerData - { position, rotation, isAiming, isReloading, quickDrawLobbyIndex }
+   * @param {Object} playerData - { position, rotation, isAiming, isReloading, isSprinting, quickDrawLobbyIndex }
    */
   sendUpdate(playerData) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      // Anti-cheat: Add sequence number for message ordering
+      this.sequenceNumber++;
+      
       this.socket.send(
         JSON.stringify({
           type: 'update',
+          sequenceNumber: this.sequenceNumber,
           ...playerData
         })
       );
@@ -268,9 +323,15 @@ export class NetworkManager {
    */
   sendShoot(bulletData) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      // Anti-cheat: Add sequence number and nonce for replay protection
+      this.sequenceNumber++;
+      const nonce = this._generateNonce();
+      
       this.socket.send(
         JSON.stringify({
           type: 'shoot',
+          sequenceNumber: this.sequenceNumber,
+          nonce: nonce,
           bulletData
         })
       );
@@ -281,14 +342,39 @@ export class NetworkManager {
    * Notifies server that we hit another player.
    * @param {number|string} hitPlayerId
    * @param {Object} hitData - { position: {x,y,z}, sourcePlayerId: ... }
+   * @param {number|string} bulletId - Optional bulletId if known
    */
-  sendPlayerHit(hitPlayerId, hitData) {
+  sendPlayerHit(hitPlayerId, hitData, bulletId = null) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      // Anti-cheat: Add sequence number and nonce for replay protection
+      this.sequenceNumber++;
+      const nonce = this._generateNonce();
+      
       this.socket.send(
         JSON.stringify({
           type: 'playerHit',
+          sequenceNumber: this.sequenceNumber,
+          nonce: nonce,
           targetId: hitPlayerId,
+          bulletId: bulletId,
           hitData
+        })
+      );
+    }
+  }
+  
+  /**
+   * Notifies server that player is starting to reload.
+   */
+  sendReload() {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      // Anti-cheat: Add sequence number for message ordering
+      this.sequenceNumber++;
+      
+      this.socket.send(
+        JSON.stringify({
+          type: 'reload',
+          sequenceNumber: this.sequenceNumber
         })
       );
     }
@@ -300,9 +386,13 @@ export class NetworkManager {
    */
   sendQuickDrawJoin(arenaIndex) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      // Anti-cheat: Add sequence number for message ordering
+      this.sequenceNumber++;
+      
       this.socket.send(
         JSON.stringify({
           type: 'quickDrawJoin',
+          sequenceNumber: this.sequenceNumber,
           arenaIndex: arenaIndex
         })
       );
@@ -314,9 +404,13 @@ export class NetworkManager {
    */
   sendQuickDrawLeave() {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      // Anti-cheat: Add sequence number for message ordering
+      this.sequenceNumber++;
+      
       this.socket.send(
         JSON.stringify({
-          type: 'quickDrawLeave'
+          type: 'quickDrawLeave',
+          sequenceNumber: this.sequenceNumber
         })
       );
     }
@@ -328,9 +422,13 @@ export class NetworkManager {
    */
   sendQuickDrawReady(arenaIndex) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      // Anti-cheat: Add sequence number for message ordering
+      this.sequenceNumber++;
+      
       this.socket.send(
         JSON.stringify({
           type: 'quickDrawReady',
+          sequenceNumber: this.sequenceNumber,
           arenaIndex: arenaIndex
         })
       );
@@ -344,10 +442,16 @@ export class NetworkManager {
    */
   sendQuickDrawShoot(opponentId, arenaIndex) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      // Anti-cheat: Add sequence number and nonce for replay protection
+      this.sequenceNumber++;
+      const nonce = this._generateNonce();
+      
       console.log(`Sending Quick Draw hit notification to server: player ${this.playerId} hit player ${opponentId} in arena ${arenaIndex + 1}`);
       this.socket.send(
         JSON.stringify({
           type: 'quickDrawShoot',
+          sequenceNumber: this.sequenceNumber,
+          nonce: nonce,
           opponentId: opponentId,
           arenaIndex: arenaIndex
         })

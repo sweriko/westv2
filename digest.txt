@@ -4333,8 +4333,8 @@ export class QuickDraw {
                 }
                 
                 void main() {
-                    // Static purple base with subtle animated swirls
-                    vec3 baseColor = vec3(0.5, 0.0, 0.8); // Purple base
+                    // Static blue base with subtle animated swirls
+                    vec3 baseColor = vec3(0.0, 0.3, 0.8); // Blue base
                     
                     // Add subtle swirl pattern
                     float swirl = sin(vUv.x * vUv.y * 10.0 + time * 0.2) * 0.1;
@@ -4343,7 +4343,7 @@ export class QuickDraw {
                     float noiseVal = noise(vUv * 5.0 + vec2(time * 0.05, time * 0.03));
                     
                     // Mix colors for subtle effect
-                    vec3 color = mix(baseColor, vec3(0.7, 0.2, 1.0), swirl + noiseVal * 0.1);
+                    vec3 color = mix(baseColor, vec3(0.2, 0.6, 1.0), swirl + noiseVal * 0.1);
                     
                     // Add edge glow
                     float edgeX = smoothstep(0.0, 0.07, vUv.x) * smoothstep(1.0, 0.93, vUv.x);
@@ -4352,7 +4352,7 @@ export class QuickDraw {
                     
                     // Subtle pulsing
                     float pulse = 0.9 + sin(time * 0.5) * 0.1;
-                    color = mix(color, vec3(0.8, 0.4, 1.0), (1.0 - edge) * pulse * 0.2);
+                    color = mix(color, vec3(0.4, 0.7, 1.0), (1.0 - edge) * pulse * 0.2);
                     
                     gl_FragColor = vec4(color, 0.9); // Slightly transparent
                 }
@@ -4499,9 +4499,9 @@ export class QuickDraw {
         const particleCount = 50;
         const particleGroup = new THREE.Group();
         
-        // Create particle material (purple to match portal)
+        // Create particle material (white to contrast with blue portal)
         const particleMaterial = new THREE.PointsMaterial({
-            color: 0xB000FF,
+            color: 0xFFFFFF,
             size: 0.15,
             transparent: true,
             opacity: 0.7,

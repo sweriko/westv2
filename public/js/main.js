@@ -13,6 +13,9 @@ import { PhysicsSystem } from './physics.js';
 // Keep track of all bullets in the game, both local and remote
 let bullets = [];
 
+// Anti-cheat: Map bullets by ID for server authority
+let bulletMap = new Map(); // bulletId -> Bullet object
+
 // We'll keep references to local player, remote players, and a combined map
 let localPlayer;
 let remotePlayers = new Map();  // (playerId => ThirdPersonModel)
@@ -138,8 +141,49 @@ function init() {
     });
 
     // Listen for remote players shooting
-    networkManager.onPlayerShoot = (playerId, bulletData) => {
-      handleRemotePlayerShoot(playerId, bulletData);
+    networkManager.onPlayerShoot = (playerId, bulletData, bulletId) => {
+      handleRemotePlayerShoot(playerId, bulletData, bulletId);
+    };
+
+    // Anti-cheat: Listen for bullet impact notifications from server
+    networkManager.onBulletImpact = (bulletId, hitType, targetId, position) => {
+      handleBulletImpact(bulletId, hitType, targetId, position);
+    };
+
+    // Anti-cheat: Listen for position corrections from server
+    networkManager.onPositionCorrection = (correctedPosition) => {
+      if (localPlayer) {
+        // Store the server position for reconciliation
+        localPlayer.serverPosition = new THREE.Vector3(
+          correctedPosition.x,
+          correctedPosition.y,
+          correctedPosition.z
+        );
+        localPlayer.isReconciling = true;
+      }
+    };
+    
+    // Anti-cheat: Listen for server-initiated respawn
+    networkManager.onRespawn = (position, health, bullets) => {
+      if (localPlayer) {
+        // Set position
+        localPlayer.group.position.copy(position);
+        localPlayer.previousPosition.copy(position);
+        
+        // Update health and bullets
+        localPlayer.health = health || 100;
+        localPlayer.bullets = bullets || localPlayer.maxBullets;
+        
+        // Reset states
+        localPlayer.isReloading = false;
+        localPlayer.isAiming = false;
+        localPlayer.velocity.y = 0;
+        localPlayer.canAim = true;
+        
+        // Update UI
+        updateHealthUI(localPlayer);
+        updateAmmoUI(localPlayer);
+      }
     };
 
     // Listen for updates to the remotePlayers map so we can refresh the master map
@@ -204,6 +248,11 @@ function animate(time) {
       }
       scene.remove(bullet.mesh);
       bullets.splice(i, 1);
+      
+      // Anti-cheat: Remove from bullet map if it has an ID
+      if (bullet.bulletId !== null) {
+        bulletMap.delete(bullet.bulletId);
+      }
     }
   }
 
@@ -221,7 +270,7 @@ function animate(time) {
  * @param {THREE.Vector3} shootDir 
  */
 function handleLocalPlayerShoot(bulletStart, shootDir) {
-  // Spawn bullet in our local game
+  // Spawn bullet in our local game (client-side prediction)
   const bullet = spawnBullet(localPlayer.id, bulletStart, shootDir);
 
   // Send bullet data over network
@@ -248,12 +297,55 @@ function handleLocalPlayerShoot(bulletStart, shootDir) {
  * Called whenever a remote player fires (based on network data).
  * @param {number} playerId 
  * @param {Object} bulletData 
+ * @param {string|number} bulletId - Server-assigned bullet ID
  */
-function handleRemotePlayerShoot(playerId, bulletData) {
+function handleRemotePlayerShoot(playerId, bulletData, bulletId) {
   const startPos = new THREE.Vector3(bulletData.position.x, bulletData.position.y, bulletData.position.z);
   const dir = new THREE.Vector3(bulletData.direction.x, bulletData.direction.y, bulletData.direction.z);
 
-  spawnBullet(playerId, startPos, dir);
+  spawnBullet(playerId, startPos, dir, bulletId);
+}
+
+/**
+ * Handles a bullet impact notification from the server.
+ * @param {string|number} bulletId - The bullet ID
+ * @param {string} hitType - Type of impact (player, npc, ground, etc.)
+ * @param {string|number|null} targetId - Target ID (for player hits)
+ * @param {Object} position - Impact position {x, y, z}
+ */
+function handleBulletImpact(bulletId, hitType, targetId, position) {
+  // Convert position to THREE.Vector3 if provided
+  let impactPosition = null;
+  if (position) {
+    impactPosition = new THREE.Vector3(position.x, position.y, position.z);
+  }
+  
+  // Find the bullet in our bullet map
+  const bullet = bulletMap.get(bulletId);
+  
+  if (bullet) {
+    // Create appropriate visual effect and deactivate bullet
+    const result = bullet.handleServerImpact(hitType, targetId, impactPosition, scene);
+    
+    // Find and remove bullet from main array
+    const bulletIndex = bullets.findIndex(b => b === bullet);
+    if (bulletIndex !== -1) {
+      scene.remove(bullet.mesh);
+      bullets.splice(bulletIndex, 1);
+    }
+    
+    // Remove from bullet map
+    bulletMap.delete(bulletId);
+  } else {
+    console.log(`Bullet ${bulletId} not found for impact event`);
+    
+    // If we don't have the bullet object, still create visual effect at impact position
+    if (impactPosition) {
+      // Create a default direction vector (upward)
+      const defaultDir = new THREE.Vector3(0, 1, 0);
+      createImpactEffect(impactPosition, defaultDir, scene, hitType);
+    }
+  }
 }
 
 /**
@@ -261,12 +353,19 @@ function handleRemotePlayerShoot(playerId, bulletData) {
  * @param {string|number} sourcePlayerId 
  * @param {THREE.Vector3} position 
  * @param {THREE.Vector3} direction 
+ * @param {string|number} bulletId - Optional server-assigned ID (for remote bullets)
+ * @returns {Bullet} The created bullet object
  */
-function spawnBullet(sourcePlayerId, position, direction) {
-  const bullet = new Bullet(position, direction);
+function spawnBullet(sourcePlayerId, position, direction, bulletId = null) {
+  const bullet = new Bullet(position, direction, bulletId);
   bullet.setSourcePlayer(sourcePlayerId);
   bullets.push(bullet);
   scene.add(bullet.mesh);
+  
+  // Anti-cheat: Store bullet in map if it has a bulletId
+  if (bulletId !== null) {
+    bulletMap.set(bulletId, bullet);
+  }
 
   // Visual effects
   createMuzzleFlash(position, scene);

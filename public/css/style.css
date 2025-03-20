@@ -286,9 +286,10 @@ body {
   display: none;
 }
 
+/* Fix font loading */
 @font-face {
   font-family: 'Western';
-  src: url('https://fonts.gstatic.com/s/oldstandard/v14/MwQrbh3o1vLImiwAVvYawgcf2eVer2i0.woff2') format('woff2');
+  src: local('Georgia'), local('Times New Roman');
   font-weight: bold;
   font-style: normal;
 }

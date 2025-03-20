@@ -1,11 +1,16 @@
 import { createImpactEffect } from './effects.js';
 
 /**
- * A simple bullet that checks collisions by seeing if its end position
- * is inside bounding boxes (NPC or players).
+ * A bullet class with client-side prediction and server validation.
+ * It lets the server have final authority on collisions and hits.
  */
 export class Bullet {
-  constructor(position, direction) {
+  /**
+   * @param {THREE.Vector3} position - Starting position
+   * @param {THREE.Vector3} direction - Normalized direction vector
+   * @param {string|number} bulletId - Optional server-assigned bullet ID (for remote bullets)
+   */
+  constructor(position, direction, bulletId = null) {
     this.mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.02, 8, 8),
       new THREE.MeshStandardMaterial({ color: 0xB8860B })
@@ -16,12 +21,19 @@ export class Bullet {
     this.speed = 80; // speed units/second
     this.distanceTraveled = 0;
     this.maxDistance = 100;
+    this.timeCreated = performance.now();
 
-    // Remember previous position for some rough continuous detection
+    // Remember previous position for continuous detection
     this.lastPosition = position.clone();
 
     // Track which player fired this bullet
     this.sourcePlayerId = null;
+    
+    // Anti-cheat: Server-assigned bulletId
+    this.bulletId = bulletId;
+    
+    // Anti-cheat: Track whether this bullet is local (created by local player)
+    this.isLocalBullet = true;
     
     // Add collision detection raycaster
     this.raycaster = new THREE.Raycaster(position.clone(), direction.clone(), 0, 0.1);
@@ -33,15 +45,21 @@ export class Bullet {
    */
   setSourcePlayer(playerId) {
     this.sourcePlayerId = playerId;
+    
+    // Anti-cheat: Determine if this is a local bullet
+    if (window.localPlayer) {
+      this.isLocalBullet = Number(playerId) === Number(window.localPlayer.id);
+    }
   }
 
   /**
    * Updates the bullet's movement & handles collisions with NPC or players.
-   * Uses a simpler .containsPoint() approach so it won't throw an error on r128.
+   * Uses client-side prediction with server authority.
    * @param {number} deltaTime
    * @param {THREE.Group} npc
    * @param {THREE.Scene} scene
    * @param {Map<number, object>} allPlayers - Map of local + remote players.
+   * @returns {Object} - Result of the update containing active state and hit info.
    */
   update(deltaTime, npc, scene, allPlayers) {
     // Previous position for boundary crossing detection
@@ -147,6 +165,9 @@ export class Bullet {
       }
     }
 
+    // Anti-cheat: For local bullets, collision detection is only client-side prediction
+    // For remote bullets, we rely on client-side collision for visual effects
+    
     // 1) Check collision with NPC
     if (npc) {
       const npcBox = new THREE.Box3().setFromObject(npc);
@@ -197,12 +218,12 @@ export class Bullet {
             return { active: false, hit: { type: 'arena', position: endPos } };
           }
           
-          // Notify server we hit this player
-          if (window.networkManager) {
+          // Anti-cheat: For local bullets, send hit to server and let server decide
+          if (this.isLocalBullet && window.networkManager) {
             window.networkManager.sendPlayerHit(playerId, {
               position: { x: endPos.x, y: endPos.y, z: endPos.z },
               sourcePlayerId: this.sourcePlayerId
-            });
+            }, this.bulletId);
             
             // Quick Draw duels with better logging
             if (window.quickDraw && window.quickDraw.inDuel && 
@@ -215,7 +236,8 @@ export class Bullet {
                 window.networkManager.sendQuickDrawShoot(playerId);
             }
           }
-          return { active: false, hit: { type: 'player', playerId } };
+          
+          return { active: false, hit: { type: 'player', playerId, bulletId: this.bulletId } };
         }
       }
     }
@@ -233,5 +255,26 @@ export class Bullet {
 
     // Still active
     return { active: true, hit: null };
+  }
+  
+  /**
+   * Directly handles a server-reported impact for this bullet.
+   * @param {string} hitType - Type of impact: 'player', 'npc', 'ground', 'boundary', 'arena'
+   * @param {string|number|null} targetId - ID of hit target (for player hits)
+   * @param {THREE.Vector3} position - Impact position
+   * @param {THREE.Scene} scene - Scene to add effects to
+   * @returns {Object} - Result object with active=false
+   */
+  handleServerImpact(hitType, targetId, position, scene) {
+    // Create visual effect based on hit type
+    if (position) {
+      createImpactEffect(position, this.direction, scene, hitType);
+    } else {
+      // If no position provided, use current bullet position
+      createImpactEffect(this.mesh.position, this.direction, scene, hitType);
+    }
+    
+    // Always deactivate the bullet
+    return { active: false, hit: { type: hitType, targetId, position } };
   }
 }
