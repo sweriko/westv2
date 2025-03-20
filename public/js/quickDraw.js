@@ -6,6 +6,7 @@
  */
 
 import { PhysicsSystem } from './physics.js';
+import { createOptimizedSmokeEffect } from './input.js';
 
 export class QuickDraw {
     constructor(scene, localPlayer, networkManager, soundManager) {
@@ -1337,7 +1338,9 @@ export class QuickDraw {
         
         // Show animated circle with CSS animation
         this.drawCircle.style.display = 'block';
-        this.drawCircle.classList.add('draw-circle-animation');
+        
+        // Apply optimized effects based on device
+        createOptimizedSmokeEffect(this.drawCircle);
         
         // Only enable aiming if the penalty period has expired.
         if (performance.now() >= this.penaltyEndTime) {
@@ -1356,6 +1359,7 @@ export class QuickDraw {
         // Remove animation class after it completes
         setTimeout(() => {
             this.drawCircle.classList.remove('draw-circle-animation');
+            this.drawCircle.classList.remove('draw-circle-animation-mobile');
             this.drawCircle.style.display = 'none';
         }, 400);
     }

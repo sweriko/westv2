@@ -11,6 +11,12 @@ body, html {
   overflow: hidden;
   background-color: #000;
   font-family: 'Courier New', Courier, monospace;
+  /* Ensure the canvas extends to the edge of the screen */
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
 }
 
 #game-container {
@@ -198,9 +204,16 @@ canvas {
 
 /* Mobile optimized smoke ring effect */
 @keyframes drawCircleAnimMobile {
-  0% { transform: translate(-50%, -50%) scale(0); opacity: 1; }
-  80% { transform: translate(-50%, -50%) scale(2); opacity: 0.8; }
-  100% { transform: translate(-50%, -50%) scale(2.5); opacity: 0; }
+  0% { transform: translate(-50%, -50%) scale(0); opacity: 0.7; }
+  80% { transform: translate(-50%, -50%) scale(1.5); opacity: 0.5; }
+  100% { transform: translate(-50%, -50%) scale(2); opacity: 0; }
+}
+
+/* Super lightweight mobile animation - even less GPU intensive */
+@keyframes drawCircleAnimMobileLite {
+  0% { transform: translate(-50%, -50%) scale(0); opacity: 0.6; }
+  50% { transform: translate(-50%, -50%) scale(1); opacity: 0.4; }
+  100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
 }
 
 .portal-animation {
@@ -211,16 +224,17 @@ canvas {
   animation: drawCircleAnim 0.3s ease-out forwards;
 }
 
+.draw-circle-animation-mobile {
+  animation: drawCircleAnimMobileLite 0.2s ease-out forwards;
+}
+
 /* Mobile-specific smoke ring */
 @media (max-width: 1024px), (pointer: coarse) {
   #draw-circle {
-    width: 200px;
-    height: 200px;
-    border-width: 6px;
-  }
-  
-  .draw-circle-animation {
-    animation: drawCircleAnimMobile 0.3s ease-out forwards;
+    width: 150px;
+    height: 150px;
+    border-width: 4px;
+    box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
   }
 }
 
@@ -438,16 +452,16 @@ canvas {
 
 .mobile-button {
   position: fixed;
-  width: 70px;
-  height: 70px;
-  background-color: rgba(0, 0, 0, 0.5);
-  border: 2px solid rgba(255, 255, 255, 0.6);
+  width: 90px;  /* Increased size */
+  height: 90px;  /* Increased size */
+  background-color: rgba(0, 0, 0, 0.6);  /* Slightly more opaque */
+  border: 3px solid rgba(255, 255, 255, 0.7);  /* More visible border */
   border-radius: 50%;
   display: flex;
   justify-content: center;
   align-items: center;
   color: white;
-  font-size: 30px;
+  font-size: 36px;  /* Larger font */
   z-index: 1000;
   touch-action: none;
   display: none;
@@ -456,24 +470,25 @@ canvas {
 
 #shoot-button {
   bottom: 160px;
-  left: 30px;
+  left: 100px;  /* Moved further right as requested */
 }
 
 #jump-button {
   bottom: 160px;
-  right: 30px;
+  right: 100px;  /* Moved further left as requested */
 }
 
 /* Simulate visible joystick areas */
 .control-hint {
   position: fixed;
-  width: 120px;
-  height: 120px;
+  width: 150px; /* Increased from 120px */
+  height: 150px; /* Increased from 120px */
   border-radius: 50%;
   border: 2px dashed rgba(255, 255, 255, 0.3);
   z-index: 999;
   pointer-events: none;
   display: none;
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 #left-control-hint {
@@ -521,10 +536,14 @@ canvas {
   }
   
   #health-counter {
-    top: 20px;
+    top: 10px;
     right: 10px;
     width: auto;
     left: auto;
+    background-color: rgba(0, 0, 0, 0.7);
+    font-size: 14px;
+    padding: 4px 8px;
+    border-radius: 3px;
   }
   
   /* Hide all info banners and instructions on mobile */
@@ -541,31 +560,33 @@ canvas {
     right: 10px;
     background-color: rgba(0, 0, 0, 0.7);
     font-weight: bold;
-    font-size: 16px;
-    padding: 5px 8px;
+    font-size: 14px;
+    padding: 4px 8px;
+    border-radius: 3px;
   }
   
   /* Adjust UI for landscape orientation on mobile */
   @media (orientation: landscape) {
     .mobile-button {
-      height: 60px;
-      width: 60px;
-      font-size: 24px;
+      height: 80px;  /* Adjusted for landscape */
+      width: 80px;   /* Adjusted for landscape */
+      font-size: 32px;
     }
     
     #shoot-button {
-      bottom: 130px;
-      left: 20px;
+      bottom: 150px; /* Move upward from 130px */
+      left: 90px;
     }
     
     #jump-button {
-      bottom: 130px;
-      right: 20px;
+      bottom: 150px; /* Move upward from 130px */
+      right: 90px;
     }
     
+    /* Control hints (joystick indicators) */
     .control-hint {
-      width: 100px;
-      height: 100px;
+      width: 120px;
+      height: 120px;
     }
     
     #left-control-hint {
@@ -585,10 +606,12 @@ canvas {
     
     /* Simplify health display to prevent overflow */
     #health-counter {
-      padding: 4px 6px;
-      font-size: 14px;
+      padding: 3px 5px;
+      font-size: 12px;
       top: 10px;
       right: 10px;
+      background-color: rgba(0, 0, 0, 0.7);
+      border-radius: 3px;
     }
   }
 }
@@ -643,6 +666,16 @@ canvas {
     user-select: none;
     overflow: hidden;
     background-color: #000;
+    /* Ensure no whitespace around edges */
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: 100vh;
+    margin: 0;
+    padding: 0;
   }
   
   /* Ensure full screen coverage */
@@ -651,15 +684,26 @@ canvas {
     height: 100vh;
     overflow: hidden;
     background-color: #000;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    margin: 0;
+    padding: 0;
   }
   
   canvas {
     width: 100vw !important;
     height: 100vh !important;
-    object-fit: cover;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     margin: 0;
     padding: 0;
-    display: block;
+    object-fit: cover;
   }
   
   /* Make sure controls are responsive to touch */
@@ -675,5 +719,13 @@ canvas {
     display: none !important;
     pointer-events: none !important;
     visibility: hidden !important;
+  }
+}
+
+/* For landscape orientation */
+@media (orientation: landscape) {
+  .control-hint {
+    width: 120px;
+    height: 120px;
   }
 }

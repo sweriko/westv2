@@ -11,6 +11,15 @@ import { ProperShootout } from './properShootout.js'; // Import the new Proper S
 import { updateAmmoUI, updateHealthUI } from './ui.js';
 import { PhysicsSystem } from './physics.js';
 
+// Check if device is mobile
+function isMobileDevice() {
+  return (window.innerWidth <= 1024 || 'ontouchstart' in window || navigator.maxTouchPoints > 0 || 
+         /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
+}
+
+// Set global flag for mobile
+window.isMobile = isMobileDevice();
+
 // Keep track of all bullets in the game, both local and remote
 let bullets = [];
 
@@ -78,11 +87,13 @@ function init() {
       );
     }
     
-    // Initialize a smoke ring effect pool for reuse
-    for (let i = 0; i < 3; i++) {
-      const smokeRing = new SmokeRingEffect(scene);
-      smokeRing.active = false;
-      smokeRings.push(smokeRing);
+    // Initialize a smoke ring effect pool for reuse - but only if not mobile
+    if (!window.isMobile) {
+      for (let i = 0; i < 3; i++) {
+        const smokeRing = new SmokeRingEffect(scene);
+        smokeRing.active = false;
+        smokeRings.push(smokeRing);
+      }
     }
     
     // Initialize multiplayer manager
@@ -361,6 +372,14 @@ function handleLocalPlayerShoot(bulletStart, shootDir) {
   if (quickDraw && quickDraw.inDuel && quickDraw.duelState === 'draw' && quickDraw.duelOpponentId) {
     // We'll handle this in the bullet collision code instead
   }
+
+  // Create smoke ring effect - only if not mobile
+  if (!window.isMobile) {
+    const availableSmokeRing = smokeRings.find(ring => !ring.active);
+    if (availableSmokeRing) {
+      availableSmokeRing.create(bulletStart.clone(), shootDir.clone());
+    }
+  }
 }
 
 /**
@@ -453,26 +472,29 @@ function spawnBullet(sourcePlayerId, position, direction, bulletId = null) {
   createSmokeEffect(position, direction, scene);
   createShockwaveRing(position, direction, scene);
   
-  // Add smoke ring effect
-  let smokeRing = null;
-  
-  // Try to reuse an inactive smoke ring first
-  for (let i = 0; i < smokeRings.length; i++) {
-    if (!smokeRings[i].active) {
-      smokeRing = smokeRings[i];
-      break;
+  // Only add smoke ring effects if not on mobile
+  if (!window.isMobile) {
+    // Add smoke ring effect
+    let smokeRing = null;
+    
+    // Try to reuse an inactive smoke ring first
+    for (let i = 0; i < smokeRings.length; i++) {
+      if (!smokeRings[i].active) {
+        smokeRing = smokeRings[i];
+        break;
+      }
     }
-  }
-  
-  // If no inactive smoke ring found, create a new one if under the limit
-  if (!smokeRing && smokeRings.length < maxSmokeRings) {
-    smokeRing = new SmokeRingEffect(scene);
-    smokeRings.push(smokeRing);
-  }
-  
-  // Activate the smoke ring
-  if (smokeRing) {
-    smokeRing.create(position, direction);
+    
+    // If no inactive smoke ring found, create a new one if under the limit
+    if (!smokeRing && smokeRings.length < maxSmokeRings) {
+      smokeRing = new SmokeRingEffect(scene);
+      smokeRings.push(smokeRing);
+    }
+    
+    // Activate the smoke ring
+    if (smokeRing) {
+      smokeRing.create(position, direction);
+    }
   }
 
   // Sound: randomly choose one of the three shot sounds
@@ -523,7 +545,7 @@ function showGameInstructions() {
     <p>R: Reload</p>
     <p>Space: Jump</p>
     <p>P: Toggle physics debug visualization</p>
-    <p><strong>Click anywhere to start</strong></p>
+    <p><strong>Touch anywhere to start</strong></p>
     <p><strong>New:</strong> Find the Quick Draw portal near spawn to duel other players!</p>
     <p><strong>New:</strong> Find the Shootout portal to join an all-vs-all match!</p>
     <p><strong>Town Boundary:</strong> You must stay within the town limits and can only access the duel arena through the portal.</p>
@@ -531,12 +553,43 @@ function showGameInstructions() {
   
   document.getElementById('game-container').appendChild(instructions);
   
-  // Remove instructions on click
-  document.addEventListener('click', () => {
+  // Add a clear dismiss button for mobile
+  const dismissButton = document.createElement('button');
+  dismissButton.textContent = '✕';
+  dismissButton.style.position = 'absolute';
+  dismissButton.style.top = '10px';
+  dismissButton.style.right = '10px';
+  dismissButton.style.background = 'transparent';
+  dismissButton.style.border = 'none';
+  dismissButton.style.color = 'white';
+  dismissButton.style.fontSize = '24px';
+  dismissButton.style.cursor = 'pointer';
+  dismissButton.style.zIndex = '1001';
+  dismissButton.style.padding = '5px 10px';
+  dismissButton.style.touchAction = 'manipulation';
+  instructions.appendChild(dismissButton);
+  
+  // Global function to remove instructions
+  window.removeInstructions = () => {
     if (instructions.parentNode) {
       instructions.parentNode.removeChild(instructions);
     }
-  }, { once: true });
+  };
+  
+  // Make both the background and the button clickable/tappable to dismiss
+  dismissButton.addEventListener('click', window.removeInstructions);
+  dismissButton.addEventListener('touchstart', window.removeInstructions, {passive: false});
+  instructions.addEventListener('click', window.removeInstructions);
+  instructions.addEventListener('touchstart', window.removeInstructions, {passive: false});
+  
+  // Add global event listeners to dismiss on any interaction
+  document.addEventListener('touchstart', window.removeInstructions, {once: true, passive: false});
+  
+  // Prevent instructions from blocking renderer initialization on mobile
+  if (window.isMobile) {
+    // Auto-dismiss after 10 seconds on mobile
+    setTimeout(window.removeInstructions, 7000);
+  }
 }
 
 // Handle window unload to cleanup game mode resources

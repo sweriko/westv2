@@ -123,88 +123,103 @@ export function createMuzzleFlash(position, scene) {
  * @param {THREE.Scene} scene - The scene to add the effect.
  */
 export function createSmokeEffect(position, direction, scene) {
-  const particleCount = 30;
-  const particles = [];
+  // Skip smoke effect on mobile devices
+  if (window.isMobile) {
+    return;
+  }
+  
+  // Original smoke effect code for desktop
   const smokeGroup = new THREE.Group();
   smokeGroup.position.copy(position);
   scene.add(smokeGroup);
 
-  const smokeColors = [
-    new THREE.Color(0.9, 0.9, 0.9),
-    new THREE.Color(0.8, 0.8, 0.8),
-    new THREE.Color(0.7, 0.7, 0.7),
-    new THREE.Color(0.6, 0.6, 0.6)
-  ];
+  // Create a small group of smoke particles
+  const numParticles = 5;
+  const particles = [];
 
-  for (let i = 0; i < particleCount; i++) {
-    const size = 0.01 + Math.random() * 0.03;
-    const smokeGeometry = new THREE.SphereGeometry(size, 6, 6);
-    const colorIndex = Math.floor(Math.random() * smokeColors.length);
-    const smokeColor = smokeColors[colorIndex];
-    const smokeMaterial = new THREE.MeshBasicMaterial({
-      color: smokeColor,
+  for (let i = 0; i < numParticles; i++) {
+    const particleGeometry = new THREE.IcosahedronGeometry(0.01 + Math.random() * 0.02, 0);
+    const particleMaterial = new THREE.MeshBasicMaterial({
+      color: 0xCCCCCC,
       transparent: true,
-      opacity: 0.3 + Math.random() * 0.4
+      opacity: 0.7
     });
-    const smokeParticle = new THREE.Mesh(smokeGeometry, smokeMaterial);
-    smokeParticle.position.set(
-      (Math.random() - 0.5) * 0.05,
-      (Math.random() - 0.5) * 0.05,
-      (Math.random() - 0.5) * 0.05
+    
+    const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+    
+    // Randomize initial position slightly around gun muzzle
+    particle.position.set(
+      (Math.random() - 0.5) * 0.04,
+      (Math.random() - 0.5) * 0.04,
+      (Math.random() - 0.5) * 0.04
     );
-    let particleDir = direction.clone();
-    particleDir.x += (Math.random() - 0.5) * 0.6;
-    particleDir.y += (Math.random() - 0.5) * 0.2 + 0.2;
-    particleDir.z += (Math.random() - 0.5) * 0.6;
+    
+    // Calculate movement direction (mostly forward along shooting direction)
+    const particleDir = direction.clone();
+    particleDir.x += (Math.random() - 0.5) * 0.2;  // Add some randomness
+    particleDir.y += (Math.random() - 0.5) * 0.2;
+    particleDir.z += (Math.random() - 0.5) * 0.2;
     particleDir.normalize();
-    const speed = 0.02 + Math.random() * 0.08;
-    const velocity = particleDir.multiplyScalar(speed);
-    const rotationSpeed = {
-      x: (Math.random() - 0.5) * 0.02,
-      y: (Math.random() - 0.5) * 0.02,
-      z: (Math.random() - 0.5) * 0.02
-    };
-    smokeGroup.add(smokeParticle);
+    
+    // Store particle properties
     particles.push({
-      mesh: smokeParticle,
-      velocity: velocity,
-      rotationSpeed: rotationSpeed,
-      life: 40 + Math.floor(Math.random() * 60),
-      maxLife: 40 + Math.floor(Math.random() * 60),
-      size: size,
-      growth: 0.005 + Math.random() * 0.01
+      mesh: particle,
+      velocity: particleDir.multiplyScalar(0.5 + Math.random() * 0.5),
+      life: 0,
+      maxLife: 0.5 + Math.random() * 0.5
     });
+    
+    smokeGroup.add(particle);
   }
-
-  const interval = setInterval(() => {
+  
+  // Animation loop for smoke particles
+  let startTime = null;
+  function animateSmoke(timestamp) {
+    if (!startTime) startTime = timestamp;
+    const elapsed = (timestamp - startTime) / 1000; // Convert to seconds
+    
     let allDead = true;
-    particles.forEach(p => {
-      if (p.life > 0) {
-        p.mesh.position.add(p.velocity);
-        p.velocity.multiplyScalar(0.98);
-        p.velocity.x += (Math.random() - 0.5) * 0.001;
-        p.velocity.z += (Math.random() - 0.5) * 0.001;
-        p.velocity.y += 0.0008;
-        p.mesh.rotation.x += p.rotationSpeed.x;
-        p.mesh.rotation.y += p.rotationSpeed.y;
-        p.mesh.rotation.z += p.rotationSpeed.z;
-        const scale = p.size + (p.growth * (p.maxLife - p.life));
-        p.mesh.scale.set(scale, scale, scale);
-        const lifeRatio = p.life / p.maxLife;
-        p.mesh.material.opacity = lifeRatio * 0.5;
-        p.life--;
+    
+    for (const particle of particles) {
+      particle.life += 0.016; // Approximate time step
+      
+      if (particle.life < particle.maxLife) {
         allDead = false;
+        
+        // Move particle based on velocity
+        particle.mesh.position.add(particle.velocity.clone().multiplyScalar(0.016));
+        
+        // Slow down over time (air resistance)
+        particle.velocity.multiplyScalar(0.96);
+        
+        // Expand slightly
+        const scale = 1 + particle.life * 3;
+        particle.mesh.scale.set(scale, scale, scale);
+        
+        // Fade out
+        const lifeRatio = particle.life / particle.maxLife;
+        if (lifeRatio > 0.7) {
+          particle.mesh.material.opacity = 0.7 * (1 - (lifeRatio - 0.7) / 0.3);
+        }
       } else {
-        smokeGroup.remove(p.mesh);
-        p.mesh.geometry.dispose();
-        p.mesh.material.dispose();
+        // Hide particle when dead
+        particle.mesh.visible = false;
       }
-    });
-    if (allDead) {
-      clearInterval(interval);
-      scene.remove(smokeGroup);
     }
-  }, 16);
+    
+    if (!allDead) {
+      requestAnimationFrame(animateSmoke);
+    } else {
+      // Clean up when all particles are dead
+      scene.remove(smokeGroup);
+      particles.forEach(particle => {
+        if (particle.mesh.material) particle.mesh.material.dispose();
+        if (particle.mesh.geometry) particle.mesh.geometry.dispose();
+      });
+    }
+  }
+  
+  requestAnimationFrame(animateSmoke);
 }
 
 /**
@@ -214,126 +229,91 @@ export function createSmokeEffect(position, direction, scene) {
  * @param {THREE.Scene} scene - The scene to add the effect.
  */
 export function createShockwaveRing(position, direction, scene) {
-  const shockwaveGroup = new THREE.Group();
-  shockwaveGroup.position.copy(position);
-  shockwaveGroup.lookAt(position.clone().add(direction));
-  scene.add(shockwaveGroup);
+  // Skip shockwave effect on mobile devices
+  if (window.isMobile) {
+    return;
+  }
 
-  const distortionGeometry = new THREE.CircleGeometry(0.08, 32);
-  const distortionMaterial = new THREE.MeshBasicMaterial({
+  const ringGroup = new THREE.Group();
+  ringGroup.position.copy(position);
+  scene.add(ringGroup);
+
+  // Face ring perpendicular to firing direction
+  ringGroup.lookAt(position.clone().add(direction));
+
+  // Create a simple ring with a flat material
+  const ringGeometry = new THREE.TorusGeometry(0.1, 0.01, 8, 16);
+  const ringMaterial = new THREE.MeshBasicMaterial({
+    color: 0xFF8C00,
+    transparent: true,
+    opacity: 0.7,
+    side: THREE.DoubleSide
+  });
+  const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+  ringGroup.add(ring);
+
+  // Create a second, larger ring with different opacity
+  const outerRingGeometry = new THREE.TorusGeometry(0.15, 0.005, 8, 16);
+  const outerRingMaterial = new THREE.MeshBasicMaterial({
+    color: 0xFF4500,
+    transparent: true,
+    opacity: 0.4,
+    side: THREE.DoubleSide
+  });
+  const outerRing = new THREE.Mesh(outerRingGeometry, outerRingMaterial);
+  ringGroup.add(outerRing);
+
+  // Create inner bright flash ring
+  const innerRingGeometry = new THREE.TorusGeometry(0.05, 0.01, 8, 16);
+  const innerRingMaterial = new THREE.MeshBasicMaterial({
     color: 0xFFFFFF,
     transparent: true,
-    opacity: 0.2,
-    blending: THREE.AdditiveBlending
+    opacity: 0.9,
+    side: THREE.DoubleSide
   });
-  const distortion = new THREE.Mesh(distortionGeometry, distortionMaterial);
-  shockwaveGroup.add(distortion);
+  const innerRing = new THREE.Mesh(innerRingGeometry, innerRingMaterial);
+  ringGroup.add(innerRing);
 
-  const lineCount = 18;
-  const speedLines = [];
-  const speedLineColors = [0xFFFFFF, 0xFFFF00, 0xFF9900, 0xFF6600];
-
-  for (let i = 0; i < lineCount; i++) {
-    const lineLength = 0.2 + Math.random() * 0.6;
-    const lineWidth = 0.003 + Math.random() * 0.005;
-    const lineGeometry = new THREE.BoxGeometry(lineWidth, lineWidth, lineLength);
-    lineGeometry.translate(0, 0, lineLength / 2);
-    const colorIndex = Math.floor(Math.random() * speedLineColors.length);
-    const lineColor = speedLineColors[colorIndex];
-    const lineMaterial = new THREE.MeshBasicMaterial({
-      color: lineColor,
-      transparent: true,
-      opacity: 0.7,
-      blending: THREE.AdditiveBlending
-    });
-    const line = new THREE.Mesh(lineGeometry, lineMaterial);
-    const spreadAngle = 15 * (Math.PI / 180);
-    line.rotation.x = (Math.random() - 0.5) * spreadAngle;
-    line.rotation.y = (Math.random() - 0.5) * spreadAngle;
-    line.scale.z = 0.1;
-    shockwaveGroup.add(line);
-    speedLines.push({
-      mesh: line,
-      material: lineMaterial,
-      maxLength: 1 + Math.random() * 2,
-      speed: 0.8 + Math.random() * 0.4,
-      delay: Math.random() * 50
-    });
-  }
-
-  const particleCount = 12;
-  const particles = [];
-
-  for (let i = 0; i < particleCount; i++) {
-    const particleGeometry = new THREE.SphereGeometry(0.01, 4, 4);
-    const particleMaterial = new THREE.MeshBasicMaterial({
-      color: 0xFFFF00,
-      transparent: true,
-      opacity: 0.6
-    });
-    const particle = new THREE.Mesh(particleGeometry, particleMaterial);
-    const angle = Math.random() * Math.PI * 0.25;
-    const radius = 0.02 + Math.random() * 0.06;
-    particle.position.z = Math.cos(angle) * radius;
-    const circleAngle = Math.random() * Math.PI * 2;
-    particle.position.x = Math.sin(angle) * Math.cos(circleAngle) * radius;
-    particle.position.y = Math.sin(angle) * Math.sin(circleAngle) * radius;
-    const velocity = new THREE.Vector3(
-      particle.position.x * (0.5 + Math.random() * 0.5),
-      particle.position.y * (0.5 + Math.random() * 0.5),
-      0.05 + Math.random() * 0.1
-    );
-    shockwaveGroup.add(particle);
-    particles.push({
-      mesh: particle,
-      velocity: velocity,
-      life: 10 + Math.floor(Math.random() * 15)
-    });
-  }
-
-  const flashLight = new THREE.PointLight(0xFF9900, 1, 2);
-  flashLight.position.set(0, 0, 0);
-  shockwaveGroup.add(flashLight);
-
-  const duration = 350;
-  const startTime = performance.now();
+  // Animation variables
+  let startTime = null;
+  const duration = 300; // milliseconds
 
   function animateShockwave(timestamp) {
+    if (!startTime) startTime = timestamp;
     const elapsed = timestamp - startTime;
-    const progress = elapsed / duration;
-    if (progress < 1) {
-      speedLines.forEach(line => {
-        if (elapsed > line.delay) {
-          const lineProgress = Math.min((elapsed - line.delay) / (duration - line.delay), 1);
-          if (lineProgress < 0.5) {
-            const scaleProgress = lineProgress * 2;
-            line.mesh.scale.z = line.maxLength * scaleProgress;
-          } else {
-            line.material.opacity = 0.7 * (1 - ((lineProgress - 0.5) * 2));
-          }
-        }
-      });
-      const distortionScale = 1 + progress * 5;
-      distortion.scale.set(distortionScale, distortionScale, 1);
-      distortionMaterial.opacity = 0.2 * (1 - progress);
+    const progress = Math.min(elapsed / duration, 1.0);
 
-      particles.forEach(p => {
-        if (p.life > 0) {
-          p.mesh.position.add(p.velocity);
-          p.mesh.material.opacity = (p.life / 25) * 0.6;
-          p.life--;
-        } else {
-          shockwaveGroup.remove(p.mesh);
-        }
-      });
-
-      flashLight.intensity = 1 - progress;
+    if (progress < 1.0) {
+      // Expand rings
+      const scale = 1 + progress * 2;
+      ring.scale.set(scale, scale, scale);
+      
+      const outerScale = 1 + progress * 3;
+      outerRing.scale.set(outerScale, outerScale, outerScale);
+      
+      const innerScale = 1 + progress * 4;
+      innerRing.scale.set(innerScale, innerScale, innerScale);
+      
+      // Fade out
+      ring.material.opacity = 0.7 * (1 - progress);
+      outerRing.material.opacity = 0.4 * (1 - progress);
+      innerRing.material.opacity = 0.9 * (1 - Math.pow(progress, 0.5));
+      
       requestAnimationFrame(animateShockwave);
     } else {
-      scene.remove(shockwaveGroup);
-      disposeHierarchy(shockwaveGroup);
+      // Clean up
+      scene.remove(ringGroup);
+      
+      // Dispose geometries and materials
+      ringGeometry.dispose();
+      ringMaterial.dispose();
+      outerRingGeometry.dispose();
+      outerRingMaterial.dispose();
+      innerRingGeometry.dispose();
+      innerRingMaterial.dispose();
     }
   }
+
   requestAnimationFrame(animateShockwave);
 }
 

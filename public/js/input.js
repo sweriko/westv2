@@ -254,11 +254,15 @@ function createMobileControls(player, soundManager) {
   const leftControlHint = document.createElement('div');
   leftControlHint.id = 'left-control-hint';
   leftControlHint.className = 'control-hint';
+  leftControlHint.style.bottom = '30px';
+  leftControlHint.style.left = '30px';
   
   // Create visual joystick hint for right side
   const rightControlHint = document.createElement('div');
   rightControlHint.id = 'right-control-hint';
   rightControlHint.className = 'control-hint';
+  rightControlHint.style.bottom = '30px';
+  rightControlHint.style.right = '30px';
   
   // Create orientation message
   const orientationMsg = document.createElement('div');
@@ -307,13 +311,43 @@ function createMobileControls(player, soundManager) {
   
   // Touch start handler
   touchOverlay.addEventListener('touchstart', (e) => {
+    // Dismiss any instructions/info banner that might be visible
+    const instructionsElement = document.getElementById('instructions');
+    if (instructionsElement && instructionsElement.parentNode) {
+      instructionsElement.parentNode.removeChild(instructionsElement);
+    }
+    
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
       const x = touch.clientX;
       const y = touch.clientY;
       
-      // Determine if touch is on the left or right side of the screen
-      if (x < screenWidth / 2) {  // Left side - movement
+      // Get the screen dimensions
+      const screenHeight = window.innerHeight;
+      
+      // Define joystick areas - smaller hitboxes instead of full screen halves
+      // Left joystick: Bottom left quarter of screen
+      const leftJoystickArea = {
+        x: 0,
+        y: screenHeight * 0.4,
+        width: screenWidth * 0.4,
+        height: screenHeight * 0.6
+      };
+      
+      // Right joystick: Bottom right quarter of screen
+      const rightJoystickArea = {
+        x: screenWidth * 0.6,
+        y: screenHeight * 0.4,
+        width: screenWidth * 0.4,
+        height: screenHeight * 0.6
+      };
+      
+      // Check if touch is in left joystick area
+      if (x >= leftJoystickArea.x && 
+          x <= leftJoystickArea.x + leftJoystickArea.width &&
+          y >= leftJoystickArea.y && 
+          y <= leftJoystickArea.y + leftJoystickArea.height) {
+        
         if (leftSideTouchId === null) {
           leftSideTouchId = touch.identifier;
           leftStartPos.x = x;
@@ -323,7 +357,13 @@ function createMobileControls(player, soundManager) {
           leftControlHint.style.borderColor = 'rgba(255, 255, 255, 0.7)';
           leftControlHint.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
         }
-      } else {  // Right side - aiming
+      } 
+      // Check if touch is in right joystick area
+      else if (x >= rightJoystickArea.x && 
+               x <= rightJoystickArea.x + rightJoystickArea.width &&
+               y >= rightJoystickArea.y && 
+               y <= rightJoystickArea.y + rightJoystickArea.height) {
+        
         if (rightSideTouchId === null) {
           rightSideTouchId = touch.identifier;
           rightStartPos.x = x;
@@ -353,6 +393,12 @@ function createMobileControls(player, soundManager) {
   
   // Touch move handler
   touchOverlay.addEventListener('touchmove', (e) => {
+    // Dismiss any instructions/info banner that might be visible
+    const instructionsElement = document.getElementById('instructions');
+    if (instructionsElement && instructionsElement.parentNode) {
+      instructionsElement.parentNode.removeChild(instructionsElement);
+    }
+    
     for (let i = 0; i < e.touches.length; i++) {
       const touch = e.touches[i];
       
@@ -570,13 +616,16 @@ function ensureFullscreen() {
   document.body.style.padding = '0';
   document.body.style.overflow = 'hidden';
   document.body.style.backgroundColor = '#000';
+  document.body.style.position = 'fixed';
   
   // Set game container to full viewport
   const gameContainer = document.getElementById('game-container');
   if (gameContainer) {
-    gameContainer.style.position = 'absolute';
+    gameContainer.style.position = 'fixed';
     gameContainer.style.top = '0';
     gameContainer.style.left = '0';
+    gameContainer.style.right = '0';
+    gameContainer.style.bottom = '0';
     gameContainer.style.width = '100%';
     gameContainer.style.height = '100%';
     gameContainer.style.margin = '0';
@@ -588,14 +637,71 @@ function ensureFullscreen() {
   // Make sure canvas fills the screen
   const canvas = document.querySelector('canvas');
   if (canvas) {
-    canvas.style.position = 'absolute';
+    canvas.style.position = 'fixed';
     canvas.style.top = '0';
     canvas.style.left = '0';
+    canvas.style.right = '0';
+    canvas.style.bottom = '0';
     canvas.style.width = '100%';
     canvas.style.height = '100%';
     canvas.style.margin = '0';
     canvas.style.padding = '0';
     canvas.style.display = 'block';
     canvas.style.backgroundColor = '#000';
+    
+    // iOS Safari specific fixes
+    if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+      // Fix for iOS notch and home indicator
+      canvas.style.width = '100vw';
+      canvas.style.height = '100vh';
+      
+      // Prevent elastic scrolling
+      document.addEventListener('touchmove', (e) => {
+        if (e.scale !== 1) {
+          e.preventDefault();
+        }
+      }, { passive: false });
+      
+      // Force scroll to top on resize/orientation change
+      window.addEventListener('resize', () => {
+        window.scrollTo(0, 0);
+        document.body.style.height = window.innerHeight + 'px';
+        canvas.style.height = window.innerHeight + 'px';
+      });
+      
+      // Initial height fix
+      setTimeout(() => {
+        window.scrollTo(0, 0);
+        document.body.style.height = window.innerHeight + 'px';
+        canvas.style.height = window.innerHeight + 'px';
+      }, 300);
+    }
   }
 }
+
+/**
+ * Create optimized smoke effect for mobile
+ * @param {HTMLElement} drawCircle - The draw circle element
+ */
+function createOptimizedSmokeEffect(drawCircle) {
+  if (isMobileDevice()) {
+    // Completely disable the effect on mobile devices
+    drawCircle.style.display = 'none';
+    drawCircle.style.opacity = '0';
+    // Remove any existing animation classes
+    drawCircle.classList.remove('draw-circle-animation');
+    drawCircle.classList.remove('draw-circle-animation-mobile');
+  } else {
+    // Desktop full version
+    drawCircle.style.display = 'block';
+    drawCircle.style.width = '300px';
+    drawCircle.style.height = '300px';
+    drawCircle.style.borderWidth = '8px';
+    drawCircle.style.opacity = '1';
+    drawCircle.style.boxShadow = '0 0 20px #FF0000';
+    drawCircle.classList.add('draw-circle-animation');
+  }
+}
+
+// Export the smoke effect function so it can be used in game logic
+export { createOptimizedSmokeEffect };
