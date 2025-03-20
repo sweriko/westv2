@@ -1,13 +1,42 @@
-body {
+/* Add this at the top to ensure proper fullscreen */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body, html {
   margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
+  background-color: #000;
   font-family: 'Courier New', Courier, monospace;
 }
+
 #game-container {
-  position: relative;
-  width: 100vw;
-  height: 100vh;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background-color: #000;
 }
+
+canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0;
+  padding: 0;
+  display: block;
+  background-color: #000;
+}
+
 #ammo-counter {
   position: absolute;
   bottom: 20px;
@@ -167,12 +196,32 @@ body {
   100% { transform: translate(-50%, -50%) scale(4); opacity: 0; }
 }
 
+/* Mobile optimized smoke ring effect */
+@keyframes drawCircleAnimMobile {
+  0% { transform: translate(-50%, -50%) scale(0); opacity: 1; }
+  80% { transform: translate(-50%, -50%) scale(2); opacity: 0.8; }
+  100% { transform: translate(-50%, -50%) scale(2.5); opacity: 0; }
+}
+
 .portal-animation {
   animation: portalPulse 2s infinite ease-in-out;
 }
 
 .draw-circle-animation {
   animation: drawCircleAnim 0.3s ease-out forwards;
+}
+
+/* Mobile-specific smoke ring */
+@media (max-width: 1024px), (pointer: coarse) {
+  #draw-circle {
+    width: 200px;
+    height: 200px;
+    border-width: 6px;
+  }
+  
+  .draw-circle-animation {
+    animation: drawCircleAnimMobile 0.3s ease-out forwards;
+  }
 }
 
 /* Styling for Quick Draw countdown */
@@ -299,15 +348,7 @@ body {
 
 /* Health counter styling */
 #health-counter {
-  position: absolute;
-  bottom: 50px;
-  right: 20px;
-  color: #4CAF50;
-  font-size: 24px;
-  background-color: rgba(0,0,0,0.5);
-  padding: 10px;
-  border-radius: 5px;
-  transition: color 0.3s ease;
+  display: none; /* Hide the problematic right UI panel */
 }
 
 /* Damage indicator (added dynamically) */
@@ -342,22 +383,7 @@ body {
 
 /* Health bar (alternative to text) */
 #health-bar-container {
-  position: absolute;
-  bottom: 85px;
-  right: 20px;
-  width: 200px;
-  height: 20px;
-  background-color: rgba(0,0,0,0.5);
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-#health-bar {
-  height: 100%;
-  width: 100%;
-  background-color: #4CAF50;
-  border-radius: 10px;
-  transition: width 0.3s ease, background-color 0.3s ease;
+  display: none; /* Hide the health bar container as well */
 }
 
 /* Hit marker */
@@ -384,14 +410,270 @@ body {
 }
 
 .hit-marker::after {
-  width: 16px;
+  width: 8px;
   height: 2px;
-  left: 0;
   top: 7px;
+  left: 4px;
 }
 
 /* Headshot marker */
 .hit-marker-headshot::before,
 .hit-marker-headshot::after {
   background-color: red;
+}
+
+/* Mobile support styles */
+#touch-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 999;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.mobile-button {
+  position: fixed;
+  width: 70px;
+  height: 70px;
+  background-color: rgba(0, 0, 0, 0.5);
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: white;
+  font-size: 30px;
+  z-index: 1000;
+  touch-action: none;
+  display: none;
+  pointer-events: auto !important;
+}
+
+#shoot-button {
+  bottom: 160px;
+  left: 30px;
+}
+
+#jump-button {
+  bottom: 160px;
+  right: 30px;
+}
+
+/* Simulate visible joystick areas */
+.control-hint {
+  position: fixed;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 255, 255, 0.3);
+  z-index: 999;
+  pointer-events: none;
+  display: none;
+}
+
+#left-control-hint {
+  bottom: 30px;
+  left: 30px;
+}
+
+#right-control-hint {
+  bottom: 30px;
+  right: 30px;
+}
+
+#orientation-message {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.9);
+  color: white;
+  display: none;
+  justify-content: center;
+  align-items: center;
+  font-size: 24px;
+  text-align: center;
+  z-index: 2000;
+}
+
+/* Only show mobile controls on mobile devices */
+@media (max-width: 1024px), (pointer: coarse) {
+  .mobile-button {
+    display: block;
+  }
+  
+  .control-hint {
+    display: block;
+  }
+  
+  #ammo-counter, #health-counter {
+    font-size: 16px;
+    padding: 8px;
+    z-index: 1001; /* Ensure they appear above the touch overlay */
+    max-width: 80px;
+    text-align: center;
+  }
+  
+  #health-counter {
+    top: 20px;
+    right: 10px;
+    width: auto;
+    left: auto;
+  }
+  
+  /* Hide all info banners and instructions on mobile */
+  #fps-counter, #player-count, #connection-status, #network-status, 
+  #quick-draw-status, #lobby-indicator, #portal-instructions,
+  #reload-message, #quick-draw-message, #quick-draw-countdown,
+  #proper-shootout-instructions {
+    display: none !important;
+  }
+  
+  /* Make ammo and health more visible but compact */
+  #ammo-counter {
+    bottom: 10px;
+    right: 10px;
+    background-color: rgba(0, 0, 0, 0.7);
+    font-weight: bold;
+    font-size: 16px;
+    padding: 5px 8px;
+  }
+  
+  /* Adjust UI for landscape orientation on mobile */
+  @media (orientation: landscape) {
+    .mobile-button {
+      height: 60px;
+      width: 60px;
+      font-size: 24px;
+    }
+    
+    #shoot-button {
+      bottom: 130px;
+      left: 20px;
+    }
+    
+    #jump-button {
+      bottom: 130px;
+      right: 20px;
+    }
+    
+    .control-hint {
+      width: 100px;
+      height: 100px;
+    }
+    
+    #left-control-hint {
+      bottom: 20px;
+      left: 20px;
+    }
+    
+    #right-control-hint {
+      bottom: 20px;
+      right: 20px;
+    }
+    
+    /* Ensure crosshair is visible */
+    #crosshair {
+      z-index: 1500;
+    }
+    
+    /* Simplify health display to prevent overflow */
+    #health-counter {
+      padding: 4px 6px;
+      font-size: 14px;
+      top: 10px;
+      right: 10px;
+    }
+  }
+}
+
+/* Force landscape for mobile - fix vertical bar issue */
+@media (max-width: 1024px) and (orientation: portrait) {
+  #game-container {
+    transform: rotate(90deg);
+    transform-origin: left top;
+    width: 100vh;
+    height: 100vw;
+    position: absolute;
+    top: 0;
+    left: 0;
+    overflow: hidden;
+  }
+  
+  /* Fix for systems with notches/home indicators */
+  body {
+    background-color: #000;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+    margin: 0;
+    padding: 0;
+  }
+  
+  /* Full screen canvas with proper alignment */
+  canvas {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover;
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+  
+  /* Additional fix for the orientation wrapper */
+  #orientation-message {
+    transform: rotate(-90deg);
+    width: 100vw;
+    height: 100vh;
+  }
+}
+
+/* Meta viewport tag doesn't allow scaling on mobiles, so add touch control */
+@media (max-width: 1024px) {
+  body {
+    touch-action: manipulation;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    overflow: hidden;
+    background-color: #000;
+  }
+  
+  /* Ensure full screen coverage */
+  #game-container {
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    background-color: #000;
+  }
+  
+  canvas {
+    width: 100vw !important;
+    height: 100vh !important;
+    object-fit: cover;
+    margin: 0;
+    padding: 0;
+    display: block;
+  }
+  
+  /* Make sure controls are responsive to touch */
+  .mobile-button {
+    touch-action: none;
+    -webkit-touch-callout: none;
+  }
+  
+  /* Prevent all portal instructions from showing */
+  #portal-instructions,
+  #proper-shootout-instructions,
+  div[class*="portal-instructions"] {
+    display: none !important;
+    pointer-events: none !important;
+    visibility: hidden !important;
+  }
 }

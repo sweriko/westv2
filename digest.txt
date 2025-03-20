@@ -1,5 +1,7 @@
 <goal>
- 
+ I want you to update, optimize and change the current way we shoot bullets, track and detect if they hit a player in which zone.
+ Follow fps browser game best practices!
+ The goal is to have a highly performant, lag free, reliable fps experience.
 </goal>
 
 <output_requirements>
@@ -149,29 +151,32 @@ body {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 20px;
-  height: 20px;
-  border: 2px solid white;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.8);
   border-radius: 50%;
-  display: none; /* Always keep it hidden to make the game more realistic */
+  display: none; /* Will be controlled by JavaScript */
+  pointer-events: none;
+  z-index: 100;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
 }
 #crosshair::before,
 #crosshair::after {
   content: '';
   position: absolute;
-  background-color: white;
+  background-color: rgba(255, 255, 255, 0.8);
 }
 #crosshair::before {
   width: 2px;
-  height: 10px;
-  top: 5px;
-  left: 9px;
+  height: 8px;
+  top: 4px;
+  left: 7px;
 }
 #crosshair::after {
-  width: 10px;
+  width: 8px;
   height: 2px;
-  top: 9px;
-  left: 5px;
+  top: 7px;
+  left: 4px;
 }
 #fps-counter {
   position: absolute;
@@ -1989,7 +1994,8 @@ export function initInput(renderer, player, soundManager) {
       if (player.arms) {
         player.arms.setVisible(true);
       }
-      // Removed crosshair display - making the game more realistic
+      // Show crosshair when aiming
+      document.getElementById('crosshair').style.display = 'block';
 
       if (soundManager) {
         soundManager.playSound("aimclick");
@@ -2012,7 +2018,8 @@ export function initInput(renderer, player, soundManager) {
       if (player.arms) {
         player.arms.setVisible(false);
       }
-      // Removed crosshair display code
+      // Hide crosshair when not aiming
+      document.getElementById('crosshair').style.display = 'none';
     }
   });
 
@@ -4437,6 +4444,14 @@ export class Player {
       this.lastNetworkUpdate = now;
       this.sendNetworkUpdate();
     }
+
+    // Update camera bob (only if on ground)
+    if (this.canJump) {
+      this.updateHeadBob(deltaTime);
+    }
+    
+    // Update aiming effects including crosshair
+    this.updateAiming(deltaTime);
   }
 
   /**
@@ -4877,6 +4892,34 @@ export class Player {
     
     // Send update to server
     this.sendNetworkUpdate();
+  }
+
+  /**
+   * Updates aiming effects including crosshair animation
+   * @param {number} deltaTime - Time elapsed since last frame
+   */
+  updateAiming(deltaTime) {
+    // Crosshair animation if aiming
+    const crosshair = document.getElementById('crosshair');
+    if (crosshair && this.isAiming) {
+      // Add subtle pulse animation based on player movement
+      const isMoving = this.isMoving();
+      const movementFactor = isMoving ? 1.0 + (this.velocity.length() * 0.008) : 1.0;
+      
+      // Calculate scaled size based on movement
+      const size = 16 * movementFactor;
+      crosshair.style.width = `${size}px`;
+      crosshair.style.height = `${size}px`;
+      
+      // Add slight opacity change based on movement
+      const opacity = isMoving ? 0.7 : 0.8;
+      crosshair.style.borderColor = `rgba(255, 255, 255, ${opacity})`;
+      
+      // A slight color tint for low health
+      if (this.health < 30) {
+        crosshair.style.borderColor = `rgba(255, ${Math.floor(255 * (this.health/30))}, ${Math.floor(255 * (this.health/60))}, ${opacity})`;
+      }
+    }
   }
 }
 

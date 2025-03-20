@@ -5,9 +5,20 @@
  * @param {SoundManager} soundManager - The SoundManager for audio feedback.
  */
 export function initInput(renderer, player, soundManager) {
-  // Request pointer lock on click
+  // Track if device is mobile
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  
+  // Create touch controls for mobile
+  if (isMobile) {
+    createMobileControls(player, soundManager);
+    
+    // Hide all instruction elements on mobile
+    hideInstructionsOnMobile();
+  }
+  
+  // Request pointer lock on click (desktop only)
   document.body.addEventListener('click', () => {
-    if (document.pointerLockElement !== renderer.domElement) {
+    if (!isMobile && document.pointerLockElement !== renderer.domElement) {
       renderer.domElement.requestPointerLock();
     }
   });
@@ -143,5 +154,448 @@ export function initInput(renderer, player, soundManager) {
     player.camera.aspect = window.innerWidth / window.innerHeight;
     player.camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    
+    // Check for device orientation
+    checkOrientation();
   });
+  
+  // Handle orientation change for mobile
+  window.addEventListener('orientationchange', checkOrientation);
+  
+  // Initial orientation check
+  checkOrientation();
+
+  // Ensure fullscreen with no white bars
+  ensureFullscreen();
+  
+  // Set up a resize listener to maintain fullscreen when orientation changes
+  window.addEventListener('resize', ensureFullscreen);
+}
+
+/**
+ * Hide all instruction elements and portals on mobile
+ */
+function hideInstructionsOnMobile() {
+  // Hide all instruction elements
+  const instructionElements = [
+    document.getElementById('portal-instructions'),
+    document.getElementById('proper-shootout-instructions'),
+    document.getElementById('reload-message'),
+    document.getElementById('quick-draw-message'),
+    document.getElementById('quick-draw-countdown'),
+    document.getElementById('health-counter'),
+    document.getElementById('health-bar-container')
+  ];
+  
+  // Hide each element if it exists
+  instructionElements.forEach(element => {
+    if (element) {
+      element.style.display = 'none';
+    }
+  });
+  
+  // Create a mutation observer to catch any new instruction elements
+  const observer = new MutationObserver((mutations) => {
+    mutations.forEach(mutation => {
+      if (mutation.addedNodes && mutation.addedNodes.length > 0) {
+        for (let i = 0; i < mutation.addedNodes.length; i++) {
+          const node = mutation.addedNodes[i];
+          if (node.nodeType === 1) { // Element node
+            if (node.id && instructionElements.includes(node.id)) {
+              node.style.display = 'none';
+            } else if (node.className && node.className.includes('portal-instructions')) {
+              node.style.display = 'none';
+            }
+          }
+        }
+      }
+    });
+  });
+  
+  // Start observing the document
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+}
+
+/**
+ * Create touch controls for mobile devices with improved handling
+ * @param {Player} player - The Player instance
+ * @param {SoundManager} soundManager - The SoundManager instance for audio feedback
+ */
+function createMobileControls(player, soundManager) {
+  // Single large invisible overlay for touch input
+  const touchOverlay = document.createElement('div');
+  touchOverlay.id = 'touch-overlay';
+  touchOverlay.style.position = 'fixed';
+  touchOverlay.style.top = '0';
+  touchOverlay.style.left = '0';
+  touchOverlay.style.width = '100%';
+  touchOverlay.style.height = '100%';
+  touchOverlay.style.zIndex = '999';
+  touchOverlay.style.touchAction = 'none'; // Prevents browser handling of touches
+  touchOverlay.style.backgroundColor = 'transparent';
+  document.body.appendChild(touchOverlay);
+  
+  // Create shoot button (left side)
+  const shootButton = document.createElement('div');
+  shootButton.id = 'shoot-button';
+  shootButton.className = 'mobile-button';
+  shootButton.innerText = '🔫';
+  
+  // Create jump button (right side)
+  const jumpButton = document.createElement('div');
+  jumpButton.id = 'jump-button';
+  jumpButton.className = 'mobile-button';
+  jumpButton.innerText = '↑';
+  
+  // Create visual joystick hint for left side
+  const leftControlHint = document.createElement('div');
+  leftControlHint.id = 'left-control-hint';
+  leftControlHint.className = 'control-hint';
+  
+  // Create visual joystick hint for right side
+  const rightControlHint = document.createElement('div');
+  rightControlHint.id = 'right-control-hint';
+  rightControlHint.className = 'control-hint';
+  
+  // Create orientation message
+  const orientationMsg = document.createElement('div');
+  orientationMsg.id = 'orientation-message';
+  orientationMsg.innerText = 'Please rotate to landscape mode';
+  
+  // Add elements to document
+  document.body.appendChild(shootButton);
+  document.body.appendChild(jumpButton);
+  document.body.appendChild(leftControlHint);
+  document.body.appendChild(rightControlHint);
+  document.body.appendChild(orientationMsg);
+  
+  // Variables to track touch state
+  let leftSideTouchId = null;
+  let rightSideTouchId = null;
+  let leftStartPos = { x: 0, y: 0 };
+  let rightStartPos = { x: 0, y: 0 };
+  let rightTouchStartTime = 0;
+  let screenWidth = window.innerWidth;
+  
+  // Constants for sensitivity
+  const MOVE_THRESHOLD = 10; // Minimum movement in pixels before registering movement
+  const MOVE_SENSITIVITY = 0.15;  // Movement speed multiplier
+  const LOOK_SENSITIVITY = 0.25;   // Look speed multiplier - further increased for mobile
+  
+  // Initial state of player
+  player.moveForward = false;
+  player.moveBackward = false;
+  player.moveLeft = false;
+  player.moveRight = false;
+  player.isAiming = false;
+  
+  // Monitor player bullets to auto-reload
+  const originalShoot = player.shoot;
+  player.shoot = function() {
+    const result = originalShoot.apply(this, arguments);
+    
+    // Auto-reload when out of bullets on mobile
+    if (this.bullets <= 0 && !this.isReloading) {
+      this.startReload();
+    }
+    
+    return result;
+  };
+  
+  // Touch start handler
+  touchOverlay.addEventListener('touchstart', (e) => {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      const x = touch.clientX;
+      const y = touch.clientY;
+      
+      // Determine if touch is on the left or right side of the screen
+      if (x < screenWidth / 2) {  // Left side - movement
+        if (leftSideTouchId === null) {
+          leftSideTouchId = touch.identifier;
+          leftStartPos.x = x;
+          leftStartPos.y = y;
+          
+          // Visual feedback - highlight active control
+          leftControlHint.style.borderColor = 'rgba(255, 255, 255, 0.7)';
+          leftControlHint.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+        }
+      } else {  // Right side - aiming
+        if (rightSideTouchId === null) {
+          rightSideTouchId = touch.identifier;
+          rightStartPos.x = x;
+          rightStartPos.y = y;
+          rightTouchStartTime = Date.now();
+          
+          // Visual feedback - highlight active control
+          rightControlHint.style.borderColor = 'rgba(255, 255, 255, 0.7)';
+          rightControlHint.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+          
+          // Start aiming immediately on touch
+          player.isAiming = true;
+          player.revolver.group.visible = true;
+          if (player.arms) {
+            player.arms.setVisible(true);
+          }
+          document.getElementById('crosshair').style.display = 'block';
+          
+          if (soundManager) {
+            soundManager.playSound("aimclick");
+          }
+        }
+      }
+    }
+    e.preventDefault();
+  });
+  
+  // Touch move handler
+  touchOverlay.addEventListener('touchmove', (e) => {
+    for (let i = 0; i < e.touches.length; i++) {
+      const touch = e.touches[i];
+      
+      // Handle left side touch (movement)
+      if (touch.identifier === leftSideTouchId) {
+        const deltaX = touch.clientX - leftStartPos.x;
+        const deltaY = touch.clientY - leftStartPos.y;
+        
+        // Only apply movement if joystick is moved beyond threshold
+        if (Math.abs(deltaX) > MOVE_THRESHOLD || Math.abs(deltaY) > MOVE_THRESHOLD) {
+          // Forward/backward based on vertical movement
+          player.moveForward = deltaY < -MOVE_THRESHOLD;
+          player.moveBackward = deltaY > MOVE_THRESHOLD;
+          
+          // Left/right based on horizontal movement
+          player.moveLeft = deltaX < -MOVE_THRESHOLD;
+          player.moveRight = deltaX > MOVE_THRESHOLD;
+        }
+      }
+      
+      // Handle right side touch (looking)
+      if (touch.identifier === rightSideTouchId) {
+        const deltaX = touch.clientX - rightStartPos.x;
+        const deltaY = touch.clientY - rightStartPos.y;
+        
+        // Apply camera rotation based on touch movement - increased sensitivity
+        player.group.rotation.y -= deltaX * LOOK_SENSITIVITY * 0.01;
+        player.camera.rotation.x -= deltaY * LOOK_SENSITIVITY * 0.01;
+        
+        // Limit vertical rotation to avoid flipping
+        player.camera.rotation.x = Math.max(
+          -Math.PI / 2,
+          Math.min(Math.PI / 2, player.camera.rotation.x)
+        );
+        
+        // Update starting position to prevent continuous rotation
+        rightStartPos.x = touch.clientX;
+        rightStartPos.y = touch.clientY;
+      }
+    }
+    e.preventDefault();
+  });
+  
+  // Touch end handler
+  touchOverlay.addEventListener('touchend', (e) => {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      
+      // Handle left side touch end
+      if (touch.identifier === leftSideTouchId) {
+        leftSideTouchId = null;
+        
+        // Reset movement flags
+        player.moveForward = false;
+        player.moveBackward = false;
+        player.moveLeft = false;
+        player.moveRight = false;
+        
+        // Reset visual feedback
+        leftControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+        leftControlHint.style.backgroundColor = 'transparent';
+      }
+      
+      // Handle right side touch end
+      if (touch.identifier === rightSideTouchId) {
+        // Stop aiming but don't shoot
+        player.isAiming = false;
+        player.revolver.group.visible = false;
+        if (player.arms) {
+          player.arms.setVisible(false);
+        }
+        document.getElementById('crosshair').style.display = 'none';
+        
+        // Reset visual feedback
+        rightControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+        rightControlHint.style.backgroundColor = 'transparent';
+        
+        rightSideTouchId = null;
+      }
+    }
+    e.preventDefault();
+  });
+  
+  // Touch cancel handler (similar to touch end)
+  touchOverlay.addEventListener('touchcancel', (e) => {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      
+      // Reset left side touch
+      if (touch.identifier === leftSideTouchId) {
+        leftSideTouchId = null;
+        player.moveForward = false;
+        player.moveBackward = false;
+        player.moveLeft = false;
+        player.moveRight = false;
+        
+        // Reset visual feedback
+        leftControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+        leftControlHint.style.backgroundColor = 'transparent';
+      }
+      
+      // Reset right side touch
+      if (touch.identifier === rightSideTouchId) {
+        rightSideTouchId = null;
+        player.isAiming = false;
+        player.revolver.group.visible = false;
+        if (player.arms) {
+          player.arms.setVisible(false);
+        }
+        document.getElementById('crosshair').style.display = 'none';
+        
+        // Reset visual feedback
+        rightControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+        rightControlHint.style.backgroundColor = 'transparent';
+      }
+    }
+    e.preventDefault();
+  });
+  
+  // Shoot button handler
+  shootButton.addEventListener('touchstart', (e) => {
+    if (player.isAiming && !player.isReloading) {
+      player.shoot();
+    }
+    e.preventDefault();
+  });
+  
+  // Button event handlers  
+  jumpButton.addEventListener('touchstart', (e) => {
+    if (player.canJump) {
+      player.velocity.y = player.isSprinting ? 15 : 10;
+      player.canJump = false;
+    }
+    e.preventDefault();
+  });
+  
+  // Handle window resize to update the screen width calculation
+  window.addEventListener('resize', () => {
+    screenWidth = window.innerWidth;
+  });
+  
+  // Special handler for clicking on any instruction element to hide it
+  document.addEventListener('touchstart', (e) => {
+    const target = e.target;
+    if (target.id === 'portal-instructions' || 
+        target.id === 'proper-shootout-instructions' ||
+        (target.parentElement && 
+         (target.parentElement.id === 'portal-instructions' || 
+          target.parentElement.id === 'proper-shootout-instructions'))) {
+      
+      // Hide the instruction element
+      if (target.id) {
+        document.getElementById(target.id).style.display = 'none';
+      } else if (target.parentElement && target.parentElement.id) {
+        document.getElementById(target.parentElement.id).style.display = 'none';
+      }
+      
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+}
+
+/**
+ * Check device orientation and display warning if not in landscape mode on mobile
+ */
+function checkOrientation() {
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  
+  if (isMobile) {
+    const orientationMsg = document.getElementById('orientation-message');
+    
+    // Check if we're in portrait mode
+    if (window.innerHeight > window.innerWidth) {
+      orientationMsg.style.display = 'flex';
+    } else {
+      orientationMsg.style.display = 'none';
+    }
+  }
+}
+
+// Function to update health display - modified to handle missing health counter
+function updateHealthDisplay(health, maxHealth) {
+  // Skip the health counter update since we removed it from the UI
+  
+  // Only update health bar if it exists
+  const healthBar = document.getElementById('health-bar');
+  if (healthBar) {
+    const healthPercent = Math.max(0, health / maxHealth * 100);
+    healthBar.style.width = `${healthPercent}%`;
+    
+    // Change color based on health level
+    if (healthPercent > 66) {
+      healthBar.style.backgroundColor = '#4CAF50'; // Green
+    } else if (healthPercent > 33) {
+      healthBar.style.backgroundColor = '#FFC107'; // Yellow
+    } else {
+      healthBar.style.backgroundColor = '#F44336'; // Red
+    }
+  }
+}
+
+function isMobileDevice() {
+  return (window.innerWidth <= 1024 || 'ontouchstart' in window || navigator.maxTouchPoints > 0);
+}
+
+// This function ensures the game takes up the full screen space with no white bars
+function ensureFullscreen() {
+  // Set body and html to full viewport dimensions
+  document.documentElement.style.width = '100%';
+  document.documentElement.style.height = '100%';
+  document.body.style.width = '100%';
+  document.body.style.height = '100%';
+  document.body.style.margin = '0';
+  document.body.style.padding = '0';
+  document.body.style.overflow = 'hidden';
+  document.body.style.backgroundColor = '#000';
+  
+  // Set game container to full viewport
+  const gameContainer = document.getElementById('game-container');
+  if (gameContainer) {
+    gameContainer.style.position = 'absolute';
+    gameContainer.style.top = '0';
+    gameContainer.style.left = '0';
+    gameContainer.style.width = '100%';
+    gameContainer.style.height = '100%';
+    gameContainer.style.margin = '0';
+    gameContainer.style.padding = '0';
+    gameContainer.style.overflow = 'hidden';
+    gameContainer.style.backgroundColor = '#000';
+  }
+  
+  // Make sure canvas fills the screen
+  const canvas = document.querySelector('canvas');
+  if (canvas) {
+    canvas.style.position = 'absolute';
+    canvas.style.top = '0';
+    canvas.style.left = '0';
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvas.style.margin = '0';
+    canvas.style.padding = '0';
+    canvas.style.display = 'block';
+    canvas.style.backgroundColor = '#000';
+  }
 }

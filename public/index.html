@@ -2,9 +2,34 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <title>Wild Western FPS – Multiplayer</title>
   <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* Ensure fullscreen with no white bars */
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+    
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #000;
+      position: fixed;
+    }
+    
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      background-color: #000;
+    }
+  </style>
 </head>
 <body>
   <div id="game-container">
