@@ -22,6 +22,9 @@ export class Bullet {
 
     // Track which player fired this bullet
     this.sourcePlayerId = null;
+    
+    // Add collision detection raycaster
+    this.raycaster = new THREE.Raycaster(position.clone(), direction.clone(), 0, 0.1);
   }
 
   /**
@@ -44,6 +47,20 @@ export class Bullet {
     // Previous position for boundary crossing detection
     this.lastPosition = this.mesh.position.clone();
     
+    // FIRST CHECK: Before moving, check if bullet is already within arena but from an unauthorized player
+    if (window.quickDraw && window.quickDraw.isPointInArena(this.mesh.position)) {
+      const isLocalPlayerBullet = Number(this.sourcePlayerId) === Number(window.localPlayer.id);
+      const isPlayerInDuel = window.quickDraw.inDuel;
+      const isOpponentBullet = window.quickDraw.duelOpponentId === Number(this.sourcePlayerId);
+      
+      // If bullet is inside arena but not from a duel player, destroy it immediately
+      if (!(isPlayerInDuel && isLocalPlayerBullet) && !isOpponentBullet) {
+        console.log("Destroying unauthorized bullet inside arena from player " + this.sourcePlayerId);
+        createImpactEffect(this.mesh.position, this.direction, scene, 'ground');
+        return { active: false, hit: { type: 'arena', position: this.mesh.position } };
+      }
+    }
+    
     // Move the bullet
     const displacement = this.direction.clone().multiplyScalar(this.speed * deltaTime);
     this.mesh.position.add(displacement);
@@ -52,34 +69,50 @@ export class Bullet {
     // Current bullet position
     const endPos = this.mesh.position.clone();
     
-    // NEW: Check if crossing Quick Draw arena boundary
-    if (window.quickDraw) {
+    // Check if crossing Quick Draw arena boundary using the physics system
+    if (window.quickDraw && window.quickDraw.physics) {
+      const physics = window.quickDraw.physics;
+      
+      // Check if bullet is crossing the arena boundary
       const bulletInArena = window.quickDraw.isPointInArena(endPos);
       const prevInArena = window.quickDraw.isPointInArena(this.lastPosition);
       
-      // Calculate if bullet is inside duel arena or crossing the boundary
+      // Calculate if bullet is crossing the boundary
       const bulletCrossingBoundary = bulletInArena !== prevInArena;
-      const playerInDuel = window.quickDraw.inDuel;
       
-      // Player in duel means bullet should stay in arena
-      // Player outside duel means bullet should stay outside arena
-      if (bulletCrossingBoundary && (
-          (playerInDuel && Number(this.sourcePlayerId) === Number(window.localPlayer.id) && !bulletInArena) || 
-          (!playerInDuel && Number(this.sourcePlayerId) === Number(window.localPlayer.id) && bulletInArena))) {
-        // Bullet hit arena boundary
-        console.log("Bullet hit arena boundary - destroying it");
-        createImpactEffect(endPos, this.direction, scene, 'ground');
-        return { active: false, hit: { type: 'arena', position: endPos } };
+      // If the bullet is crossing the boundary
+      if (bulletCrossingBoundary) {
+        const playerInDuel = window.quickDraw.inDuel;
+        const isLocalPlayerBullet = Number(this.sourcePlayerId) === Number(window.localPlayer.id);
+        
+        // Case 1: Player in duel and their bullet trying to exit
+        if (playerInDuel && isLocalPlayerBullet && !bulletInArena) {
+          console.log("Bullet hit arena boundary (exiting) - destroying it");
+          createImpactEffect(endPos, this.direction, scene, 'ground');
+          return { active: false, hit: { type: 'arena', position: endPos } };
+        }
+        
+        // Case 2: Player outside trying to shoot in
+        if (!playerInDuel && isLocalPlayerBullet && bulletInArena) {
+          console.log("Bullet from outside entering arena - destroying it");
+          createImpactEffect(endPos, this.direction, scene, 'ground');
+          return { active: false, hit: { type: 'arena', position: endPos } };
+        }
+        
+        // Case 3: Bullet from duel player hitting boundary from inside
+        if (playerInDuel && !isLocalPlayerBullet && !bulletInArena) {
+          console.log("Bullet from other duel player hitting boundary (exiting) - destroying it");
+          createImpactEffect(endPos, this.direction, scene, 'ground');
+          return { active: false, hit: { type: 'arena', position: endPos } };
+        }
+        
+        // Case 4: Bullet from outside player hitting boundary from outside
+        if (!playerInDuel && !isLocalPlayerBullet && bulletInArena) {
+          console.log("Bullet from outside player hitting boundary (entering) - destroying it");
+          createImpactEffect(endPos, this.direction, scene, 'ground');
+          return { active: false, hit: { type: 'arena', position: endPos } };
+        }
       }
-      
-      // If the bullet is coming from outside and entering the arena, destroy it
-      if (bulletCrossingBoundary && !playerInDuel && bulletInArena) {
-        console.log("Bullet from outside entering arena - destroying it");
-        createImpactEffect(endPos, this.direction, scene, 'ground');
-        return { active: false, hit: { type: 'arena', position: endPos } };
-      }
-      
-      // If the bullet is inside arena and coming from inside, let it continue
     }
 
     // 1) Check collision with NPC
@@ -120,6 +153,18 @@ export class Bullet {
         const playerBox = new THREE.Box3(boxMin, boxMax);
         if (playerBox.containsPoint(endPos)) {
           createImpactEffect(endPos, this.direction, scene, 'player');
+          
+          // Prevent hits across arena boundary
+          // Only allow hits if both players are in the same area (both in arena or both outside)
+          const bulletPlayerInArena = window.quickDraw && window.quickDraw.inDuel;
+          const targetPlayerInArena = window.quickDraw && 
+                                     window.quickDraw.duelOpponentId === Number(playerId);
+          
+          if (bulletPlayerInArena !== targetPlayerInArena) {
+            console.log("Bullet hit blocked - players in different areas");
+            return { active: false, hit: { type: 'arena', position: endPos } };
+          }
+          
           // Notify server we hit this player
           if (window.networkManager) {
             window.networkManager.sendPlayerHit(playerId, {
@@ -127,7 +172,7 @@ export class Bullet {
               sourcePlayerId: this.sourcePlayerId
             });
             
-            // ENHANCED: Add this section for Quick Draw duels with better logging
+            // Quick Draw duels with better logging
             if (window.quickDraw && window.quickDraw.inDuel && 
                 window.quickDraw.duelState === 'draw' && 
                 Number(playerId) === Number(window.quickDraw.duelOpponentId) && 

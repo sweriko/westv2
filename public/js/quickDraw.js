@@ -3,6 +3,9 @@
  * Players face off in a wild west duel where they must wait for the "draw" signal
  * before pulling their revolvers and shooting at each other.
  */
+
+import { PhysicsSystem } from './physics.js';
+
 export class QuickDraw {
     constructor(scene, localPlayer, networkManager, soundManager) {
         this.scene = scene;
@@ -20,6 +23,11 @@ export class QuickDraw {
         
         // Duel area position
         this.duelCenter = new THREE.Vector3(50, 0, 50); // Far from main spawn
+        this.arenaRadius = 15;
+        this.arenaHeight = 5;
+        
+        // Initialize physics system for collision detection
+        this.physics = new PhysicsSystem();
         
         // Initialize portal, duel area, and network handlers
         this.initPortal();
@@ -231,7 +239,7 @@ export class QuickDraw {
         this.duelArea = new THREE.Group();
         
         // Ground platform
-        const groundGeometry = new THREE.CircleGeometry(15, 32);
+        const groundGeometry = new THREE.CircleGeometry(this.arenaRadius, 32);
         const groundMaterial = new THREE.MeshStandardMaterial({
             color: 0xCD853F, // Sandy color
             roughness: 0.9,
@@ -244,42 +252,8 @@ export class QuickDraw {
         ground.receiveShadow = true;
         this.duelArea.add(ground);
         
-        // Invisible boundary walls
-        const wallHeight = 3;
-        const wallRadius = 15;
-        const wallSegments = 16;
-        
-        for (let i = 0; i < wallSegments; i++) {
-            const angle1 = (i / wallSegments) * Math.PI * 2;
-            const angle2 = ((i + 1) / wallSegments) * Math.PI * 2;
-            
-            const x1 = this.duelCenter.x + Math.cos(angle1) * wallRadius;
-            const z1 = this.duelCenter.z + Math.sin(angle1) * wallRadius;
-            const x2 = this.duelCenter.x + Math.cos(angle2) * wallRadius;
-            const z2 = this.duelCenter.z + Math.sin(angle2) * wallRadius;
-            
-            const wallGeometry = new THREE.BoxGeometry(
-                Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(z2 - z1, 2)),
-                wallHeight,
-                0.1
-            );
-            
-            const wallMaterial = new THREE.MeshBasicMaterial({
-                color: 0xFFFFFF,
-                transparent: true,
-                opacity: 0.0 // Invisible
-            });
-            
-            const wall = new THREE.Mesh(wallGeometry, wallMaterial);
-            wall.position.set(
-                (x1 + x2) / 2,
-                wallHeight / 2,
-                (z1 + z2) / 2
-            );
-            
-            wall.lookAt(this.duelCenter.x, wallHeight / 2, this.duelCenter.z);
-            this.duelArea.add(wall);
-        }
+        // Create the physics boundary with cannon.js
+        // This will be activated when the duel begins
         
         // Add western-themed props
         this.addDuelProps();
@@ -427,22 +401,28 @@ export class QuickDraw {
     }
     
     /**
-     * Check if a point is inside the duel arena
+     * Check if a point is inside the duel arena using the physics system
      * @param {THREE.Vector3} point - The point to check
      * @returns {boolean} - True if the point is inside the arena
      */
     isPointInArena(point) {
+        // First check if the arena is active
         if (!this.duelArea || !this.duelArea.visible) {
             return false;
         }
         
-        // The arena is a cylinder, so check if the point is within radius and height
+        // Use the physics system to check if the point is inside the arena boundary
+        if (this.physics && this.physics.isPointInArenaBoundary) {
+            return this.physics.isPointInArenaBoundary(point);
+        }
+        
+        // Fallback to simple cylindrical check if physics is not available
         const dx = point.x - this.duelCenter.x;
         const dz = point.z - this.duelCenter.z;
         const distanceFromCenter = Math.sqrt(dx * dx + dz * dz);
         
         // Check if within radius (15 units) and height (0 to 5 units)
-        return distanceFromCenter <= 15 && point.y >= 0 && point.y <= 5;
+        return distanceFromCenter <= this.arenaRadius && point.y >= 0 && point.y <= this.arenaHeight;
     }
     
     /**
@@ -452,6 +432,30 @@ export class QuickDraw {
         // Skip if player not loaded
         if (!this.localPlayer || !this.localPlayer.group) {
             return;
+        }
+        
+        // Update physics system
+        if (this.physics) {
+            this.physics.update(deltaTime);
+            
+            // If the player is in the arena, enforce arena boundary collision
+            if (this.inDuel && this.physics.arenaBoundaryBody) {
+                const playerPos = this.localPlayer.group.position.clone();
+                const isInArena = this.isPointInArena(playerPos);
+                
+                if (!isInArena) {
+                    // If player is outside the arena but should be inside, push them back in
+                    const dirToCenter = new THREE.Vector3(
+                        this.duelCenter.x - playerPos.x,
+                        0,
+                        this.duelCenter.z - playerPos.z
+                    ).normalize();
+                    
+                    // Move player back inside
+                    this.localPlayer.group.position.x += dirToCenter.x * 0.1;
+                    this.localPlayer.group.position.z += dirToCenter.z * 0.1;
+                }
+            }
         }
         
         // Check for portal collision when not in lobby or duel
@@ -568,6 +572,13 @@ export class QuickDraw {
         
         // Make duel area visible
         this.duelArea.visible = true;
+        
+        // Create the arena physics boundary
+        this.physics.createQuickDrawArenaBoundary(
+            this.duelCenter, 
+            this.arenaRadius,
+            this.arenaHeight
+        );
         
         // Disable weapon drawing immediately and forcefully
         this.originalCanAim = this.localPlayer.canAim !== false;
@@ -805,6 +816,11 @@ export class QuickDraw {
         this.duelOpponentId = null;
         this.updateStatusIndicator();
         
+        // Clean up the physics boundary
+        if (this.physics) {
+            this.physics.removeQuickDrawArenaBoundary();
+        }
+        
         // Clear any timers
         if (this.countdownTimer) clearTimeout(this.countdownTimer);
         if (this.drawTimer) clearTimeout(this.drawTimer);
@@ -884,6 +900,11 @@ export class QuickDraw {
                     }
                 }
             });
+        }
+        
+        // Clean up physics
+        if (this.physics) {
+            this.physics.cleanup();
         }
         
         // Remove UI elements

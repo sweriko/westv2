@@ -65,6 +65,9 @@ export class Player {
 
     // Quick Draw mode
     this.canAim = true; // Whether the player is allowed to aim (used by Quick Draw)
+    
+    // Store previous position to detect collision with arena boundary
+    this.previousPosition = new THREE.Vector3();
 
     // Initialize network & UI
     this.initNetworking();
@@ -85,6 +88,9 @@ export class Player {
   }
 
   update(deltaTime) {
+    // Store previous position before movement for collision detection
+    this.previousPosition.copy(this.group.position);
+    
     // Smoothly interpolate the gun offset & FOV
     const targetOffset = this.isAiming && this.canAim ? this.aimOffset : this.holsterOffset;
     this.currentGunOffset.lerp(targetOffset, 0.1);
@@ -120,6 +126,24 @@ export class Player {
     if (this.moveBackward) this.group.position.add(forward.clone().multiplyScalar(-moveSpeed * deltaTime));
     if (this.moveLeft) this.group.position.add(right.clone().multiplyScalar(-moveSpeed * deltaTime));
     if (this.moveRight) this.group.position.add(right.clone().multiplyScalar(moveSpeed * deltaTime));
+
+    // Arena boundary collision detection
+    if (window.quickDraw) {
+      const inArena = window.quickDraw.isPointInArena(this.group.position);
+      const wasInArena = window.quickDraw.isPointInArena(this.previousPosition);
+      
+      // If player is in a duel, they must stay inside
+      if (window.quickDraw.inDuel && !inArena && wasInArena) {
+        // Player tried to leave the arena - move them back inside
+        this.group.position.copy(this.previousPosition);
+      }
+      
+      // If player is not in a duel, they must stay outside
+      if (!window.quickDraw.inDuel && inArena && !wasInArena) {
+        // Player tried to enter the arena from outside - move them back outside
+        this.group.position.copy(this.previousPosition);
+      }
+    }
 
     // Send periodic network updates
     const now = performance.now();

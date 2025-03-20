@@ -54,9 +54,23 @@ function init() {
 
     // Initialize input
     initInput(renderer, localPlayer, soundManager);
+    
+    // Make scene globally accessible for physics visualization
+    window.scene = scene;
 
     // Initialize Quick Draw game mode after the local player is created
     quickDraw = new QuickDraw(scene, localPlayer, networkManager, soundManager);
+    
+    // Debug toggle for physics visualization (press P)
+    window.addEventListener('keydown', (event) => {
+      if (event.code === 'KeyP') {
+        if (quickDraw && quickDraw.physics) {
+          const isDebugMode = !quickDraw.physics.debugMode;
+          quickDraw.physics.setDebugMode(isDebugMode);
+          console.log(`Physics debug mode: ${isDebugMode ? 'ENABLED' : 'DISABLED'}`);
+        }
+      }
+    });
     
     // Make updateHealthUI globally accessible for the Quick Draw mode to use
     window.updateHealthUI = updateHealthUI;
@@ -252,8 +266,10 @@ function showGameInstructions() {
     <p>Left-click (while aiming): Shoot</p>
     <p>R: Reload</p>
     <p>Space: Jump</p>
+    <p>P: Toggle physics debug visualization</p>
     <p><strong>Click anywhere to start</strong></p>
-    <p><strong>New:</strong> Find the Quick Draw portal near spawn to duel other players!</p>`;
+    <p><strong>New:</strong> Find the Quick Draw portal near spawn to duel other players!</p>
+    <p><strong>Arena boundaries:</strong> Players and bullets cannot cross between the main world and duel arena.</p>`;
   
   document.getElementById('game-container').appendChild(instructions);
   
@@ -264,5 +280,12 @@ function showGameInstructions() {
     }
   }, { once: true });
 }
+
+// Handle window unload to cleanup physics resources
+window.addEventListener('beforeunload', () => {
+  if (quickDraw && quickDraw.physics) {
+    quickDraw.physics.cleanup();
+  }
+});
 
 init();
