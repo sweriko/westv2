@@ -20,6 +20,8 @@ export class QuickDraw {
         this.duelState = 'none'; // 'none', 'ready', 'countdown', 'draw'
         this.gunLocked = false;
         this.originalCanAim = true;
+        // Record the time (in ms) until which the gun remains locked
+        this.penaltyEndTime = 0;
         
         // Duel area position
         this.duelCenter = new THREE.Vector3(50, 0, 50); // Far from main spawn
@@ -67,8 +69,8 @@ export class QuickDraw {
         this.drawCircle.style.top = '50%';
         this.drawCircle.style.left = '50%';
         this.drawCircle.style.transform = 'translate(-50%, -50%) scale(0)';
-        this.drawCircle.style.width = '600px'; // Much bigger circle (was 300px)
-        this.drawCircle.style.height = '600px'; // Much bigger circle (was 300px)
+        this.drawCircle.style.width = '600px';
+        this.drawCircle.style.height = '600px';
         this.drawCircle.style.borderRadius = '50%';
         this.drawCircle.style.border = '8px solid #FF0000';
         this.drawCircle.style.boxShadow = '0 0 20px #FF0000';
@@ -95,7 +97,8 @@ export class QuickDraw {
     }
     
     /**
-     * Initialize the portal near spawn that players can walk into to join the queue.
+     * Initialize the portal near spawn that players can walk into
+     * to join the queue.
      */
     initPortal() {
         // Create a visible portal that players can walk into
@@ -471,19 +474,21 @@ export class QuickDraw {
             this.portal.rotation.y += deltaTime * 0.5;
         }
         
-        // ENHANCED CHECK: Aggressively check for early weapon drawing during countdown
+        // If in countdown phase, check for early aiming
         if (this.inDuel && this.duelState === 'countdown') {
-            // Force the gun to be holstered during countdown
             if (this.localPlayer.isAiming && !this.gunLocked) {
                 this.penalizeEarlyDraw();
             }
-            
-            // Even if not aiming, ensure the gun remains holstered
+        }
+        
+        // Enforce penalty lock regardless of duel state if penalty is active.
+        if (performance.now() < this.penaltyEndTime) {
             this.localPlayer.canAim = false;
+            this.localPlayer.isAiming = false;
             this.localPlayer.revolver.group.visible = false;
         }
         
-        // Update portal instructions visibility
+        // (Additional portal instruction update)
         this.updatePortalInstructions();
     }
     
@@ -556,18 +561,20 @@ export class QuickDraw {
         
         this.showMessage('Opponent found! Preparing duel...');
         
-        // Teleport to duel area
+        // Teleport to duel area.
+        // For "left" side, spawn on the left; for "right", spawn on the right.
         const playerPosition = message.position === 'left' ?
             new THREE.Vector3(this.duelCenter.x - 5, 1.6, this.duelCenter.z) : 
             new THREE.Vector3(this.duelCenter.x + 5, 1.6, this.duelCenter.z);
         
         this.localPlayer.group.position.copy(playerPosition);
         
-        // Face the opponent
+        // Invert player orientation by 180°:
+        // For left side, set rotation.y to (Math.PI/2 + Math.PI) = 3π/2; for right, (-Math.PI/2 + Math.PI) = π/2.
         if (message.position === 'left') {
-            this.localPlayer.group.rotation.y = 0; // Face right
+            this.localPlayer.group.rotation.y = 3 * Math.PI / 2;
         } else {
-            this.localPlayer.group.rotation.y = Math.PI; // Face left
+            this.localPlayer.group.rotation.y = Math.PI / 2;
         }
         
         // Make duel area visible
@@ -642,25 +649,22 @@ export class QuickDraw {
         this.duelState = 'draw';
         this.updateStatusIndicator();
         
-        // Show animated circle with CSS animation - MUCH BIGGER
+        // Show animated circle with CSS animation
         this.drawCircle.style.display = 'block';
         this.drawCircle.classList.add('draw-circle-animation');
         
-        // NO TEXT - just the circle animation
-        // Don't show "DRAW!" text anymore
+        // Only enable aiming if the penalty period has expired.
+        if (performance.now() >= this.penaltyEndTime) {
+            this.localPlayer.canAim = this.originalCanAim;
+        } else {
+            console.log("Penalty still active; gun remains locked.");
+        }
         
-        // Enable aiming
-        this.localPlayer.canAim = this.originalCanAim;
+        console.log('DRAW signal triggered - players can now shoot (if not penalized)');
         
-        console.log('DRAW signal triggered - players can now shoot');
-        
-        // Play sound
+        // Play bell start sound instead of a gunshot
         if (this.soundManager) {
-            // Play both sounds for dramatic effect
-            this.soundManager.playSound("aimclick");
-            setTimeout(() => {
-                this.soundManager.playSound("shot1");
-            }, 100);
+            this.soundManager.playSound("bellstart");
         }
         
         // Remove animation class after it completes
@@ -672,11 +676,14 @@ export class QuickDraw {
     
     /**
      * Apply a penalty with dramatic red flashing warning.
+     * Once triggered, records a penalty end time so that gun drawing remains locked
+     * for a full 3 seconds even if the "DRAW!" signal comes.
      */
     penalizeEarlyDraw() {
         if (this.gunLocked) return;
         
         this.gunLocked = true;
+        this.penaltyEndTime = performance.now() + 3000;
         
         // Show the message with a warning style
         this.showMessage('TOO EARLY!', 3000);
@@ -719,7 +726,7 @@ export class QuickDraw {
             this.soundManager.playSound("aimclick");
         }
         
-        // Add countdown timer text
+        // Countdown timer text update
         let secondsLeft = 3;
         const updateCountdown = () => {
             this.messageOverlay.textContent = `TOO EARLY! Gun locked (${secondsLeft}s)`;
@@ -729,15 +736,12 @@ export class QuickDraw {
                 this.penaltyTimer = setTimeout(updateCountdown, 1000);
             }
         };
-        
         updateCountdown();
         
-        // Enable aiming after penalty
+        // After 3 seconds, clear the penalty
         setTimeout(() => {
-            if (this.duelState === 'draw') {
-                this.localPlayer.canAim = this.originalCanAim;
-            }
             this.gunLocked = false;
+            this.penaltyEndTime = 0;
             this.hideMessage();
             this.messageOverlay.classList.remove('gun-locked-warning');
         }, 3000);

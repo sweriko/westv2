@@ -35,6 +35,8 @@ function init() {
     soundManager.loadSound("aimclick", "sounds/aimclick.mp3");
     soundManager.loadSound("shellejection", "sounds/shellejection.mp3");
     soundManager.loadSound("reloading", "sounds/reloading.mp3");
+    // Load the bell start sound for Quick Draw start signal
+    soundManager.loadSound("bellstart", "sounds/bellstart.mp3");
     
     // Initialize multiplayer manager
     multiplayerManager = new MultiplayerManager(scene, soundManager, remotePlayers);
