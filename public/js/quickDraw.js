@@ -23,8 +23,8 @@ export class QuickDraw {
         // Record the time (in ms) until which the gun remains locked
         this.penaltyEndTime = 0;
         
-        // Duel area position
-        this.duelCenter = new THREE.Vector3(50, 0, 50); // Far from main spawn
+        // Duel area position - positioned outside town boundary
+        this.duelCenter = new THREE.Vector3(0, 0, 0); // Will be updated based on town dimensions
         this.arenaRadius = 15;
         this.arenaHeight = 5;
         
@@ -110,7 +110,23 @@ export class QuickDraw {
             opacity: 0.8
         });
         this.portal = new THREE.Mesh(portalGeometry, portalMaterial);
-        this.portal.position.set(5, 1.5, 5); // Near the spawn point
+        
+        // Position the portal within the town street
+        // If town dimensions are available, use them for positioning
+        if (window.townDimensions) {
+            const streetWidth = window.townDimensions.streetWidth;
+            const townLength = window.townDimensions.length;
+            
+            // Position the portal near the center of the street
+            this.portal.position.set(0, 1.5, townLength * 0.3); // 30% down the street
+            
+            // Update the duel center position to be outside town boundary
+            this.duelCenter = new THREE.Vector3(0, 0, townLength + 30);
+        } else {
+            // Default position if town dimensions aren't available
+            this.portal.position.set(0, 1.5, 10); // Further down the street from spawn
+        }
+        
         this.portal.rotation.y = Math.PI / 2; // Make it vertical
         this.scene.add(this.portal);
         
@@ -135,14 +151,16 @@ export class QuickDraw {
         
         const textGeometry = new THREE.PlaneGeometry(2, 0.5);
         this.portalText = new THREE.Mesh(textGeometry, textMaterial);
-        this.portalText.position.set(5, 2.5, 5);
+        this.portalText.position.copy(this.portal.position);
+        this.portalText.position.y += 1.0; // Position above the portal
         this.portalText.rotation.y = Math.PI / 2;
         this.scene.add(this.portalText);
         
-        // Create collision detector for the portal
+        // Create collision detector for the portal - adjust based on portal position
+        const portalPos = this.portal.position;
         this.portalCollider = new THREE.Box3(
-            new THREE.Vector3(4.5, 0, 4.5),
-            new THREE.Vector3(5.5, 3, 5.5)
+            new THREE.Vector3(portalPos.x - 0.5, portalPos.y - 1.5, portalPos.z - 0.5),
+            new THREE.Vector3(portalPos.x + 0.5, portalPos.y + 1.5, portalPos.z + 0.5)
         );
         
         // Animate the portal
@@ -187,9 +205,11 @@ export class QuickDraw {
         document.getElementById('game-container').appendChild(this.instructionsElement);
         
         // Show instructions when player gets close to portal
+        // Adjust the proximity box based on portal position
+        const portalPos = this.portal.position;
         this.portalProximityBox = new THREE.Box3(
-            new THREE.Vector3(3, 0, 3),
-            new THREE.Vector3(7, 3, 7)
+            new THREE.Vector3(portalPos.x - 2, portalPos.y - 2, portalPos.z - 2),
+            new THREE.Vector3(portalPos.x + 2, portalPos.y + 2, portalPos.z + 2)
         );
     }
     
@@ -404,6 +424,106 @@ export class QuickDraw {
     }
     
     /**
+     * Creates an invisible cylindrical boundary for the QuickDraw arena
+     * @param {THREE.Vector3} center - Center position of the arena
+     * @param {number} radius - Radius of the cylindrical arena
+     * @param {number} height - Height of the cylindrical arena
+     */
+    createQuickDrawArenaBoundary(center, radius, height) {
+        // First remove any existing arena boundaries
+        this.removeQuickDrawArenaBoundary();
+        
+        // Create a physics body for the arena boundary
+        const arenaBody = new CANNON.Body({
+            mass: 0, // Static body
+            material: this.defaultMaterial
+        });
+        
+        // Position at the center
+        arenaBody.position.set(center.x, center.y + height/2, center.z);
+        
+        // Add a cylindrical shape for the arena
+        // Use segments to approximate the cylinder
+        const segments = 16; // Number of sides for the cylinder approximation
+        const wallThickness = 0.5;
+        
+        // Create segments around the circle to approximate the cylinder
+        for (let i = 0; i < segments; i++) {
+            const angle1 = (i / segments) * Math.PI * 2;
+            const angle2 = ((i + 1) / segments) * Math.PI * 2;
+            
+            const x1 = Math.cos(angle1) * radius;
+            const z1 = Math.sin(angle1) * radius;
+            const x2 = Math.cos(angle2) * radius;
+            const z2 = Math.sin(angle2) * radius;
+            
+            // Calculate the position and orientation of this wall segment
+            const segCenter = {
+                x: (x1 + x2) / 2,
+                z: (z1 + z2) / 2
+            };
+            
+            const length = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(z2 - z1, 2));
+            
+            // Create a box shape for this wall segment
+            // Position the wall so it doesn't intrude into the arena
+            const halfExtents = new CANNON.Vec3(length/2, height/2, wallThickness/2);
+            const wallShape = new CANNON.Box(halfExtents);
+            
+            // Get the angle to rotate this wall segment
+            const rotationY = Math.atan2(z2 - z1, x2 - x1) + Math.PI/2;
+            
+            // Position the walls at exactly the arena radius, not inside it
+            const offsetDistance = radius;
+            const offset = new CANNON.Vec3(
+                segCenter.x * (offsetDistance / Math.sqrt(segCenter.x * segCenter.x + segCenter.z * segCenter.z)),
+                0,
+                segCenter.z * (offsetDistance / Math.sqrt(segCenter.x * segCenter.x + segCenter.z * segCenter.z))
+            );
+            
+            const quaternion = new CANNON.Quaternion();
+            quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), rotationY);
+            
+            arenaBody.addShape(wallShape, offset, quaternion);
+        }
+        
+        // Bottom circle to prevent falling through
+        const bottomShape = new CANNON.Cylinder(radius, radius, wallThickness, segments);
+        const bottomOffset = new CANNON.Vec3(0, -height/2, 0);
+        const bottomQuaternion = new CANNON.Quaternion();
+        bottomQuaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI / 2);
+        arenaBody.addShape(bottomShape, bottomOffset, bottomQuaternion);
+        
+        arenaBody.arenaBoundary = true; // Tag this body as an arena boundary
+        arenaBody.collisionFilterGroup = 2; // Group 2 for arena boundaries
+        
+        // Add the arena body to the world
+        this.world.addBody(arenaBody);
+        this.bodies.push(arenaBody);
+        
+        // Create a reference to easily find this body later
+        this.arenaBoundaryBody = arenaBody;
+        
+        // If debug mode is enabled, create a visual representation
+        if (this.debugMode) {
+            this.createDebugMesh(arenaBody);
+        }
+        
+        console.log("Created QuickDraw arena boundary at", center, "with radius", radius, "and height", height);
+        
+        return arenaBody;
+    }
+    
+    /**
+     * Removes the QuickDraw arena boundary if it exists
+     */
+    removeQuickDrawArenaBoundary() {
+        if (this.physics && this.physics.arenaBoundaryBody) {
+            this.physics.removeQuickDrawArenaBoundary();
+        }
+    }
+    
+    /**
      * Check if a point is inside the duel arena using the physics system
      * @param {THREE.Vector3} point - The point to check
      * @returns {boolean} - True if the point is inside the arena
@@ -488,7 +608,7 @@ export class QuickDraw {
             this.localPlayer.revolver.group.visible = false;
         }
         
-        // (Additional portal instruction update)
+        // Update portal instruction visibility
         this.updatePortalInstructions();
     }
     
@@ -581,11 +701,13 @@ export class QuickDraw {
         this.duelArea.visible = true;
         
         // Create the arena physics boundary
-        this.physics.createQuickDrawArenaBoundary(
-            this.duelCenter, 
-            this.arenaRadius,
-            this.arenaHeight
-        );
+        if (this.physics) {
+            this.physics.createQuickDrawArenaBoundary(
+                this.duelCenter, 
+                this.arenaRadius,
+                this.arenaHeight
+            );
+        }
         
         // Disable weapon drawing immediately and forcefully
         this.originalCanAim = this.localPlayer.canAim !== false;
@@ -835,7 +957,7 @@ export class QuickDraw {
             this.duelArea.visible = false;
             
             // Teleport back to normal spawn
-            this.localPlayer.group.position.set(0, 1.6, 0);
+            this.localPlayer.spawnPlayerRandomly();
             
             // Re-enable normal controls
             this.localPlayer.canAim = this.originalCanAim;

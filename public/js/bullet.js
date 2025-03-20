@@ -115,6 +115,38 @@ export class Bullet {
       }
     }
 
+    // Check if crossing town boundary using the physics system
+    if (window.physics && typeof window.physics.isPointInTown === 'function') {
+      const bulletInTown = window.physics.isPointInTown(endPos);
+      const prevInTown = window.physics.isPointInTown(this.lastPosition);
+      
+      // Calculate if bullet is crossing the boundary
+      const bulletCrossingBoundary = bulletInTown !== prevInTown;
+      
+      // If the bullet is crossing the boundary, destroy it
+      if (bulletCrossingBoundary) {
+        console.log("Bullet hit town boundary - destroying it");
+        createImpactEffect(endPos, this.direction, scene, 'ground');
+        return { active: false, hit: { type: 'boundary', position: endPos } };
+      }
+    } else if (window.townDimensions) {
+      // Fallback if physics isn't available but town dimensions are
+      const width = window.townDimensions.width;
+      const length = window.townDimensions.length;
+      
+      // Check if bullet is outside town boundary
+      if (
+        endPos.x < -width / 2 || 
+        endPos.x > width / 2 || 
+        endPos.z < -length / 2 || 
+        endPos.z > length / 2
+      ) {
+        console.log("Bullet hit town boundary - destroying it");
+        createImpactEffect(endPos, this.direction, scene, 'ground');
+        return { active: false, hit: { type: 'boundary', position: endPos } };
+      }
+    }
+
     // 1) Check collision with NPC
     if (npc) {
       const npcBox = new THREE.Box3().setFromObject(npc);

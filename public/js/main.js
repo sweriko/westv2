@@ -5,9 +5,10 @@ import { Player } from './player.js';
 import { networkManager } from './network.js';
 import { MultiplayerManager } from './multiplayerManager.js';
 import { Bullet } from './bullet.js';
-import { createMuzzleFlash, createSmokeEffect, createShockwaveRing, createImpactEffect } from './effects.js';
+import { createMuzzleFlash, createSmokeEffect, createShockwaveRing, createImpactEffect, SmokeRingEffect } from './effects.js';
 import { QuickDraw } from './quickDraw.js';
-import { updateAmmoUI, updateHealthUI } from './ui.js'; // Added import for updateHealthUI
+import { updateAmmoUI, updateHealthUI } from './ui.js';
+import { PhysicsSystem } from './physics.js';
 
 // Keep track of all bullets in the game, both local and remote
 let bullets = [];
@@ -21,7 +22,12 @@ let playersMap = new Map();     // Master map including local + remote
 let renderer, camera, npc;
 let multiplayerManager;
 let quickDraw;
+let physics;
 let lastTime = 0;
+
+// Smoke ring effects
+let smokeRings = [];
+let maxSmokeRings = 10; // Limit to prevent performance issues
 
 function init() {
   try {
@@ -42,6 +48,26 @@ function init() {
     // Load impact sounds
     soundManager.loadSound("woodimpact", "sounds/woodimpact.mp3");
     soundManager.loadSound("fleshimpact", "sounds/fleshimpact.mp3");
+    
+    // Initialize physics system
+    physics = new PhysicsSystem();
+    window.physics = physics; // Make physics globally accessible
+
+    // Create town boundary if dimensions are available
+    if (window.townDimensions) {
+      physics.createTownBoundary(
+        window.townDimensions.width,
+        window.townDimensions.length,
+        5 // Height of the barrier
+      );
+    }
+    
+    // Initialize a smoke ring effect pool for reuse
+    for (let i = 0; i < 3; i++) {
+      const smokeRing = new SmokeRingEffect(scene);
+      smokeRing.active = false;
+      smokeRings.push(smokeRing);
+    }
     
     // Initialize multiplayer manager
     multiplayerManager = new MultiplayerManager(scene, soundManager, remotePlayers);
@@ -68,12 +94,15 @@ function init() {
     // Initialize Quick Draw game mode after the local player is created
     quickDraw = new QuickDraw(scene, localPlayer, networkManager, soundManager);
     
+    // Share the main physics system with QuickDraw
+    quickDraw.physics = physics;
+    
     // Debug toggle for physics visualization (press P)
     window.addEventListener('keydown', (event) => {
       if (event.code === 'KeyP') {
-        if (quickDraw && quickDraw.physics) {
-          const isDebugMode = !quickDraw.physics.debugMode;
-          quickDraw.physics.setDebugMode(isDebugMode);
+        if (physics) {
+          const isDebugMode = !physics.debugMode;
+          physics.setDebugMode(isDebugMode);
           console.log(`Physics debug mode: ${isDebugMode ? 'ENABLED' : 'DISABLED'}`);
         }
       }
@@ -135,6 +164,11 @@ function animate(time) {
   const deltaTime = (time - lastTime) / 1000;
   lastTime = time;
 
+  // Update physics system
+  if (physics) {
+    physics.update(deltaTime);
+  }
+
   // Update local player
   localPlayer.update(deltaTime);
 
@@ -147,6 +181,16 @@ function animate(time) {
   // Update Quick Draw game mode
   if (quickDraw) {
     quickDraw.update(deltaTime);
+  }
+
+  // Update smoke ring effects
+  for (let i = smokeRings.length - 1; i >= 0; i--) {
+    // If the smoke ring is inactive after update, we can remove it
+    // But keep at least 3 in the pool for reuse
+    if (!smokeRings[i].update(deltaTime) && smokeRings.length > 3) {
+      smokeRings[i].dispose();
+      smokeRings.splice(i, 1);
+    }
   }
 
   // Update bullets (both local & remote)
@@ -228,6 +272,28 @@ function spawnBullet(sourcePlayerId, position, direction) {
   createMuzzleFlash(position, scene);
   createSmokeEffect(position, direction, scene);
   createShockwaveRing(position, direction, scene);
+  
+  // Add smoke ring effect
+  let smokeRing = null;
+  
+  // Try to reuse an inactive smoke ring first
+  for (let i = 0; i < smokeRings.length; i++) {
+    if (!smokeRings[i].active) {
+      smokeRing = smokeRings[i];
+      break;
+    }
+  }
+  
+  // If no inactive smoke ring found, create a new one if under the limit
+  if (!smokeRing && smokeRings.length < maxSmokeRings) {
+    smokeRing = new SmokeRingEffect(scene);
+    smokeRings.push(smokeRing);
+  }
+  
+  // Activate the smoke ring
+  if (smokeRing) {
+    smokeRing.create(position, direction);
+  }
 
   // Sound: randomly choose one of the three shot sounds
   if (localPlayer.soundManager) {
@@ -271,6 +337,7 @@ function showGameInstructions() {
   instructions.innerHTML = `
     <h2>Wild Western Shooter - Multiplayer</h2>
     <p>WASD: Move</p>
+    <p>Shift: Sprint</p>
     <p>Right-click: Aim</p>
     <p>Left-click (while aiming): Shoot</p>
     <p>R: Reload</p>
@@ -278,7 +345,7 @@ function showGameInstructions() {
     <p>P: Toggle physics debug visualization</p>
     <p><strong>Click anywhere to start</strong></p>
     <p><strong>New:</strong> Find the Quick Draw portal near spawn to duel other players!</p>
-    <p><strong>Arena boundaries:</strong> Players and bullets cannot cross between the main world and duel arena.</p>`;
+    <p><strong>Town Boundary:</strong> You must stay within the town limits and can only access the duel arena through the portal.</p>`;
   
   document.getElementById('game-container').appendChild(instructions);
   
@@ -295,6 +362,16 @@ window.addEventListener('beforeunload', () => {
   if (quickDraw && quickDraw.physics) {
     quickDraw.physics.cleanup();
   }
+  
+  if (physics) {
+    physics.cleanup();
+  }
+  
+  // Clean up smoke rings
+  for (let i = 0; i < smokeRings.length; i++) {
+    smokeRings[i].dispose();
+  }
+  smokeRings = [];
 });
 
 init();

@@ -50,13 +50,19 @@ export function initInput(renderer, player, soundManager) {
         break;
       case 'Space':
         if (player.canJump) {
-          player.velocity.y = 10;
+          // If sprinting, jump higher
+          player.velocity.y = player.isSprinting ? 15 : 10;
           player.canJump = false;
         }
         break;
       case 'KeyR':
         // Start reload
         player.startReload();
+        break;
+      case 'ShiftLeft':
+      case 'ShiftRight':
+        // Enable sprinting
+        player.isSprinting = true;
         break;
       default:
         break;
@@ -77,6 +83,11 @@ export function initInput(renderer, player, soundManager) {
         break;
       case 'KeyD':
         player.moveRight = false;
+        break;
+      case 'ShiftLeft':
+      case 'ShiftRight':
+        // Disable sprinting
+        player.isSprinting = false;
         break;
       default:
         break;
