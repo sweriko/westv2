@@ -152,7 +152,7 @@ body {
   height: 20px;
   border: 2px solid white;
   border-radius: 50%;
-  display: none;
+  display: none; /* Always keep it hidden to make the game more realistic */
 }
 #crosshair::before,
 #crosshair::after {
@@ -362,6 +362,23 @@ body {
 #portal-instructions li {
   margin-bottom: 5px;
   list-style-type: square;
+}
+
+/* Lobby display for showing which arena the player is in */
+#lobby-indicator {
+  position: absolute;
+  top: 150px;
+  left: 20px;
+  color: white;
+  font-size: 16px;
+  background-color: rgba(255, 107, 0, 0.7);
+  padding: 8px 12px;
+  border-radius: 5px;
+  font-family: 'Courier New', Courier, monospace;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  display: none;
 }
 
 @font-face {
@@ -1386,8 +1403,7 @@ export function initInput(renderer, player, soundManager) {
       if (player.arms) {
         player.arms.setVisible(true);
       }
-      const crosshair = document.getElementById('crosshair');
-      if (crosshair) crosshair.style.display = 'block';
+      // Removed crosshair display - making the game more realistic
 
       if (soundManager) {
         soundManager.playSound("aimclick");
@@ -1410,8 +1426,7 @@ export function initInput(renderer, player, soundManager) {
       if (player.arms) {
         player.arms.setVisible(false);
       }
-      const crosshair = document.getElementById('crosshair');
-      if (crosshair) crosshair.style.display = 'none';
+      // Removed crosshair display code
     }
   });
 
@@ -1973,320 +1988,383 @@ File: /public/js/network.js
  * It provides event callbacks for multiplayer events and methods to send data.
  */
 export class NetworkManager {
-    constructor() {
-      this.socket = null;
-      this.playerId = null;
-      this.otherPlayers = new Map(); // Maps playerId -> playerData from the server
-  
-      // Callbacks
-      this.onInit = null;              // Called when we first receive 'init' from server
-      this.onPlayerJoined = null;
-      this.onPlayerLeft = null;
-      this.onPlayerUpdate = null;
-      this.onPlayerShoot = null;
-      this.onPlayerCount = null;
-      this.onPlayerHit = null;         // When this player is hit by someone
-      this.onPlayerHitBroadcast = null;// When any player is hit
-      this.onOpen = null;
-      this.onClose = null;
-      this.onError = null;
-  
-      // Automatic reconnect attempts
+  constructor() {
+    this.socket = null;
+    this.playerId = null;
+    this.otherPlayers = new Map(); // Maps playerId -> playerData from the server
+
+    // Callbacks
+    this.onInit = null;              // Called when we first receive 'init' from server
+    this.onPlayerJoined = null;
+    this.onPlayerLeft = null;
+    this.onPlayerUpdate = null;
+    this.onPlayerShoot = null;
+    this.onPlayerCount = null;
+    this.onPlayerHit = null;         // When this player is hit by someone
+    this.onPlayerHitBroadcast = null;// When any player is hit
+    this.onOpen = null;
+    this.onClose = null;
+    this.onError = null;
+
+    // Automatic reconnect attempts
+    this.connectionAttempts = 0;
+    this.maxConnectionAttempts = 5;
+    this.reconnectTimer = null;
+
+    // Unique sessionId to prevent multiple tabs from colliding
+    this.sessionId = this._generateSessionId();
+  }
+
+  /**
+   * Generates a unique-ish session ID to detect duplicate connections from the same tab.
+   */
+  _generateSessionId() {
+    return Date.now().toString(36) + Math.random().toString(36).substring(2);
+  }
+
+  /**
+   * Initiates a connection to the WebSocket server.
+   */
+  connect() {
+    this._cleanupSocket();
+
+    // Determine correct ws:// or wss:// based on current protocol
+    const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const wsUrl = `${protocol}${window.location.host}?sessionId=${this.sessionId}`;
+
+    console.log('Attempting to connect to:', wsUrl);
+    this.socket = new WebSocket(wsUrl);
+
+    this.socket.onopen = (event) => {
+      console.log('WebSocket connected');
       this.connectionAttempts = 0;
-      this.maxConnectionAttempts = 5;
+      if (typeof this.onOpen === 'function') {
+        this.onOpen(event);
+      }
+    };
+
+    this.socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        this.handleMessage(message);
+      } catch (err) {
+        console.error('Error parsing server message:', err);
+      }
+    };
+
+    this.socket.onclose = (event) => {
+      console.log(`WebSocket closed: ${event.code} ${event.reason}`);
+      if (typeof this.onClose === 'function') {
+        this.onClose(event);
+      }
+      this._scheduleReconnect();
+    };
+
+    this.socket.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      if (typeof this.onError === 'function') {
+        this.onError(error);
+      }
+    };
+  }
+
+  /**
+   * Clean up any existing WebSocket connection.
+   */
+  _cleanupSocket() {
+    if (this.socket) {
+      this.socket.onopen = null;
+      this.socket.onmessage = null;
+      this.socket.onclose = null;
+      this.socket.onerror = null;
+      if (
+        this.socket.readyState === WebSocket.OPEN ||
+        this.socket.readyState === WebSocket.CONNECTING
+      ) {
+        this.socket.close();
+      }
+      this.socket = null;
+    }
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
-  
-      // Unique sessionId to prevent multiple tabs from colliding
-      this.sessionId = this._generateSessionId();
     }
-  
-    /**
-     * Generates a unique-ish session ID to detect duplicate connections from the same tab.
-     */
-    _generateSessionId() {
-      return Date.now().toString(36) + Math.random().toString(36).substring(2);
+  }
+
+  /**
+   * Schedules a reconnect attempt if under max attempts.
+   */
+  _scheduleReconnect() {
+    if (this.connectionAttempts < this.maxConnectionAttempts) {
+      this.connectionAttempts++;
+      const delay = Math.min(1000 * Math.pow(2, this.connectionAttempts), 30000);
+      console.log(`Reconnecting in ${(delay / 1000).toFixed(1)}s... (Attempt ${this.connectionAttempts}/${this.maxConnectionAttempts})`);
+      
+      this.reconnectTimer = setTimeout(() => {
+        console.log(`Reconnecting now (Attempt ${this.connectionAttempts})...`);
+        this.connect();
+      }, delay);
+    } else {
+      console.error('Max reconnect attempts reached. Please refresh the page.');
     }
-  
-    /**
-     * Initiates a connection to the WebSocket server.
-     */
-    connect() {
-      this._cleanupSocket();
-  
-      // Determine correct ws:// or wss:// based on current protocol
-      const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-      const wsUrl = `${protocol}${window.location.host}?sessionId=${this.sessionId}`;
-  
-      console.log('Attempting to connect to:', wsUrl);
-      this.socket = new WebSocket(wsUrl);
-  
-      this.socket.onopen = (event) => {
-        console.log('WebSocket connected');
-        this.connectionAttempts = 0;
-        if (typeof this.onOpen === 'function') {
-          this.onOpen(event);
+  }
+
+  /**
+   * Handles all messages from the server.
+   * @param {Object} message The parsed JSON message object.
+   */
+  handleMessage(message) {
+    switch (message.type) {
+      // New connection initialization
+      case 'init':
+        this.playerId = message.id;
+        console.log(`Assigned player ID: ${this.playerId}`);
+
+        // If there's a callback
+        if (typeof this.onInit === 'function') {
+          this.onInit(message);
         }
-      };
-  
-      this.socket.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-          this.handleMessage(message);
-        } catch (err) {
-          console.error('Error parsing server message:', err);
-        }
-      };
-  
-      this.socket.onclose = (event) => {
-        console.log(`WebSocket closed: ${event.code} ${event.reason}`);
-        if (typeof this.onClose === 'function') {
-          this.onClose(event);
-        }
-        this._scheduleReconnect();
-      };
-  
-      this.socket.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        if (typeof this.onError === 'function') {
-          this.onError(error);
-        }
-      };
-    }
-  
-    /**
-     * Clean up any existing WebSocket connection.
-     */
-    _cleanupSocket() {
-      if (this.socket) {
-        this.socket.onopen = null;
-        this.socket.onmessage = null;
-        this.socket.onclose = null;
-        this.socket.onerror = null;
-        if (
-          this.socket.readyState === WebSocket.OPEN ||
-          this.socket.readyState === WebSocket.CONNECTING
-        ) {
-          this.socket.close();
-        }
-        this.socket = null;
-      }
-  
-      if (this.reconnectTimer) {
-        clearTimeout(this.reconnectTimer);
-        this.reconnectTimer = null;
-      }
-    }
-  
-    /**
-     * Schedules a reconnect attempt if under max attempts.
-     */
-    _scheduleReconnect() {
-      if (this.connectionAttempts < this.maxConnectionAttempts) {
-        this.connectionAttempts++;
-        const delay = Math.min(1000 * Math.pow(2, this.connectionAttempts), 30000);
-        console.log(`Reconnecting in ${(delay / 1000).toFixed(1)}s... (Attempt ${this.connectionAttempts}/${this.maxConnectionAttempts})`);
-        
-        this.reconnectTimer = setTimeout(() => {
-          console.log(`Reconnecting now (Attempt ${this.connectionAttempts})...`);
-          this.connect();
-        }, delay);
-      } else {
-        console.error('Max reconnect attempts reached. Please refresh the page.');
-      }
-    }
-  
-    /**
-     * Handles all messages from the server.
-     * @param {Object} message The parsed JSON message object.
-     */
-    handleMessage(message) {
-      switch (message.type) {
-        // New connection initialization
-        case 'init':
-          this.playerId = message.id;
-          console.log(`Assigned player ID: ${this.playerId}`);
-  
-          // If there's a callback
-          if (typeof this.onInit === 'function') {
-            this.onInit(message);
-          }
-  
-          // Add known players
-          message.players.forEach(player => {
-            if (this.onPlayerJoined) {
-              this.onPlayerJoined(player);
-            }
-            this.otherPlayers.set(player.id, player);
-          });
-          break;
-  
-        // Another player joined
-        case 'playerJoined':
-          console.log(`Player ${message.id} joined`);
+
+        // Add known players
+        message.players.forEach(player => {
           if (this.onPlayerJoined) {
-            this.onPlayerJoined(message);
+            this.onPlayerJoined(player);
           }
-          this.otherPlayers.set(message.id, {
-            id: message.id,
-            position: message.position,
-            rotation: message.rotation,
-            isAiming: false,
-            isShooting: false,
-            isReloading: false
-          });
-          break;
-  
-        // Player left
-        case 'playerLeft':
-          console.log(`Player ${message.id} left`);
-          if (this.onPlayerLeft) {
-            this.onPlayerLeft(message.id);
+          this.otherPlayers.set(player.id, player);
+        });
+        break;
+
+      // Another player joined
+      case 'playerJoined':
+        console.log(`Player ${message.id} joined`);
+        if (this.onPlayerJoined) {
+          this.onPlayerJoined(message);
+        }
+        this.otherPlayers.set(message.id, {
+          id: message.id,
+          position: message.position,
+          rotation: message.rotation,
+          isAiming: false,
+          isShooting: false,
+          isReloading: false,
+          quickDrawLobbyIndex: message.quickDrawLobbyIndex || -1
+        });
+        break;
+
+      // Player left
+      case 'playerLeft':
+        console.log(`Player ${message.id} left`);
+        if (this.onPlayerLeft) {
+          this.onPlayerLeft(message.id);
+        }
+        this.otherPlayers.delete(message.id);
+        break;
+
+      // General player update (pos/rot/aiming/etc.)
+      case 'playerUpdate':
+        {
+          const existing = this.otherPlayers.get(message.id);
+          if (existing) {
+            existing.position = message.position || existing.position;
+            existing.rotation = message.rotation || existing.rotation;
+            existing.isAiming =
+              message.isAiming !== undefined ? message.isAiming : existing.isAiming;
+            existing.isShooting =
+              message.isShooting !== undefined ? message.isShooting : existing.isShooting;
+            existing.isReloading =
+              message.isReloading !== undefined ? message.isReloading : existing.isReloading;
+            existing.quickDrawLobbyIndex =
+              message.quickDrawLobbyIndex !== undefined ? message.quickDrawLobbyIndex : existing.quickDrawLobbyIndex;
           }
-          this.otherPlayers.delete(message.id);
-          break;
-  
-        // General player update (pos/rot/aiming/etc.)
-        case 'playerUpdate':
-          {
-            const existing = this.otherPlayers.get(message.id);
-            if (existing) {
-              existing.position = message.position || existing.position;
-              existing.rotation = message.rotation || existing.rotation;
-              existing.isAiming =
-                message.isAiming !== undefined ? message.isAiming : existing.isAiming;
-              existing.isShooting =
-                message.isShooting !== undefined ? message.isShooting : existing.isShooting;
-              existing.isReloading =
-                message.isReloading !== undefined ? message.isReloading : existing.isReloading;
-            }
-            if (this.onPlayerUpdate) {
-              this.onPlayerUpdate(message.id, existing);
-            }
+          if (this.onPlayerUpdate) {
+            this.onPlayerUpdate(message.id, existing);
           }
-          break;
-  
-        // Remote player fired
-        case 'playerShoot':
-          if (this.onPlayerShoot) {
-            this.onPlayerShoot(message.id, message.bulletData);
-          }
-          break;
-  
-        // Current total player count
-        case 'playerCount':
-          if (this.onPlayerCount) {
-            this.onPlayerCount(message.count);
-          }
-          break;
-  
-        // This client was hit by another player
-        case 'hit':
-          console.log(`I was hit by player ${message.sourceId}`);
-          if (this.onPlayerHit) {
-            this.onPlayerHit(message.sourceId, message.hitData);
-          }
-          break;
-  
-        // A broadcast that someone was hit
-        case 'playerHit':
-          console.log(`Player ${message.targetId} was hit by player ${message.sourceId}`);
-          if (this.onPlayerHitBroadcast) {
-            this.onPlayerHitBroadcast(
-              message.targetId,
-              message.sourceId,
-              message.hitPosition
-            );
-          }
-          break;
-  
-        // Generic error from server
-        case 'error':
-          console.error('Server error:', message.message);
-          if (message.fatal) {
-            this.connectionAttempts = this.maxConnectionAttempts; // block further reconnect
-            alert(`Fatal error: ${message.message}`);
-          }
-          break;
-  
-        default:
-          console.warn('Unhandled message:', message);
-          break;
-      }
+        }
+        break;
+
+      // Remote player fired
+      case 'playerShoot':
+        if (this.onPlayerShoot) {
+          this.onPlayerShoot(message.id, message.bulletData);
+        }
+        break;
+
+      // Current total player count
+      case 'playerCount':
+        if (this.onPlayerCount) {
+          this.onPlayerCount(message.count);
+        }
+        break;
+
+      // This client was hit by another player
+      case 'hit':
+        console.log(`I was hit by player ${message.sourceId}`);
+        if (this.onPlayerHit) {
+          this.onPlayerHit(message.sourceId, message.hitData);
+        }
+        break;
+
+      // A broadcast that someone was hit
+      case 'playerHit':
+        console.log(`Player ${message.targetId} was hit by player ${message.sourceId}`);
+        if (this.onPlayerHitBroadcast) {
+          this.onPlayerHitBroadcast(
+            message.targetId,
+            message.sourceId,
+            message.hitPosition
+          );
+        }
+        break;
+
+      // Generic error from server
+      case 'error':
+        console.error('Server error:', message.message);
+        if (message.fatal) {
+          this.connectionAttempts = this.maxConnectionAttempts; // block further reconnect
+          alert(`Fatal error: ${message.message}`);
+        }
+        break;
+
+      default:
+        console.warn('Unhandled message:', message);
+        break;
     }
-  
-    /**
-     * Sends local player position/rotation etc. to the server.
-     * @param {Object} playerData - { position, rotation, isAiming, isReloading }
-     */
-    sendUpdate(playerData) {
-      if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-        this.socket.send(
-          JSON.stringify({
-            type: 'update',
-            ...playerData
-          })
-        );
-      }
+  }
+
+  /**
+   * Sends local player position/rotation etc. to the server.
+   * @param {Object} playerData - { position, rotation, isAiming, isReloading, quickDrawLobbyIndex }
+   */
+  sendUpdate(playerData) {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(
+        JSON.stringify({
+          type: 'update',
+          ...playerData
+        })
+      );
     }
-  
-    /**
-     * Notifies server that we fired a bullet.
-     * @param {Object} bulletData - { position: {x,y,z}, direction: {x,y,z} }
-     */
-    sendShoot(bulletData) {
-      if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-        this.socket.send(
-          JSON.stringify({
-            type: 'shoot',
-            bulletData
-          })
-        );
-      }
+  }
+
+  /**
+   * Notifies server that we fired a bullet.
+   * @param {Object} bulletData - { position: {x,y,z}, direction: {x,y,z} }
+   */
+  sendShoot(bulletData) {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(
+        JSON.stringify({
+          type: 'shoot',
+          bulletData
+        })
+      );
     }
-  
-    /**
-     * Notifies server that we hit another player.
-     * @param {number|string} hitPlayerId
-     * @param {Object} hitData - { position: {x,y,z}, sourcePlayerId: ... }
-     */
-    sendPlayerHit(hitPlayerId, hitData) {
-      if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-        this.socket.send(
-          JSON.stringify({
-            type: 'playerHit',
-            targetId: hitPlayerId,
-            hitData
-          })
-        );
-      }
-    }
-  
-    /**
-     * Closes the connection manually.
-     */
-    disconnect() {
-      this._cleanupSocket();
-      console.log('WebSocket connection manually closed');
+  }
+
+  /**
+   * Notifies server that we hit another player.
+   * @param {number|string} hitPlayerId
+   * @param {Object} hitData - { position: {x,y,z}, sourcePlayerId: ... }
+   */
+  sendPlayerHit(hitPlayerId, hitData) {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(
+        JSON.stringify({
+          type: 'playerHit',
+          targetId: hitPlayerId,
+          hitData
+        })
+      );
     }
   }
   
-  // Export a singleton instance
-  export const networkManager = new NetworkManager();
-  // Make it globally accessible
-  window.networkManager = networkManager;
+  /**
+   * Sends a request to join a specific Quick Draw arena queue.
+   * @param {number} arenaIndex - The arena index (0-4)
+   */
+  sendQuickDrawJoin(arenaIndex) {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(
+        JSON.stringify({
+          type: 'quickDrawJoin',
+          arenaIndex: arenaIndex
+        })
+      );
+    }
+  }
   
-  // Cleanup on page unload
-  window.addEventListener('beforeunload', () => {
-    networkManager.disconnect();
-  });
+  /**
+   * Sends a request to leave the Quick Draw queue.
+   */
+  sendQuickDrawLeave() {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(
+        JSON.stringify({
+          type: 'quickDrawLeave'
+        })
+      );
+    }
+  }
   
+  /**
+   * Notifies the server that the player is ready for a Quick Draw duel.
+   * @param {number} arenaIndex - The arena index for the duel
+   */
+  sendQuickDrawReady(arenaIndex) {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(
+        JSON.stringify({
+          type: 'quickDrawReady',
+          arenaIndex: arenaIndex
+        })
+      );
+    }
+  }
+  
+  /**
+   * Notifies the server that the player has shot their opponent in a Quick Draw duel.
+   * @param {number|string} opponentId - The opponent's player ID
+   * @param {number} arenaIndex - The arena index for the duel
+   */
+  sendQuickDrawShoot(opponentId, arenaIndex) {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      console.log(`Sending Quick Draw hit notification to server: player ${this.playerId} hit player ${opponentId} in arena ${arenaIndex + 1}`);
+      this.socket.send(
+        JSON.stringify({
+          type: 'quickDrawShoot',
+          opponentId: opponentId,
+          arenaIndex: arenaIndex
+        })
+      );
+    }
+  }
+
+  /**
+   * Closes the connection manually.
+   */
+  disconnect() {
+    this._cleanupSocket();
+    console.log('WebSocket connection manually closed');
+  }
+}
+
+// Export a singleton instance
+export const networkManager = new NetworkManager();
+// Make it globally accessible
+window.networkManager = networkManager;
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+  networkManager.disconnect();
+});
 
 ================================================
 File: /public/js/physics.js
 ================================================
 /**
  * Physics system using cannon.js for collision detection and physics simulation.
- * Focused on creating invisible boundaries for the QuickDraw arena.
+ * Focused on creating invisible boundaries for the QuickDraw arenas and town.
  */
 export class PhysicsSystem {
     constructor() {
@@ -2313,6 +2391,9 @@ export class PhysicsSystem {
       // Debug helper for visualizing physics bodies
       this.debugMeshes = [];
       this.debugMode = false;
+      
+      // Track arena boundaries separately
+      this.arenaBoundaryBodies = [];
       
       // Initialize ground
       this.initGround();
@@ -2438,14 +2519,16 @@ export class PhysicsSystem {
     }
     
     /**
-     * Creates an invisible cylindrical boundary for the QuickDraw arena
+     * Creates an invisible cylindrical boundary for a QuickDraw arena
      * @param {THREE.Vector3} center - Center position of the arena
      * @param {number} radius - Radius of the cylindrical arena
      * @param {number} height - Height of the cylindrical arena
+     * @param {number} arenaIndex - Index of the arena (0-4)
+     * @returns {CANNON.Body} - The created physics body
      */
-    createQuickDrawArenaBoundary(center, radius, height) {
-      // First remove any existing arena boundaries
-      this.removeQuickDrawArenaBoundary();
+    createQuickDrawArenaBoundary(center, radius, height, arenaIndex = 0) {
+      // First remove any existing arena boundary for this index
+      this.removeQuickDrawArenaBoundaryByIndex(arenaIndex);
       
       // Create a physics body for the arena boundary
       const arenaBody = new CANNON.Body({
@@ -2456,7 +2539,6 @@ export class PhysicsSystem {
       // Position at the center
       arenaBody.position.set(center.x, center.y + height/2, center.z);
       
-      // Add a cylindrical shape for the arena
       // Use a hollow cylinder (cylinder + inverted cylinder)
       // We make the walls a bit thick (0.5 units) to ensure reliable collision detection
       const wallThickness = 0.5;
@@ -2506,41 +2588,53 @@ export class PhysicsSystem {
       arenaBody.addShape(bottomShape, bottomOffset, bottomQuaternion);
       
       arenaBody.arenaBoundary = true; // Tag this body as an arena boundary
+      arenaBody.arenaIndex = arenaIndex; // Store which arena this belongs to
       arenaBody.collisionFilterGroup = 2; // Group 2 for arena boundaries
       
       // Add the arena body to the world
       this.world.addBody(arenaBody);
       this.bodies.push(arenaBody);
       
-      // Create a reference to easily find this body later
-      this.arenaBoundaryBody = arenaBody;
+      // Store in our array of arena boundaries
+      this.arenaBoundaryBodies[arenaIndex] = arenaBody;
       
       // If debug mode is enabled, create a visual representation
       if (this.debugMode) {
         this.createDebugMesh(arenaBody);
       }
       
-      console.log("Created QuickDraw arena boundary at", center, "with radius", radius, "and height", height);
+      console.log(`Created QuickDraw arena boundary ${arenaIndex + 1} at`, center, "with radius", radius, "and height", height);
       
       return arenaBody;
     }
     
     /**
-     * Removes the QuickDraw arena boundary if it exists
+     * Removes a QuickDraw arena boundary for a specific arena index
+     * @param {number} arenaIndex - The index of the arena (0-4)
      */
-    removeQuickDrawArenaBoundary() {
-      if (this.arenaBoundaryBody) {
-        this.world.removeBody(this.arenaBoundaryBody);
+    removeQuickDrawArenaBoundaryByIndex(arenaIndex) {
+      if (this.arenaBoundaryBodies[arenaIndex]) {
+        this.world.removeBody(this.arenaBoundaryBodies[arenaIndex]);
         
         // Remove from our bodies array
-        const index = this.bodies.indexOf(this.arenaBoundaryBody);
+        const index = this.bodies.indexOf(this.arenaBoundaryBodies[arenaIndex]);
         if (index !== -1) {
           this.bodies.splice(index, 1);
         }
         
-        // Clear the reference
-        this.arenaBoundaryBody = null;
-        console.log("Removed QuickDraw arena boundary");
+        // Clear the reference in our arena boundaries array
+        this.arenaBoundaryBodies[arenaIndex] = null;
+        console.log(`Removed QuickDraw arena boundary ${arenaIndex + 1}`);
+      }
+    }
+    
+    /**
+     * Removes the QuickDraw arena boundary (legacy method for backward compatibility)
+     */
+    removeQuickDrawArenaBoundary() {
+      // Remove all arena boundaries
+      for (let i = 0; i < this.arenaBoundaryBodies.length; i++) {
+        this.removeQuickDrawArenaBoundaryByIndex(i);
       }
     }
     
@@ -2579,16 +2673,32 @@ export class PhysicsSystem {
     }
     
     /**
-     * Checks if a point is inside the arena boundary
+     * Checks if a point is inside any active arena boundary
      * @param {THREE.Vector3} point - The point to check
      * @returns {boolean} - True if inside, false if outside
      */
     isPointInArenaBoundary(point) {
-      // If no arena boundary exists, return false
-      if (!this.arenaBoundaryBody) return false;
+      // Check all arena boundaries
+      for (let i = 0; i < this.arenaBoundaryBodies.length; i++) {
+        if (this.isPointInSpecificArenaBoundary(point, i)) {
+          return true;
+        }
+      }
+      return false;
+    }
+    
+    /**
+     * Checks if a point is inside a specific arena boundary
+     * @param {THREE.Vector3} point - The point to check
+     * @param {number} arenaIndex - The arena index to check
+     * @returns {boolean} - True if inside, false if outside
+     */
+    isPointInSpecificArenaBoundary(point, arenaIndex) {
+      // If no arena boundary exists for this index, return false
+      if (!this.arenaBoundaryBodies[arenaIndex]) return false;
       
-      // Get arena position and create a CANNON vector for the point
-      const arenaPos = this.arenaBoundaryBody.position;
+      // Get arena position
+      const arenaPos = this.arenaBoundaryBodies[arenaIndex].position;
       const pointVec = new CANNON.Vec3(point.x, point.y, point.z);
       
       // Calculate horizontal distance (ignoring Y) from arena center
@@ -2596,10 +2706,10 @@ export class PhysicsSystem {
       const dz = pointVec.z - arenaPos.z;
       const horizontalDist = Math.sqrt(dx * dx + dz * dz);
       
-      // Get the radius from the first shape (assuming it's a cylinder or shape with radius property)
-      const radius = 15; // Default from QuickDraw.js
+      // Get the radius - assuming 15 is the standard radius for all arenas
+      const radius = 15;
       
-      // Check if point is inside the cylinder horizontally and vertically
+      // Check if point is inside the cylinder horizontally
       return horizontalDist < radius;
     }
 
@@ -2817,6 +2927,7 @@ export class PhysicsSystem {
       
       this.bodies = [];
       this.debugMeshes = [];
+      this.arenaBoundaryBodies = [];
     }
   }
 
@@ -2896,7 +3007,7 @@ export class Player {
 
     // Reload
     this.isReloading = false;
-    this.reloadTime = 2000;
+    this.reloadTime = 4000; // Changed from 2000ms to 4000ms (4 seconds)
     this.reloadProgress = 0;
     this.bullets = 6;
     this.maxBullets = 6;
@@ -2914,6 +3025,9 @@ export class Player {
     
     // Store previous position to detect collision with arena boundary
     this.previousPosition = new THREE.Vector3();
+
+    // Quick Draw lobby information
+    this.quickDrawLobbyIndex = -1; // -1 means not in a lobby
 
     // Initialize network & UI
     this.initNetworking();
@@ -3201,7 +3315,8 @@ export class Player {
       },
       isAiming: this.isAiming,
       isReloading: this.isReloading,
-      health: this.health
+      health: this.health,
+      quickDrawLobbyIndex: this.quickDrawLobbyIndex
     });
   }
 
@@ -3286,6 +3401,9 @@ export class Player {
     // Reset vertical velocity
     this.velocity.y = 0;
     
+    // Reset Quick Draw lobby information
+    this.quickDrawLobbyIndex = -1;
+    
     console.log('Player respawned');
   }
 
@@ -3339,6 +3457,28 @@ export class Player {
     
     this.isReloading = false;
     this.sendNetworkUpdate(); // let others know
+  }
+  
+  /**
+   * Set the Quick Draw lobby index for this player
+   * @param {number} index - The lobby index (0-4) or -1 for none
+   */
+  setQuickDrawLobby(index) {
+    this.quickDrawLobbyIndex = index;
+    
+    // Update UI indicator
+    const lobbyIndicator = document.getElementById('lobby-indicator');
+    if (lobbyIndicator) {
+      if (index >= 0) {
+        lobbyIndicator.textContent = `Arena ${index + 1}`;
+        lobbyIndicator.style.display = 'block';
+      } else {
+        lobbyIndicator.style.display = 'none';
+      }
+    }
+    
+    // Send update to server
+    this.sendNetworkUpdate();
   }
 }
 
@@ -3903,6 +4043,7 @@ File: /public/js/quickDraw.js
  * Quick Draw game mode implementation
  * Players face off in a wild west duel where they must wait for the "draw" signal
  * before pulling their revolvers and shooting at each other.
+ * Now with a single portal that automatically assigns players to available arenas.
  */
 
 import { PhysicsSystem } from './physics.js';
@@ -3924,22 +4065,81 @@ export class QuickDraw {
         // Record the time (in ms) until which the gun remains locked
         this.penaltyEndTime = 0;
         
-        // Duel area position - positioned outside town boundary
-        this.duelCenter = new THREE.Vector3(0, 0, 0); // Will be updated based on town dimensions
-        this.arenaRadius = 15;
-        this.arenaHeight = 5;
+        // Current active arena index (0-4, -1 means none)
+        this.activeArenaIndex = -1;
+        
+        // Arena configurations
+        this.maxArenas = 5; // Support for 5 concurrent lobbies as requested
+        this.arenaConfigs = this.createArenaConfigs();
         
         // Initialize physics system for collision detection
         this.physics = new PhysicsSystem();
         
-        // Initialize portal, duel area, and network handlers
+        // Track arena physics bodies
+        this.arenaBoundaries = new Array(this.maxArenas).fill(null);
+        
+        // Initialize the single portal, duel areas, and network handlers
         this.initPortal();
-        this.createDuelArea();
+        this.createDuelAreas();
         this.initNetworkHandlers();
         this.createUI();
 
         // Make this instance globally accessible for network handlers
         window.quickDraw = this;
+    }
+    
+    /**
+     * Create arena configurations with different positions
+     */
+    createArenaConfigs() {
+        const configs = [];
+        // Positioning logic - arenas are placed in a row with proper spacing
+        
+        // Calculate base position - if town dimensions are available, place them outside town
+        let baseZ = 0;
+        if (window.townDimensions) {
+            baseZ = window.townDimensions.length + 50; // Position outside town boundary
+        } else {
+            baseZ = 100; // Default position if town dimensions aren't available
+        }
+        
+        // Arena spacing - make sure they don't overlap
+        const spacingX = 50; // Allow enough space between arenas
+        
+        // Create 5 arena configs
+        for (let i = 0; i < this.maxArenas; i++) {
+            // Calculate position - arrange in a row along X axis
+            let offsetX = (i - 2) * spacingX; // Center on zero, spread outward
+            
+            configs.push({
+                index: i,
+                center: new THREE.Vector3(offsetX, 0, baseZ),
+                radius: 15,  // Arena radius
+                height: 5,   // Arena height
+                portalColor: this.getPortalColor(i),
+                active: false, // Whether this arena is currently in use
+                portalCollider: null, // Will store collision box for the portal
+                duelArea: null, // Will store the THREE.Group for the arena
+                duelAreaActive: false // Track if this duel area is currently visible
+            });
+        }
+        
+        return configs;
+    }
+    
+    /**
+     * Get a unique color for each portal
+     */
+    getPortalColor(index) {
+        const colors = [
+            0xFF6B00, // Orange (original)
+            0x4CAF50, // Green
+            0x2196F3, // Blue
+            0x9C27B0, // Purple
+            0xFFEB3B  // Yellow
+        ];
+        
+        return colors[index % colors.length];
     }
     
     /**
@@ -3995,161 +4195,440 @@ export class QuickDraw {
         this.statusIndicator.style.borderRadius = '5px';
         this.statusIndicator.style.display = 'none';
         document.getElementById('game-container').appendChild(this.statusIndicator);
+        
+        // Add lobby indicator
+        this.lobbyIndicator = document.createElement('div');
+        this.lobbyIndicator.id = 'lobby-indicator';
+        this.lobbyIndicator.style.position = 'absolute';
+        this.lobbyIndicator.style.top = '150px';
+        this.lobbyIndicator.style.left = '20px';
+        this.lobbyIndicator.style.color = 'white';
+        this.lobbyIndicator.style.fontSize = '16px';
+        this.lobbyIndicator.style.backgroundColor = 'rgba(255, 107, 0, 0.7)';
+        this.lobbyIndicator.style.padding = '8px 12px';
+        this.lobbyIndicator.style.borderRadius = '5px';
+        this.lobbyIndicator.style.display = 'none';
+        document.getElementById('game-container').appendChild(this.lobbyIndicator);
     }
     
     /**
-     * Initialize the portal near spawn that players can walk into
-     * to join the queue.
+     * Initialize the single portal for all Quick Draw arenas
      */
     initPortal() {
-        // Create a visible portal that players can walk into
-        const portalGeometry = new THREE.RingGeometry(1, 1.2, 32);
-        const portalMaterial = new THREE.MeshBasicMaterial({ 
-            color: 0xFF6B00,
-            side: THREE.DoubleSide,
-            transparent: true,
-            opacity: 0.8
-        });
-        this.portal = new THREE.Mesh(portalGeometry, portalMaterial);
+        this.portalGroup = new THREE.Group();
         
-        // Position the portal within the town street
+        // Calculate portal position
+        let portalX = 0;
+        let portalY = 2.5; // Increased Y position for a taller portal
+        let portalZ = 0;
+        
         // If town dimensions are available, use them for positioning
         if (window.townDimensions) {
             const streetWidth = window.townDimensions.streetWidth;
             const townLength = window.townDimensions.length;
             
-            // Position the portal near the center of the street
-            this.portal.position.set(0, 1.5, townLength * 0.3); // 30% down the street
-            
-            // Update the duel center position to be outside town boundary
-            this.duelCenter = new THREE.Vector3(0, 0, townLength + 30);
-        } else {
-            // Default position if town dimensions aren't available
-            this.portal.position.set(0, 1.5, 10); // Further down the street from spawn
+            // Position portal on the side of the street in the center of town
+            portalX = streetWidth * 0.4; // Move to the right side of the street
+            portalZ = 0; // Center of town (Z axis)
         }
         
-        this.portal.rotation.y = Math.PI / 2; // Make it vertical
-        this.scene.add(this.portal);
+        // Create a wooden frame portal
+        this.createWoodenFramePortal(portalX, portalY, portalZ);
         
-        // Add text above the portal
-        const textCanvas = document.createElement('canvas');
-        const context = textCanvas.getContext('2d');
-        textCanvas.width = 256;
-        textCanvas.height = 64;
-        context.fillStyle = 'white';
-        context.font = 'bold 28px Arial';
-        context.textAlign = 'center';
-        context.fillText('QUICK DRAW', 128, 40);
+        // Create collision detector for the portal - make it larger to match the bigger portal
+        const portalCollider = new THREE.Box3(
+            new THREE.Vector3(portalX - 2.5, 0, portalZ - 1),
+            new THREE.Vector3(portalX + 2.5, portalY * 2, portalZ + 1)
+        );
         
-        const textTexture = new THREE.Texture(textCanvas);
-        textTexture.needsUpdate = true;
+        // Store the collider for all arena configs to reference the same portal
+        for (let i = 0; i < this.maxArenas; i++) {
+            this.arenaConfigs[i].portalCollider = portalCollider;
+        }
         
-        const textMaterial = new THREE.MeshBasicMaterial({
-            map: textTexture,
+        this.scene.add(this.portalGroup);
+        
+        // Create portal instructions
+        this.createPortalInstructions(new THREE.Vector3(portalX, portalY, portalZ));
+    }
+    
+    /**
+     * Creates a wooden frame portal with Minecraft-like portal filling and a wooden sign on top
+     * @param {number} x - X position
+     * @param {number} y - Y position
+     * @param {number} z - Z position
+     */
+    createWoodenFramePortal(x, y, z) {
+        const frameWidth = 5; // Wider frame
+        const frameHeight = 7; // Taller frame
+        const beamThickness = 0.25; // Thicker beams
+        
+        // Create wooden beam material with more texture
+        const woodMaterial = new THREE.MeshStandardMaterial({
+            color: 0x8B4513,  // Brown
+            roughness: 0.9,
+            metalness: 0.1
+        });
+        
+        // Create the wooden frame beams
+        // Top beam
+        const topBeam = new THREE.Mesh(
+            new THREE.BoxGeometry(frameWidth, beamThickness, beamThickness),
+            woodMaterial
+        );
+        topBeam.position.set(0, frameHeight/2, 0);
+        this.portalGroup.add(topBeam);
+        
+        // Bottom beam
+        const bottomBeam = new THREE.Mesh(
+            new THREE.BoxGeometry(frameWidth, beamThickness, beamThickness),
+            woodMaterial
+        );
+        bottomBeam.position.set(0, -frameHeight/2, 0);
+        this.portalGroup.add(bottomBeam);
+        
+        // Left beam
+        const leftBeam = new THREE.Mesh(
+            new THREE.BoxGeometry(beamThickness, frameHeight, beamThickness),
+            woodMaterial
+        );
+        leftBeam.position.set(-frameWidth/2, 0, 0);
+        this.portalGroup.add(leftBeam);
+        
+        // Right beam
+        const rightBeam = new THREE.Mesh(
+            new THREE.BoxGeometry(beamThickness, frameHeight, beamThickness),
+            woodMaterial
+        );
+        rightBeam.position.set(frameWidth/2, 0, 0);
+        this.portalGroup.add(rightBeam);
+        
+        // Create the Minecraft-like portal filling with a more static appearance
+        const fillingGeometry = new THREE.PlaneGeometry(frameWidth - beamThickness, frameHeight - beamThickness, 32, 32); // More segments for wave effect
+        
+        // Create a custom shader material for Minecraft nether portal effect - more static version
+        const fillingMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                time: { value: 0.0 }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                uniform float time;
+                
+                void main() {
+                    vUv = uv;
+                    // Add very subtle displacement to vertices
+                    vec3 pos = position;
+                    pos.x += sin(position.y * 2.0 + time * 0.5) * 0.01;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform float time;
+                varying vec2 vUv;
+                
+                // Simple noise function
+                float noise(vec2 p) {
+                    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+                }
+                
+                void main() {
+                    // Static purple base with subtle animated swirls
+                    vec3 baseColor = vec3(0.5, 0.0, 0.8); // Purple base
+                    
+                    // Add subtle swirl pattern
+                    float swirl = sin(vUv.x * vUv.y * 10.0 + time * 0.2) * 0.1;
+                    
+                    // Add a bit of noise pattern
+                    float noiseVal = noise(vUv * 5.0 + vec2(time * 0.05, time * 0.03));
+                    
+                    // Mix colors for subtle effect
+                    vec3 color = mix(baseColor, vec3(0.7, 0.2, 1.0), swirl + noiseVal * 0.1);
+                    
+                    // Add edge glow
+                    float edgeX = smoothstep(0.0, 0.07, vUv.x) * smoothstep(1.0, 0.93, vUv.x);
+                    float edgeY = smoothstep(0.0, 0.07, vUv.y) * smoothstep(1.0, 0.93, vUv.y);
+                    float edge = edgeX * edgeY;
+                    
+                    // Subtle pulsing
+                    float pulse = 0.9 + sin(time * 0.5) * 0.1;
+                    color = mix(color, vec3(0.8, 0.4, 1.0), (1.0 - edge) * pulse * 0.2);
+                    
+                    gl_FragColor = vec4(color, 0.9); // Slightly transparent
+                }
+            `,
             transparent: true,
             side: THREE.DoubleSide
         });
         
-        const textGeometry = new THREE.PlaneGeometry(2, 0.5);
-        this.portalText = new THREE.Mesh(textGeometry, textMaterial);
-        this.portalText.position.copy(this.portal.position);
-        this.portalText.position.y += 1.0; // Position above the portal
-        this.portalText.rotation.y = Math.PI / 2;
-        this.scene.add(this.portalText);
+        const filling = new THREE.Mesh(fillingGeometry, fillingMaterial);
+        filling.position.set(0, 0, -0.05);
+        this.portalGroup.add(filling);
         
-        // Create collision detector for the portal - adjust based on portal position
-        const portalPos = this.portal.position;
-        this.portalCollider = new THREE.Box3(
-            new THREE.Vector3(portalPos.x - 0.5, portalPos.y - 1.5, portalPos.z - 0.5),
-            new THREE.Vector3(portalPos.x + 0.5, portalPos.y + 1.5, portalPos.z + 0.5)
-        );
+        // Update the time uniform in the shader
+        this.animatePortalFilling(fillingMaterial);
         
-        // Animate the portal
-        this.animatePortal();
+        // Create a wooden sign on top of the portal
+        this.createWoodenSign(frameWidth, frameHeight);
         
-        // Add instructions
-        this.createPortalInstructions();
+        // Add particle effect around the portal
+        this.addPortalParticles(frameWidth, frameHeight);
+        
+        // Position the portal
+        this.portalGroup.position.set(x, y, z);
+        this.portalGroup.rotation.y = Math.PI / 2; // Make it vertical and facing the street
     }
     
     /**
-     * Creates a floating instruction panel above the portal.
+     * Creates a wooden sign on top of the portal with text visible from both sides
+     * @param {number} frameWidth - Width of the portal frame
+     * @param {number} frameHeight - Height of the portal frame
      */
-    createPortalInstructions() {
-        // Create a container for the instructions
-        this.instructionsElement = document.createElement('div');
-        this.instructionsElement.id = 'portal-instructions';
-        this.instructionsElement.style.position = 'absolute';
-        this.instructionsElement.style.top = '35%';
-        this.instructionsElement.style.left = '50%';
-        this.instructionsElement.style.transform = 'translate(-50%, -50%)';
-        this.instructionsElement.style.color = 'white';
-        this.instructionsElement.style.backgroundColor = 'rgba(0,0,0,0.7)';
-        this.instructionsElement.style.padding = '20px';
-        this.instructionsElement.style.borderRadius = '10px';
-        this.instructionsElement.style.textAlign = 'center';
-        this.instructionsElement.style.width = '400px';
-        this.instructionsElement.style.display = 'none';
-        this.instructionsElement.style.zIndex = '500';
-        this.instructionsElement.style.fontFamily = 'Arial, sans-serif';
+    createWoodenSign(frameWidth, frameHeight) {
+        // Create wooden sign material
+        const woodMaterial = new THREE.MeshStandardMaterial({
+            color: 0x8B4513,  // Brown
+            roughness: 0.9,
+            metalness: 0.1
+        });
         
-        this.instructionsElement.innerHTML = `
-            <h2 style="color:#FF6B00; margin-bottom:10px;">Quick Draw Duel</h2>
-            <p>Step into the portal to challenge another player to a classic western showdown!</p>
-            <ul style="text-align:left; margin-top:10px; padding-left:20px;">
-                <li>Wait for opponent and follow the "READY?" signal</li>
-                <li>Keep your gun holstered until you see "DRAW!"</li>
-                <li>Drawing too early will lock your gun for 3 seconds</li>
-                <li>First player to hit their opponent wins!</li>
-            </ul>
-        `;
+        // Create sign post
+        const signWidth = frameWidth * 0.8;
+        const signHeight = 0.8;
+        const signDepth = 0.1;
         
-        document.getElementById('game-container').appendChild(this.instructionsElement);
+        // Create the wooden sign board
+        const signGeometry = new THREE.BoxGeometry(signWidth, signHeight, signDepth);
+        const sign = new THREE.Mesh(signGeometry, woodMaterial);
         
-        // Show instructions when player gets close to portal
-        // Adjust the proximity box based on portal position
-        const portalPos = this.portal.position;
-        this.portalProximityBox = new THREE.Box3(
-            new THREE.Vector3(portalPos.x - 2, portalPos.y - 2, portalPos.z - 2),
-            new THREE.Vector3(portalPos.x + 2, portalPos.y + 2, portalPos.z + 2)
-        );
+        // Position the sign above the portal
+        sign.position.set(0, frameHeight/2 + signHeight/2 + 0.1, 0);
+        
+        // Create two small posts to connect the sign to the portal frame
+        const postGeometry = new THREE.BoxGeometry(0.2, 0.4, 0.2);
+        
+        // Left post
+        const leftPost = new THREE.Mesh(postGeometry, woodMaterial);
+        leftPost.position.set(-signWidth/3, frameHeight/2 + 0.2, 0);
+        
+        // Right post
+        const rightPost = new THREE.Mesh(postGeometry, woodMaterial);
+        rightPost.position.set(signWidth/3, frameHeight/2 + 0.2, 0);
+        
+        // Create text for both sides of the sign
+        const createSignText = (isBack) => {
+            const textCanvas = document.createElement('canvas');
+            const context = textCanvas.getContext('2d');
+            textCanvas.width = 512;
+            textCanvas.height = 128;
+            
+            // Clear background
+            context.fillStyle = '#8B4513'; // Match the wood color
+            context.fillRect(0, 0, textCanvas.width, textCanvas.height);
+            
+            // Add wood grain texture
+            context.strokeStyle = '#6B3F13'; // Darker wood color for grain
+            context.lineWidth = 2;
+            for (let i = 0; i < 20; i++) {
+                const y = i * 7;
+                context.beginPath();
+                context.moveTo(0, y);
+                // Wavy line for wood grain
+                for (let x = 0; x < textCanvas.width; x += 20) {
+                    context.lineTo(x + 10, y + (Math.random() * 4 - 2));
+                }
+                context.stroke();
+            }
+            
+            // Add text
+            context.fillStyle = 'white';
+            context.font = 'bold 70px Western, Arial, sans-serif';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText('Join 1v1', 256, 64);
+            
+            // Add a slightly darker stroke to make text more readable
+            context.strokeStyle = 'rgba(0,0,0,0.5)';
+            context.lineWidth = 2;
+            context.strokeText('Join 1v1', 256, 64);
+            
+            const texture = new THREE.CanvasTexture(textCanvas);
+            texture.needsUpdate = true;
+            
+            const material = new THREE.MeshBasicMaterial({
+                map: texture,
+                side: THREE.FrontSide
+            });
+            
+            // Create text plane slightly larger than the sign to avoid z-fighting
+            const textGeometry = new THREE.PlaneGeometry(signWidth - 0.05, signHeight - 0.05);
+            const textMesh = new THREE.Mesh(textGeometry, material);
+            
+            // Position text just in front of the sign
+            const zOffset = isBack ? -signDepth/2 - 0.01 : signDepth/2 + 0.01;
+            textMesh.position.set(0, 0, zOffset);
+            
+            // If this is the back face, rotate it 180 degrees
+            if (isBack) {
+                textMesh.rotation.y = Math.PI;
+            }
+            
+            return textMesh;
+        };
+        
+        // Create front and back text
+        const frontText = createSignText(false);
+        const backText = createSignText(true);
+        
+        // Add text to sign
+        sign.add(frontText);
+        sign.add(backText);
+        
+        // Add everything to the portal group
+        this.portalGroup.add(sign);
+        this.portalGroup.add(leftPost);
+        this.portalGroup.add(rightPost);
     }
     
     /**
-     * Check if player is near the portal and show instructions.
+     * Adds particle effects around the portal to enhance the Minecraft feel
+     * @param {number} width - Width of the portal
+     * @param {number} height - Height of the portal
      */
-    updatePortalInstructions() {
-        if (!this.localPlayer || !this.localPlayer.group || !this.instructionsElement || !this.portalProximityBox) {
-            return;
+    addPortalParticles(width, height) {
+        const particleCount = 50;
+        const particleGroup = new THREE.Group();
+        
+        // Create particle material (purple to match portal)
+        const particleMaterial = new THREE.PointsMaterial({
+            color: 0xB000FF,
+            size: 0.15,
+            transparent: true,
+            opacity: 0.7,
+            blending: THREE.AdditiveBlending
+        });
+        
+        // Create particle geometry
+        const particleGeometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+        const velocities = []; // Store velocities for animation
+        
+        // Create particles around the frame
+        for (let i = 0; i < particleCount; i++) {
+            // Position particles around the portal frame
+            const side = Math.floor(Math.random() * 4); // 0: top, 1: right, 2: bottom, 3: left
+            let x, y;
+            
+            switch(side) {
+                case 0: // top
+                    x = (Math.random() - 0.5) * width;
+                    y = height/2 + Math.random() * 0.5;
+                    break;
+                case 1: // right
+                    x = width/2 + Math.random() * 0.5;
+                    y = (Math.random() - 0.5) * height;
+                    break;
+                case 2: // bottom
+                    x = (Math.random() - 0.5) * width;
+                    y = -height/2 - Math.random() * 0.5;
+                    break;
+                case 3: // left
+                    x = -width/2 - Math.random() * 0.5;
+                    y = (Math.random() - 0.5) * height;
+                    break;
+            }
+            
+            positions[i * 3] = x;
+            positions[i * 3 + 1] = y;
+            positions[i * 3 + 2] = (Math.random() - 0.5) * 0.2; // Small Z variation
+            
+            // Random velocities moving toward the portal
+            velocities.push({
+                x: -x * 0.01 * (0.5 + Math.random() * 0.5),
+                y: -y * 0.01 * (0.5 + Math.random() * 0.5),
+                z: (Math.random() - 0.5) * 0.01,
+                life: 0,
+                maxLife: 60 + Math.floor(Math.random() * 60) // Random lifetime
+            });
         }
         
-        const playerPos = this.localPlayer.group.position.clone();
-        const isNearPortal = this.portalProximityBox.containsPoint(playerPos);
+        particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const particles = new THREE.Points(particleGeometry, particleMaterial);
+        particleGroup.add(particles);
+        this.portalGroup.add(particleGroup);
         
-        if (isNearPortal && !this.inLobby && !this.inDuel) {
-            this.instructionsElement.style.display = 'block';
-        } else {
-            this.instructionsElement.style.display = 'none';
-        }
+        // Animate particles
+        const animateParticles = () => {
+            const positions = particles.geometry.attributes.position.array;
+            
+            // Update each particle
+            for (let i = 0; i < particleCount; i++) {
+                // Update position based on velocity
+                positions[i * 3] += velocities[i].x;
+                positions[i * 3 + 1] += velocities[i].y;
+                positions[i * 3 + 2] += velocities[i].z;
+                
+                // Update life
+                velocities[i].life++;
+                
+                // If particle has reached end of life or center of portal, reset it
+                if (velocities[i].life >= velocities[i].maxLife || 
+                    (Math.abs(positions[i * 3]) < 0.3 && Math.abs(positions[i * 3 + 1]) < 0.3)) {
+                    
+                    // Reset to edge of portal
+                    const side = Math.floor(Math.random() * 4);
+                    let x, y;
+                    
+                    switch(side) {
+                        case 0: // top
+                            x = (Math.random() - 0.5) * width;
+                            y = height/2 + Math.random() * 0.5;
+                            break;
+                        case 1: // right
+                            x = width/2 + Math.random() * 0.5;
+                            y = (Math.random() - 0.5) * height;
+                            break;
+                        case 2: // bottom
+                            x = (Math.random() - 0.5) * width;
+                            y = -height/2 - Math.random() * 0.5;
+                            break;
+                        case 3: // left
+                            x = -width/2 - Math.random() * 0.5;
+                            y = (Math.random() - 0.5) * height;
+                            break;
+                    }
+                    
+                    positions[i * 3] = x;
+                    positions[i * 3 + 1] = y;
+                    positions[i * 3 + 2] = (Math.random() - 0.5) * 0.2;
+                    
+                    // New velocity
+                    velocities[i] = {
+                        x: -x * 0.01 * (0.5 + Math.random() * 0.5),
+                        y: -y * 0.01 * (0.5 + Math.random() * 0.5),
+                        z: (Math.random() - 0.5) * 0.01,
+                        life: 0,
+                        maxLife: 60 + Math.floor(Math.random() * 60)
+                    };
+                }
+            }
+            
+            // Update geometry
+            particles.geometry.attributes.position.needsUpdate = true;
+            
+            requestAnimationFrame(animateParticles);
+        };
+        
+        requestAnimationFrame(animateParticles);
     }
     
     /**
-     * Animate the portal with a pulsing effect.
+     * Animate the portal filling shader
+     * @param {THREE.ShaderMaterial} material - The shader material to animate
      */
-    animatePortal() {
-        const duration = 2000; // ms
-        const startTime = performance.now();
-        
-        const animate = (time) => {
-            const elapsed = time - startTime;
-            const progress = (elapsed % duration) / duration;
-            
-            const scale = 1 + 0.1 * Math.sin(progress * Math.PI * 2);
-            this.portal.scale.set(scale, scale, scale);
-            
-            const hue = (progress * 60) + 20; // Cycle through orange/red hues
-            const color = new THREE.Color(`hsl(${hue}, 100%, 50%)`);
-            this.portal.material.color = color;
-            
+    animatePortalFilling(material) {
+        const animate = () => {
+            material.uniforms.time.value += 0.01;
             requestAnimationFrame(animate);
         };
         
@@ -4157,13 +4636,103 @@ export class QuickDraw {
     }
     
     /**
-     * Create the duel area where the players will face off.
+     * Creates a floating instruction panel for the portal
+     * @param {THREE.Vector3} portalPosition - The position of the portal
      */
-    createDuelArea() {
-        this.duelArea = new THREE.Group();
+    createPortalInstructions(portalPosition) {
+        // Create a container for the instructions
+        const instructionsId = 'portal-instructions';
+        
+        // Check if it already exists
+        let instructionsElement = document.getElementById(instructionsId);
+        if (!instructionsElement) {
+            instructionsElement = document.createElement('div');
+            instructionsElement.id = instructionsId;
+            instructionsElement.className = 'portal-instructions';
+            instructionsElement.style.position = 'absolute';
+            instructionsElement.style.top = '35%';
+            instructionsElement.style.left = '50%';
+            instructionsElement.style.transform = 'translate(-50%, -50%)';
+            instructionsElement.style.color = 'white';
+            instructionsElement.style.backgroundColor = 'rgba(0,0,0,0.7)';
+            instructionsElement.style.padding = '20px';
+            instructionsElement.style.borderRadius = '10px';
+            instructionsElement.style.textAlign = 'center';
+            instructionsElement.style.width = '400px';
+            instructionsElement.style.display = 'none';
+            instructionsElement.style.zIndex = '500';
+            instructionsElement.style.fontFamily = 'Arial, sans-serif';
+            
+            instructionsElement.innerHTML = `
+                <h2 style="color:#FF6B00; margin-bottom:10px;">Quick Draw Duel</h2>
+                <p>Step into the portal to challenge another player to a classic western showdown!</p>
+                <ul style="text-align:left; margin-top:10px; padding-left:20px;">
+                    <li>Wait for opponent and follow the "READY?" signal</li>
+                    <li>Keep your gun holstered until you see "DRAW!"</li>
+                    <li>Drawing too early will lock your gun for 3 seconds</li>
+                    <li>First player to hit their opponent wins!</li>
+                </ul>
+            `;
+            
+            document.getElementById('game-container').appendChild(instructionsElement);
+        }
+        
+        // Show instructions when player gets close to portal
+        // Adjust the proximity box based on portal position
+        const proximityBox = new THREE.Box3(
+            new THREE.Vector3(portalPosition.x - 4, portalPosition.y - 4, portalPosition.z - 4),
+            new THREE.Vector3(portalPosition.x + 4, portalPosition.y + 4, portalPosition.z + 4)
+        );
+        
+        // Store the box reference and element for the portal
+        this.portalProximityBox = proximityBox;
+        this.instructionsElement = instructionsElement;
+    }
+    
+    /**
+     * Check if player is near the portal and show appropriate instructions
+     */
+    updatePortalInstructions() {
+        if (!this.localPlayer || !this.localPlayer.group) {
+            return;
+        }
+        
+        const playerPos = this.localPlayer.group.position.clone();
+        
+        // Check if near portal
+        if (this.portalProximityBox && this.portalProximityBox.containsPoint(playerPos) && 
+            !this.inLobby && !this.inDuel) {
+            // Show portal instructions
+            if (this.instructionsElement) {
+                this.instructionsElement.style.display = 'block';
+            }
+        } else {
+            // Hide instructions
+            if (this.instructionsElement) {
+                this.instructionsElement.style.display = 'none';
+            }
+        }
+    }
+    
+    /**
+     * Create all duel areas
+     */
+    createDuelAreas() {
+        for (let i = 0; i < this.maxArenas; i++) {
+            this.createDuelArea(i);
+        }
+    }
+    
+    /**
+     * Create a duel area for a specific arena index
+     * @param {number} arenaIndex - The arena index (0-4)
+     */
+    createDuelArea(arenaIndex) {
+        const config = this.arenaConfigs[arenaIndex];
+        const duelArea = new THREE.Group();
         
         // Ground platform
-        const groundGeometry = new THREE.CircleGeometry(this.arenaRadius, 32);
+        const groundGeometry = new THREE.CircleGeometry(config.radius, 32);
         const groundMaterial = new THREE.MeshStandardMaterial({
             color: 0xCD853F, // Sandy color
             roughness: 0.9,
@@ -4171,57 +4740,124 @@ export class QuickDraw {
         });
         const ground = new THREE.Mesh(groundGeometry, groundMaterial);
         ground.rotation.x = -Math.PI / 2;
-        ground.position.copy(this.duelCenter);
+        ground.position.copy(config.center);
         ground.position.y = 0.01; // Slightly above main ground
         ground.receiveShadow = true;
-        this.duelArea.add(ground);
-        
-        // Create the physics boundary with cannon.js
-        // This will be activated when the duel begins
+        duelArea.add(ground);
         
         // Add western-themed props
-        this.addDuelProps();
+        this.addDuelProps(duelArea, arenaIndex);
         
         // Initially hide the duel area
-        this.duelArea.visible = false;
-        this.scene.add(this.duelArea);
+        duelArea.visible = false;
+        this.scene.add(duelArea);
+        
+        // Store in arena config
+        config.duelArea = duelArea;
     }
     
     /**
-     * Add western-themed props to the duel area.
+     * Add western-themed props to a specific duel area
+     * @param {THREE.Group} duelArea - The duel area group to add props to
+     * @param {number} arenaIndex - The arena index for variations
      */
-    addDuelProps() {
-        // Add cacti around the edge
-        const cactusCount = 8;
+    addDuelProps(duelArea, arenaIndex) {
+        const config = this.arenaConfigs[arenaIndex];
+        
+        // Add cacti around the edge with variations based on arenaIndex
+        const cactusCount = 6 + arenaIndex % 3; // Vary cactus count by arena
         
         for (let i = 0; i < cactusCount; i++) {
             const angle = (i / cactusCount) * Math.PI * 2;
             const distance = 12 + Math.random() * 2;
             
-            const x = this.duelCenter.x + Math.cos(angle) * distance;
-            const z = this.duelCenter.z + Math.sin(angle) * distance;
+            const x = config.center.x + Math.cos(angle) * distance;
+            const z = config.center.z + Math.sin(angle) * distance;
             
-            this.createCactus(x, z);
+            this.createCactus(x, z, duelArea, arenaIndex);
         }
         
-        // Add tumbleweeds, barrels, etc. if desired
+        // Add arena number marker in the center
+        this.createArenaMarker(config.center, arenaIndex, duelArea);
     }
     
     /**
-     * Create a simple cactus model at the given position.
+     * Create a central marker showing the arena number
+     * @param {THREE.Vector3} center - The center position of the arena
+     * @param {number} arenaIndex - The arena index (0-4)
+     * @param {THREE.Group} duelArea - The duel area group to add the marker to
      */
-    createCactus(x, z) {
+    createArenaMarker(center, arenaIndex, duelArea) {
+        // Create a standalone sign post
+        const postGeometry = new THREE.CylinderGeometry(0.1, 0.1, 2, 8);
+        const woodMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+        const post = new THREE.Mesh(postGeometry, woodMaterial);
+        post.position.set(center.x, 1, center.z);
+        duelArea.add(post);
+        
+        // Create a sign with the arena number
+        const signGeometry = new THREE.BoxGeometry(1, 0.7, 0.1);
+        const signMaterial = new THREE.MeshStandardMaterial({ color: 0xA0522D });
+        const sign = new THREE.Mesh(signGeometry, signMaterial);
+        sign.position.set(center.x, 1.8, center.z);
+        duelArea.add(sign);
+        
+        // Create a texture for the text
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.width = 128;
+        canvas.height = 64;
+        context.fillStyle = 'white';
+        context.font = 'bold 40px Arial';
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText(`#${arenaIndex + 1}`, 64, 32);
+        
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+        
+        // Apply texture to a plane in front of the sign
+        const textGeometry = new THREE.PlaneGeometry(0.8, 0.5);
+        const textMaterial = new THREE.MeshBasicMaterial({
+            map: texture,
+            transparent: true,
+            side: THREE.DoubleSide
+        });
+        const textMesh = new THREE.Mesh(textGeometry, textMaterial);
+        textMesh.position.set(center.x, 1.8, center.z + 0.06);
+        duelArea.add(textMesh);
+    }
+    
+    /**
+     * Create a simple cactus model at the given position with variations based on arena index
+     * @param {number} x - X position
+     * @param {number} z - Z position
+     * @param {THREE.Group} duelArea - The duel area group to add the cactus to
+     * @param {number} arenaIndex - Arena index for variations
+     */
+    createCactus(x, z, duelArea, arenaIndex) {
         const cactusGroup = new THREE.Group();
+        
+        // Different cactus colors based on arena index
+        const cactusColors = [
+            0x2E8B57, // Sea green (default)
+            0x006400, // Dark green
+            0x228B22, // Forest green
+            0x3CB371, // Medium sea green
+            0x32CD32  // Lime green
+        ];
+        
+        const cactusColor = cactusColors[arenaIndex % cactusColors.length];
         
         // Main body
         const bodyGeometry = new THREE.CylinderGeometry(0.3, 0.4, 2, 8);
-        const cactusMaterial = new THREE.MeshStandardMaterial({ color: 0x2E8B57 });
+        const cactusMaterial = new THREE.MeshStandardMaterial({ color: cactusColor });
         const body = new THREE.Mesh(bodyGeometry, cactusMaterial);
         body.position.y = 1;
         cactusGroup.add(body);
         
         // Add arms
-        const armCount = 1 + Math.floor(Math.random() * 2);
+        const armCount = (arenaIndex % 3) + 1; // 1, 2, or 3 arms based on arena index
         
         for (let i = 0; i < armCount; i++) {
             const armGeometry = new THREE.CylinderGeometry(0.2, 0.2, 1, 8);
@@ -4244,7 +4880,7 @@ export class QuickDraw {
         
         cactusGroup.position.set(x, 0, z);
         cactusGroup.castShadow = true;
-        this.duelArea.add(cactusGroup);
+        duelArea.add(cactusGroup);
     }
     
     /**
@@ -4252,10 +4888,11 @@ export class QuickDraw {
      */
     initNetworkHandlers() {
         // Extend existing network manager with Quick Draw methods
-        this.networkManager.sendQuickDrawJoin = () => {
+        this.networkManager.sendQuickDrawJoin = (arenaIndex) => {
             if (this.networkManager.socket && this.networkManager.socket.readyState === WebSocket.OPEN) {
                 this.networkManager.socket.send(JSON.stringify({
-                    type: 'quickDrawJoin'
+                    type: 'quickDrawJoin',
+                    arenaIndex: arenaIndex
                 }));
             }
         };
@@ -4273,7 +4910,8 @@ export class QuickDraw {
                 console.log(`Sending Quick Draw hit notification to server: player ${this.localPlayer.id} hit player ${opponentId}`);
                 this.networkManager.socket.send(JSON.stringify({
                     type: 'quickDrawShoot',
-                    opponentId: opponentId
+                    opponentId: opponentId,
+                    arenaIndex: this.activeArenaIndex
                 }));
             }
         };
@@ -4281,7 +4919,8 @@ export class QuickDraw {
         this.networkManager.sendQuickDrawReady = () => {
             if (this.networkManager.socket && this.networkManager.socket.readyState === WebSocket.OPEN) {
                 this.networkManager.socket.send(JSON.stringify({
-                    type: 'quickDrawReady'
+                    type: 'quickDrawReady',
+                    arenaIndex: this.activeArenaIndex
                 }));
             }
         };
@@ -4325,128 +4964,170 @@ export class QuickDraw {
     }
     
     /**
-     * Creates an invisible cylindrical boundary for the QuickDraw arena
-     * @param {THREE.Vector3} center - Center position of the arena
-     * @param {number} radius - Radius of the cylindrical arena
-     * @param {number} height - Height of the cylindrical arena
+     * Creates an invisible cylindrical boundary for a specific QuickDraw arena
+     * @param {number} arenaIndex - The arena index (0-4)
      */
-    createQuickDrawArenaBoundary(center, radius, height) {
-        // First remove any existing arena boundaries
-        this.removeQuickDrawArenaBoundary();
+    createQuickDrawArenaBoundary(arenaIndex) {
+        if (!this.physics) return null;
         
-        // Create a physics body for the arena boundary
-        const arenaBody = new CANNON.Body({
-            mass: 0, // Static body
-            material: this.defaultMaterial
-        });
+        const config = this.arenaConfigs[arenaIndex];
         
-        // Position at the center
-        arenaBody.position.set(center.x, center.y + height/2, center.z);
+        // Create the physics boundary for this arena
+        const arenaBody = this.physics.createQuickDrawArenaBoundary(
+            config.center,
+            config.radius,
+            config.height
+        );
         
-        // Add a cylindrical shape for the arena
-        // Use segments to approximate the cylinder
-        const segments = 16; // Number of sides for the cylinder approximation
-        const wallThickness = 0.5;
-        
-        // Create segments around the circle to approximate the cylinder
-        for (let i = 0; i < segments; i++) {
-            const angle1 = (i / segments) * Math.PI * 2;
-            const angle2 = ((i + 1) / segments) * Math.PI * 2;
-            
-            const x1 = Math.cos(angle1) * radius;
-            const z1 = Math.sin(angle1) * radius;
-            const x2 = Math.cos(angle2) * radius;
-            const z2 = Math.sin(angle2) * radius;
-            
-            // Calculate the position and orientation of this wall segment
-            const segCenter = {
-                x: (x1 + x2) / 2,
-                z: (z1 + z2) / 2
-            };
-            
-            const length = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(z2 - z1, 2));
-            
-            // Create a box shape for this wall segment
-            // Position the wall so it doesn't intrude into the arena
-            const halfExtents = new CANNON.Vec3(length/2, height/2, wallThickness/2);
-            const wallShape = new CANNON.Box(halfExtents);
-            
-            // Get the angle to rotate this wall segment
-            const rotationY = Math.atan2(z2 - z1, x2 - x1) + Math.PI/2;
-            
-            // Position the walls at exactly the arena radius, not inside it
-            const offsetDistance = radius;
-            const offset = new CANNON.Vec3(
-                segCenter.x * (offsetDistance / Math.sqrt(segCenter.x * segCenter.x + segCenter.z * segCenter.z)),
-                0,
-                segCenter.z * (offsetDistance / Math.sqrt(segCenter.x * segCenter.x + segCenter.z * segCenter.z))
-            );
-            
-            const quaternion = new CANNON.Quaternion();
-            quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), rotationY);
-            
-            arenaBody.addShape(wallShape, offset, quaternion);
-        }
-        
-        // Bottom circle to prevent falling through
-        const bottomShape = new CANNON.Cylinder(radius, radius, wallThickness, segments);
-        const bottomOffset = new CANNON.Vec3(0, -height/2, 0);
-        const bottomQuaternion = new CANNON.Quaternion();
-        bottomQuaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI / 2);
-        arenaBody.addShape(bottomShape, bottomOffset, bottomQuaternion);
-        
-        arenaBody.arenaBoundary = true; // Tag this body as an arena boundary
-        arenaBody.collisionFilterGroup = 2; // Group 2 for arena boundaries
-        
-        // Add the arena body to the world
-        this.world.addBody(arenaBody);
-        this.bodies.push(arenaBody);
-        
-        // Create a reference to easily find this body later
-        this.arenaBoundaryBody = arenaBody;
-        
-        // If debug mode is enabled, create a visual representation
-        if (this.debugMode) {
-            this.createDebugMesh(arenaBody);
-        }
-        
-        console.log("Created QuickDraw arena boundary at", center, "with radius", radius, "and height", height);
+        // Store the arena body for this arena
+        this.arenaBoundaries[arenaIndex] = arenaBody;
         
         return arenaBody;
     }
     
     /**
-     * Removes the QuickDraw arena boundary if it exists
+     * Removes a specific QuickDraw arena boundary
+     * @param {number} arenaIndex - The arena index (0-4)
      */
-    removeQuickDrawArenaBoundary() {
-        if (this.physics && this.physics.arenaBoundaryBody) {
-            this.physics.removeQuickDrawArenaBoundary();
+    removeQuickDrawArenaBoundary(arenaIndex) {
+        if (!this.physics) return;
+        
+        // If there's a boundary for this arena, remove it
+        if (this.arenaBoundaries[arenaIndex]) {
+            this.physics.removeQuickDrawArenaBoundaryByIndex(arenaIndex);
+            this.arenaBoundaries[arenaIndex] = null;
         }
     }
     
     /**
-     * Check if a point is inside the duel arena using the physics system
+     * Check if a point is inside any active arena
      * @param {THREE.Vector3} point - The point to check
-     * @returns {boolean} - True if the point is inside the arena
+     * @returns {boolean} - True if inside an active arena
      */
     isPointInArena(point) {
-        // First check if the arena is active
-        if (!this.duelArea || !this.duelArea.visible) {
+        // First check if any arena is active
+        if (this.activeArenaIndex < 0 || !this.arenaConfigs[this.activeArenaIndex].duelAreaActive) {
             return false;
         }
         
-        // Use the physics system to check if the point is inside the arena boundary
+        const config = this.arenaConfigs[this.activeArenaIndex];
+        
+        // Use the physics system to check if the point is inside the active arena boundary
         if (this.physics && this.physics.isPointInArenaBoundary) {
             return this.physics.isPointInArenaBoundary(point);
         }
         
         // Fallback to simple cylindrical check if physics is not available
-        const dx = point.x - this.duelCenter.x;
-        const dz = point.z - this.duelCenter.z;
+        const dx = point.x - config.center.x;
+        const dz = point.z - config.center.z;
         const distanceFromCenter = Math.sqrt(dx * dx + dz * dz);
         
-        // Check if within radius (15 units) and height (0 to 5 units)
-        return distanceFromCenter <= this.arenaRadius && point.y >= 0 && point.y <= this.arenaHeight;
+        // Check if within radius and height
+        return distanceFromCenter <= config.radius && point.y >= 0 && point.y <= config.height;
+    }
+    
+    /**
+     * Check if a point is inside a specific arena
+     * @param {THREE.Vector3} point - The point to check
+     * @param {number} arenaIndex - The arena index to check
+     * @returns {boolean} - True if inside the specified arena
+     */
+    isPointInSpecificArena(point, arenaIndex) {
+        if (arenaIndex < 0 || arenaIndex >= this.maxArenas) {
+            return false;
+        }
+        
+        const config = this.arenaConfigs[arenaIndex];
+        
+        // Simple cylindrical check
+        const dx = point.x - config.center.x;
+        const dz = point.z - config.center.z;
+        const distanceFromCenter = Math.sqrt(dx * dx + dz * dz);
+        
+        // Check if within radius and height
+        return distanceFromCenter <= config.radius && point.y >= 0 && point.y <= config.height;
+    }
+    
+    /**
+     * Find the optimal arena index to join by checking where other players are waiting
+     * @returns {number} - The arena index to join
+     */
+    getOptimalArenaIndex() {
+        // Get information about other players from the network manager
+        const arenaPlayerCounts = Array(this.maxArenas).fill(0);
+        let foundWaitingPlayer = false;
+        
+        // If we can access the other players through networkManager
+        if (this.networkManager && this.networkManager.otherPlayers) {
+            // Count players in each lobby/queue
+            for (const [_, playerData] of this.networkManager.otherPlayers) {
+                // Check if player is in a Quick Draw lobby but not in a duel
+                if (playerData.quickDrawLobbyIndex >= 0 && 
+                    playerData.quickDrawLobbyIndex < this.maxArenas) {
+                    arenaPlayerCounts[playerData.quickDrawLobbyIndex]++;
+                    
+                    // If this player appears to be waiting alone in a queue
+                    if (arenaPlayerCounts[playerData.quickDrawLobbyIndex] === 1) {
+                        foundWaitingPlayer = true;
+                    }
+                }
+            }
+            
+            // If we found at least one player waiting in a queue
+            if (foundWaitingPlayer) {
+                // Find all arenas with exactly one player waiting
+                const queuesWithOnePlayer = [];
+                for (let i = 0; i < this.maxArenas; i++) {
+                    if (arenaPlayerCounts[i] === 1) {
+                        queuesWithOnePlayer.push(i);
+                    }
+                }
+                
+                // If we found arenas with one player waiting, join one of them
+                if (queuesWithOnePlayer.length > 0) {
+                    // If multiple arenas have one player, pick one randomly
+                    const randomIndex = Math.floor(Math.random() * queuesWithOnePlayer.length);
+                    return queuesWithOnePlayer[randomIndex];
+                }
+            }
+        }
+        
+        // If we couldn't find a player waiting or couldn't access player data,
+        // look for completely empty arenas
+        const emptyArenas = [];
+        for (let i = 0; i < this.maxArenas; i++) {
+            if (arenaPlayerCounts[i] === 0) {
+                emptyArenas.push(i);
+            }
+        }
+        
+        // If we found empty arenas, pick one randomly
+        if (emptyArenas.length > 0) {
+            const randomIndex = Math.floor(Math.random() * emptyArenas.length);
+            return emptyArenas[randomIndex];
+        }
+        
+        // If all arenas have players, pick the one with the fewest players
+        let minPlayers = Infinity;
+        let minArenas = [];
+        
+        for (let i = 0; i < this.maxArenas; i++) {
+            if (arenaPlayerCounts[i] < minPlayers) {
+                minPlayers = arenaPlayerCounts[i];
+                minArenas = [i];
+            } else if (arenaPlayerCounts[i] === minPlayers) {
+                minArenas.push(i);
+            }
+        }
+        
+        // If we found arenas with the minimum number of players, pick one randomly
+        if (minArenas.length > 0) {
+            const randomIndex = Math.floor(Math.random() * minArenas.length);
+            return minArenas[randomIndex];
+        }
+        
+        // Fallback to a random arena if something went wrong
+        return Math.floor(Math.random() * this.maxArenas);
     }
     
     /**
@@ -4463,16 +5144,17 @@ export class QuickDraw {
             this.physics.update(deltaTime);
             
             // If the player is in the arena, enforce arena boundary collision
-            if (this.inDuel && this.physics.arenaBoundaryBody) {
+            if (this.inDuel && this.activeArenaIndex >= 0 && this.arenaBoundaries[this.activeArenaIndex]) {
                 const playerPos = this.localPlayer.group.position.clone();
-                const isInArena = this.isPointInArena(playerPos);
+                const config = this.arenaConfigs[this.activeArenaIndex];
+                const isInArena = this.isPointInSpecificArena(playerPos, this.activeArenaIndex);
                 
                 if (!isInArena) {
                     // If player is outside the arena but should be inside, push them back in
                     const dirToCenter = new THREE.Vector3(
-                        this.duelCenter.x - playerPos.x,
+                        config.center.x - playerPos.x,
                         0,
-                        this.duelCenter.z - playerPos.z
+                        config.center.z - playerPos.z
                     ).normalize();
                     
                     // Move player back inside
@@ -4485,14 +5167,11 @@ export class QuickDraw {
         // Check for portal collision when not in lobby or duel
         if (!this.inLobby && !this.inDuel) {
             const playerPos = this.localPlayer.group.position.clone();
-            if (this.portalCollider.containsPoint(playerPos)) {
-                this.joinQueue();
+            
+            // Check if player is colliding with the single portal
+            if (this.arenaConfigs[0].portalCollider && this.arenaConfigs[0].portalCollider.containsPoint(playerPos)) {
+                this.joinQueue(this.getOptimalArenaIndex());
             }
-        }
-        
-        // Animate portal
-        if (this.portal) {
-            this.portal.rotation.y += deltaTime * 0.5;
         }
         
         // If in countdown phase, check for early aiming
@@ -4502,7 +5181,7 @@ export class QuickDraw {
             }
         }
         
-        // Enforce penalty lock regardless of duel state if penalty is active.
+        // Enforce penalty lock regardless of duel state if penalty is active
         if (performance.now() < this.penaltyEndTime) {
             this.localPlayer.canAim = false;
             this.localPlayer.isAiming = false;
@@ -4520,19 +5199,21 @@ export class QuickDraw {
         if (!this.statusIndicator) return;
         
         if (this.inLobby) {
-            this.statusIndicator.textContent = 'Quick Draw: Waiting for opponent...';
+            const arenaNum = this.activeArenaIndex + 1;
+            this.statusIndicator.textContent = `Quick Draw Arena ${arenaNum}: Waiting for opponent...`;
             this.statusIndicator.style.display = 'block';
             this.statusIndicator.style.backgroundColor = 'rgba(33, 150, 243, 0.7)';
         } else if (this.inDuel) {
-            let statusText = 'Quick Draw: Duel in progress';
+            const arenaNum = this.activeArenaIndex + 1;
+            let statusText = `Quick Draw Arena ${arenaNum}: Duel in progress`;
             let bgColor = 'rgba(255, 87, 34, 0.7)';
             
             if (this.duelState === 'ready') {
-                statusText = 'Quick Draw: Get ready!';
+                statusText = `Quick Draw Arena ${arenaNum}: Get ready!`;
             } else if (this.duelState === 'countdown') {
-                statusText = 'Quick Draw: Wait for the signal...';
+                statusText = `Quick Draw Arena ${arenaNum}: Wait for the signal...`;
             } else if (this.duelState === 'draw') {
-                statusText = 'Quick Draw: DRAW!';
+                statusText = `Quick Draw Arena ${arenaNum}: DRAW!`;
                 bgColor = 'rgba(244, 67, 54, 0.7)';
             }
             
@@ -4545,30 +5226,47 @@ export class QuickDraw {
     }
     
     /**
-     * Join the Quick Draw queue.
+     * Join the Quick Draw queue for a specific arena.
+     * @param {number} arenaIndex - The arena index to join (0-4)
      */
-    joinQueue() {
+    joinQueue(arenaIndex) {
         if (this.inLobby || this.inDuel) {
             return; // Already in queue or duel
         }
         
+        if (arenaIndex < 0 || arenaIndex >= this.maxArenas) {
+            console.error(`Invalid arena index: ${arenaIndex}`);
+            return;
+        }
+        
         this.inLobby = true;
-        this.showMessage('Joining Quick Draw queue...');
+        this.activeArenaIndex = arenaIndex;
+        
+        // Update the player's lobby index
+        this.localPlayer.setQuickDrawLobby(arenaIndex);
+        
+        this.showMessage(`Joining Quick Draw Arena ${arenaIndex + 1} queue...`);
         this.updateStatusIndicator();
         
-        // Send join request to server
-        this.networkManager.sendQuickDrawJoin();
+        // Send join request to server with arena index
+        this.networkManager.sendQuickDrawJoin(arenaIndex);
         
-        console.log('Joined Quick Draw queue');
+        console.log(`Joined Quick Draw queue for arena ${arenaIndex + 1}`);
     }
     
     /**
      * Handle queue join confirmation from server.
      */
     handleQueueJoin(message) {
-        this.showMessage('Waiting for opponent...');
+        // Make sure the arena index matches what we expect
+        if (message.arenaIndex !== undefined && message.arenaIndex !== this.activeArenaIndex) {
+            this.activeArenaIndex = message.arenaIndex;
+            this.localPlayer.setQuickDrawLobby(message.arenaIndex);
+        }
+        
+        this.showMessage(`Waiting for opponent in Arena ${this.activeArenaIndex + 1}...`);
         this.updateStatusIndicator();
-        console.log('Quick Draw queue joined, waiting for opponent');
+        console.log(`Quick Draw queue joined for arena ${this.activeArenaIndex + 1}, waiting for opponent`);
     }
     
     /**
@@ -4578,37 +5276,43 @@ export class QuickDraw {
         this.inLobby = false;
         this.inDuel = true;
         this.duelOpponentId = message.opponentId;
+        
+        // Make sure we're using the correct arena
+        if (message.arenaIndex !== undefined) {
+            this.activeArenaIndex = message.arenaIndex;
+            this.localPlayer.setQuickDrawLobby(message.arenaIndex);
+        }
+        
         this.updateStatusIndicator();
         
-        this.showMessage('Opponent found! Preparing duel...');
+        this.showMessage(`Opponent found! Preparing duel in Arena ${this.activeArenaIndex + 1}...`);
         
-        // Teleport to duel area.
-        // For "left" side, spawn on the left; for "right", spawn on the right.
+        const config = this.arenaConfigs[this.activeArenaIndex];
+        
+        // Teleport to the correct duel area
+        // For "left" side, spawn on the left; for "right", spawn on the right
         const playerPosition = message.position === 'left' ?
-            new THREE.Vector3(this.duelCenter.x - 5, 1.6, this.duelCenter.z) : 
-            new THREE.Vector3(this.duelCenter.x + 5, 1.6, this.duelCenter.z);
+            new THREE.Vector3(config.center.x - 5, 1.6, config.center.z) : 
+            new THREE.Vector3(config.center.x + 5, 1.6, config.center.z);
         
         this.localPlayer.group.position.copy(playerPosition);
         
         // Invert player orientation by 180°:
-        // For left side, set rotation.y to (Math.PI/2 + Math.PI) = 3π/2; for right, (-Math.PI/2 + Math.PI) = π/2.
+        // For left side, set rotation.y to (Math.PI/2 + Math.PI) = 3π/2; for right, (-Math.PI/2 + Math.PI) = π/2
         if (message.position === 'left') {
             this.localPlayer.group.rotation.y = 3 * Math.PI / 2;
         } else {
             this.localPlayer.group.rotation.y = Math.PI / 2;
         }
         
-        // Make duel area visible
-        this.duelArea.visible = true;
+        // Make the correct duel area visible
+        if (config.duelArea) {
+            config.duelArea.visible = true;
+            config.duelAreaActive = true;
+        }
         
         // Create the arena physics boundary
-        if (this.physics) {
-            this.physics.createQuickDrawArenaBoundary(
-                this.duelCenter, 
-                this.arenaRadius,
-                this.arenaHeight
-            );
-        }
+        this.createQuickDrawArenaBoundary(this.activeArenaIndex);
         
         // Disable weapon drawing immediately and forcefully
         this.originalCanAim = this.localPlayer.canAim !== false;
@@ -4837,6 +5541,9 @@ export class QuickDraw {
             }, 10);
         }
         
+        // Store the current arena index before resetting
+        const endedArenaIndex = this.activeArenaIndex;
+        
         // Reset duel state
         this.duelState = 'none';
         this.inDuel = false;
@@ -4844,18 +5551,23 @@ export class QuickDraw {
         this.updateStatusIndicator();
         
         // Clean up the physics boundary
-        if (this.physics) {
-            this.physics.removeQuickDrawArenaBoundary();
-        }
+        this.removeQuickDrawArenaBoundary(endedArenaIndex);
         
         // Clear any timers
         if (this.countdownTimer) clearTimeout(this.countdownTimer);
         if (this.drawTimer) clearTimeout(this.drawTimer);
         if (this.penaltyTimer) clearTimeout(this.penaltyTimer);
         
-        // Hide duel area and teleport back to spawn after delay
+        // Hide the active duel area and teleport back to spawn after delay
         setTimeout(() => {
-            this.duelArea.visible = false;
+            // Make sure we're hiding the correct duel area
+            if (endedArenaIndex >= 0 && endedArenaIndex < this.maxArenas) {
+                const config = this.arenaConfigs[endedArenaIndex];
+                if (config.duelArea) {
+                    config.duelArea.visible = false;
+                    config.duelAreaActive = false;
+                }
+            }
             
             // Teleport back to normal spawn
             this.localPlayer.spawnPlayerRandomly();
@@ -4872,6 +5584,10 @@ export class QuickDraw {
             
             // Reset message styling
             this.messageOverlay.classList.remove('quick-draw-winner', 'quick-draw-loser');
+            
+            // Reset active arena and Quick Draw lobby
+            this.activeArenaIndex = -1;
+            this.localPlayer.setQuickDrawLobby(-1);
         }, 2000);
     }
     
@@ -4900,24 +5616,10 @@ export class QuickDraw {
      * Cleanup resources.
      */
     cleanup() {
-        // Remove portal
-        if (this.portal) {
-            this.scene.remove(this.portal);
-            this.portal.geometry.dispose();
-            this.portal.material.dispose();
-        }
-        
-        if (this.portalText) {
-            this.scene.remove(this.portalText);
-            this.portalText.geometry.dispose();
-            this.portalText.material.dispose();
-        }
-        
-        // Remove duel area
-        if (this.duelArea) {
-            this.scene.remove(this.duelArea);
-            // Dispose of geometries and materials
-            this.duelArea.traverse(child => {
+        // Remove the portal group
+        if (this.portalGroup) {
+            this.scene.remove(this.portalGroup);
+            this.portalGroup.traverse(child => {
                 if (child.geometry) child.geometry.dispose();
                 if (child.material) {
                     if (Array.isArray(child.material)) {
@@ -4927,6 +5629,34 @@ export class QuickDraw {
                     }
                 }
             });
+        }
+        
+        // Remove duel areas
+        for (let i = 0; i < this.maxArenas; i++) {
+            const config = this.arenaConfigs[i];
+            
+            // Remove duel area
+            if (config.duelArea) {
+                this.scene.remove(config.duelArea);
+                config.duelArea.traverse(child => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) {
+                        if (Array.isArray(child.material)) {
+                            child.material.forEach(mat => mat.dispose());
+                        } else {
+                            child.material.dispose();
+                        }
+                    }
+                });
+            }
+            
+            // Remove physics boundary
+            this.removeQuickDrawArenaBoundary(i);
+        }
+        
+        // Remove instruction elements
+        if (this.instructionsElement && this.instructionsElement.parentNode) {
+            this.instructionsElement.parentNode.removeChild(this.instructionsElement);
         }
         
         // Clean up physics
@@ -4947,8 +5677,8 @@ export class QuickDraw {
             this.statusIndicator.parentNode.removeChild(this.statusIndicator);
         }
         
-        if (this.instructionsElement && this.instructionsElement.parentNode) {
-            this.instructionsElement.parentNode.removeChild(this.instructionsElement);
+        if (this.lobbyIndicator && this.lobbyIndicator.parentNode) {
+            this.lobbyIndicator.parentNode.removeChild(this.lobbyIndicator);
         }
         
         // Clear timers
@@ -5834,8 +6564,10 @@ const sessions = new Set();   // tracks sessionIds to prevent duplicate connecti
 let nextPlayerId = 1;
 
 // Track Quick Draw game mode queues and active duels
-const quickDrawQueue = []; // Players waiting for a match
-const quickDrawDuels = new Map(); // Map of duelId -> { player1Id, player2Id, state, ... }
+// Support for 5 concurrent lobbies
+const MAX_ARENAS = 5;
+const quickDrawQueues = Array(MAX_ARENAS).fill(null).map(() => []);  // Array of queues for each arena
+const quickDrawDuels = new Map(); // Map of duelId -> { player1Id, player2Id, state, arenaIndex, ... }
 
 // On new connection
 wss.on('connection', (ws, req) => {
@@ -5861,7 +6593,7 @@ wss.on('connection', (ws, req) => {
   const playerId = nextPlayerId++;
   console.log(`Player ${playerId} connected (sessionId: ${sessionId || 'none'})`);
 
-  // Create initial player data with health
+  // Create initial player data with health and QuickDraw info
   players.set(playerId, {
     ws,
     sessionId,
@@ -5871,7 +6603,11 @@ wss.on('connection', (ws, req) => {
     isShooting: false,
     isReloading: false,
     health: 100,
-    lastActivity: Date.now()
+    lastActivity: Date.now(),
+    quickDrawLobbyIndex: -1, // -1 means not in any lobby
+    inQuickDrawQueue: false,
+    inQuickDrawDuel: false,
+    quickDrawDuelId: null
   });
 
   // Send init data to this client (their ID + existing players)
@@ -5887,7 +6623,8 @@ wss.on('connection', (ws, req) => {
         isAiming: p.isAiming,
         isShooting: p.isShooting,
         isReloading: p.isReloading,
-        health: p.health
+        health: p.health,
+        quickDrawLobbyIndex: p.quickDrawLobbyIndex
       }))
   }));
 
@@ -5897,7 +6634,8 @@ wss.on('connection', (ws, req) => {
     id: playerId,
     position: players.get(playerId).position,
     rotation: players.get(playerId).rotation,
-    health: players.get(playerId).health
+    health: players.get(playerId).health,
+    quickDrawLobbyIndex: players.get(playerId).quickDrawLobbyIndex
   });
 
   // Handle incoming messages
@@ -5920,7 +6658,13 @@ wss.on('connection', (ws, req) => {
             player.isAiming = data.isAiming !== undefined ? data.isAiming : player.isAiming;
             player.isShooting = data.isShooting !== undefined ? data.isShooting : player.isShooting;
             player.isReloading = data.isReloading !== undefined ? data.isReloading : player.isReloading;
-            // Broadcast to others including current health
+            
+            // Update QuickDraw lobby index if provided
+            if (data.quickDrawLobbyIndex !== undefined) {
+              player.quickDrawLobbyIndex = data.quickDrawLobbyIndex;
+            }
+            
+            // Broadcast to others including current health and Quick Draw info
             broadcastToOthers(playerId, {
               type: 'playerUpdate',
               id: playerId,
@@ -5929,7 +6673,8 @@ wss.on('connection', (ws, req) => {
               isAiming: player.isAiming,
               isShooting: player.isShooting,
               isReloading: player.isReloading,
-              health: player.health
+              health: player.health,
+              quickDrawLobbyIndex: player.quickDrawLobbyIndex
             });
           }
           break;
@@ -5975,7 +6720,7 @@ wss.on('connection', (ws, req) => {
           break;
           
         case 'quickDrawJoin':
-          handleQuickDrawJoin(playerId);
+          handleQuickDrawJoin(playerId, data.arenaIndex);
           break;
           
         case 'quickDrawLeave':
@@ -5983,11 +6728,11 @@ wss.on('connection', (ws, req) => {
           break;
           
         case 'quickDrawReady':
-          handleQuickDrawReady(playerId);
+          handleQuickDrawReady(playerId, data.arenaIndex);
           break;
           
         case 'quickDrawShoot':
-          handleQuickDrawShoot(playerId, data.opponentId);
+          handleQuickDrawShoot(playerId, data.opponentId, data.arenaIndex);
           break;
 
         default:
@@ -6023,11 +6768,15 @@ function cleanupPlayer(playerId) {
     }
     
     // Quick Draw cleanup
-    if (player.inQuickDrawQueue) {
-      // Remove from queue
-      const index = quickDrawQueue.indexOf(playerId);
-      if (index !== -1) {
-        quickDrawQueue.splice(index, 1);
+    if (player.inQuickDrawQueue && player.quickDrawLobbyIndex >= 0) {
+      // Remove from the appropriate queue
+      const queueIndex = player.quickDrawLobbyIndex;
+      if (queueIndex >= 0 && queueIndex < MAX_ARENAS) {
+        const queue = quickDrawQueues[queueIndex];
+        const index = queue.indexOf(playerId);
+        if (index !== -1) {
+          queue.splice(index, 1);
+        }
       }
     }
     
@@ -6081,59 +6830,85 @@ function broadcastToAll(data) {
 }
 
 /**
- * Handle a player joining the Quick Draw queue.
+ * Handle a player joining a specific Quick Draw queue.
+ * @param {number} playerId - The player's ID
+ * @param {number} arenaIndex - The arena index to join (0-4)
  */
-function handleQuickDrawJoin(playerId) {
-  console.log(`Player ${playerId} joined Quick Draw queue`);
+function handleQuickDrawJoin(playerId, arenaIndex) {
+  // Validate arena index
+  if (arenaIndex < 0 || arenaIndex >= MAX_ARENAS) {
+    console.error(`Invalid arena index: ${arenaIndex}`);
+    return;
+  }
+  
+  console.log(`Player ${playerId} joined Quick Draw queue for arena ${arenaIndex + 1}`);
   const playerData = players.get(playerId);
   
   if (!playerData || playerData.inQuickDrawQueue || playerData.inQuickDrawDuel) {
     return; // Invalid state
   }
   
-  // Add to the queue
+  // Add to the specific queue
   playerData.inQuickDrawQueue = true;
-  quickDrawQueue.push(playerId);
+  playerData.quickDrawLobbyIndex = arenaIndex;
+  quickDrawQueues[arenaIndex].push(playerId);
   
   // Notify the player they joined the queue
   playerData.ws.send(JSON.stringify({
-    type: 'quickDrawJoin'
+    type: 'quickDrawJoin',
+    arenaIndex: arenaIndex
   }));
   
-  // Check if we have enough players to start a match
-  checkQuickDrawQueue();
+  // Check if we have enough players in this queue to start a match
+  checkQuickDrawQueue(arenaIndex);
 }
 
 /**
  * Handle a player leaving the Quick Draw queue.
+ * @param {number} playerId - The player's ID
  */
 function handleQuickDrawLeave(playerId) {
-  console.log(`Player ${playerId} left Quick Draw queue`);
   const playerData = players.get(playerId);
   
   if (!playerData || !playerData.inQuickDrawQueue) {
     return; // Invalid state
   }
   
-  // Remove from queue
-  playerData.inQuickDrawQueue = false;
-  const index = quickDrawQueue.indexOf(playerId);
-  if (index !== -1) {
-    quickDrawQueue.splice(index, 1);
+  // Get the arena index
+  const arenaIndex = playerData.quickDrawLobbyIndex;
+  if (arenaIndex >= 0 && arenaIndex < MAX_ARENAS) {
+    console.log(`Player ${playerId} left Quick Draw queue for arena ${arenaIndex + 1}`);
+    
+    // Remove from appropriate queue
+    const index = quickDrawQueues[arenaIndex].indexOf(playerId);
+    if (index !== -1) {
+      quickDrawQueues[arenaIndex].splice(index, 1);
+    }
   }
+  
+  // Reset player state
+  playerData.inQuickDrawQueue = false;
+  playerData.quickDrawLobbyIndex = -1;
 }
 
 /**
- * Check if we have enough players in the Quick Draw queue to start a match.
+ * Check if we have enough players in a specific Quick Draw queue to start a match.
+ * @param {number} arenaIndex - The arena index to check
  */
-function checkQuickDrawQueue() {
-  if (quickDrawQueue.length < 2) {
-    return; // Not enough players
+function checkQuickDrawQueue(arenaIndex) {
+  if (arenaIndex < 0 || arenaIndex >= MAX_ARENAS) {
+    return; // Invalid arena index
+  }
+  
+  const queue = quickDrawQueues[arenaIndex];
+  
+  if (queue.length < 2) {
+    return; // Not enough players in this queue
   }
   
   // Get the two players who have been waiting the longest
-  const player1Id = quickDrawQueue.shift();
-  const player2Id = quickDrawQueue.shift();
+  const player1Id = queue.shift();
+  const player2Id = queue.shift();
   
   // Make sure both players are still connected
   const player1 = players.get(player1Id);
@@ -6141,15 +6916,16 @@ function checkQuickDrawQueue() {
   
   if (!player1 || !player2) {
     // Put the valid player back in the queue
-    if (player1) quickDrawQueue.push(player1Id);
-    if (player2) quickDrawQueue.push(player2Id);
+    if (player1) queue.push(player1Id);
+    if (player2) queue.push(player2Id);
     return;
   }
   
   // Create a new duel
-  const duelId = `duel_${player1Id}_${player2Id}`;
+  const duelId = `duel_${arenaIndex}_${player1Id}_${player2Id}`;
   quickDrawDuels.set(duelId, {
     id: duelId,
+    arenaIndex: arenaIndex,
     player1Id,
     player2Id,
     state: 'starting',
@@ -6169,22 +6945,26 @@ function checkQuickDrawQueue() {
   player1.ws.send(JSON.stringify({
     type: 'quickDrawMatch',
     opponentId: player2Id,
-    position: 'left' // Player 1 spawns on the left
+    position: 'left', // Player 1 spawns on the left
+    arenaIndex: arenaIndex
   }));
   
   player2.ws.send(JSON.stringify({
     type: 'quickDrawMatch',
     opponentId: player1Id,
-    position: 'right' // Player 2 spawns on the right
+    position: 'right', // Player 2 spawns on the right
+    arenaIndex: arenaIndex
   }));
   
-  console.log(`Started Quick Draw duel ${duelId} between players ${player1Id} and ${player2Id}`);
+  console.log(`Started Quick Draw duel ${duelId} between players ${player1Id} and ${player2Id} in arena ${arenaIndex + 1}`);
 }
 
 /**
  * Handle a player being ready in a Quick Draw duel.
+ * @param {number} playerId - The player's ID
+ * @param {number} arenaIndex - The arena index for the duel
  */
-function handleQuickDrawReady(playerId) {
+function handleQuickDrawReady(playerId, arenaIndex) {
   const playerData = players.get(playerId);
   
   if (!playerData || !playerData.inQuickDrawDuel) {
@@ -6196,6 +6976,12 @@ function handleQuickDrawReady(playerId) {
   
   if (!duel) {
     return; // Invalid duel
+  }
+  
+  // Verify arena index matches
+  if (arenaIndex !== undefined && duel.arenaIndex !== arenaIndex) {
+    console.error(`Arena index mismatch: expected ${duel.arenaIndex}, got ${arenaIndex}`);
+    return;
   }
   
   // Mark this player as ready
@@ -6213,6 +6999,7 @@ function handleQuickDrawReady(playerId) {
 
 /**
  * Start the Quick Draw duel sequence.
+ * @param {string} duelId - The duel ID
  */
 function startQuickDrawDuel(duelId) {
   const duel = quickDrawDuels.get(duelId);
@@ -6255,6 +7042,7 @@ function startQuickDrawDuel(duelId) {
 
 /**
  * Send the "DRAW!" signal to both players.
+ * @param {string} duelId - The duel ID
  */
 function sendDrawSignal(duelId) {
   const duel = quickDrawDuels.get(duelId);
@@ -6278,17 +7066,20 @@ function sendDrawSignal(duelId) {
   player1.ws.send(JSON.stringify({ type: 'quickDrawDraw' }));
   player2.ws.send(JSON.stringify({ type: 'quickDrawDraw' }));
   
-  console.log(`Draw signal sent for duel ${duelId}`);
+  console.log(`Draw signal sent for duel ${duelId} in arena ${duel.arenaIndex + 1}`);
 }
 
 /**
  * Handle a player shooting in a Quick Draw duel.
+ * @param {number} playerId - The player's ID
+ * @param {number} targetId - The target player's ID
+ * @param {number} arenaIndex - The arena index for the duel
  */
-function handleQuickDrawShoot(playerId, targetId) {
+function handleQuickDrawShoot(playerId, targetId, arenaIndex) {
     playerId = Number(playerId);
     targetId = Number(targetId);
     
-    console.log(`Quick Draw shoot: Player ${playerId} shot player ${targetId}`);
+    console.log(`Quick Draw shoot: Player ${playerId} shot player ${targetId} in arena ${arenaIndex + 1}`);
     
     const playerData = players.get(playerId);
     
@@ -6303,6 +7094,12 @@ function handleQuickDrawShoot(playerId, targetId) {
     if (!duel) {
         console.log(`Quick Draw shoot rejected: Duel ${duelId} not found`);
         return; // Invalid duel
+    }
+    
+    // Verify arena index matches
+    if (arenaIndex !== undefined && duel.arenaIndex !== arenaIndex) {
+        console.error(`Arena index mismatch: expected ${duel.arenaIndex}, got ${arenaIndex}`);
+        return;
     }
     
     if (duel.state !== 'draw') {
@@ -6337,7 +7134,8 @@ function endQuickDrawDuel(duelId, winnerId) {
     return; // Invalid duel
   }
   
-  console.log(`Ending duel ${duelId} with winner ${winnerId || 'none'}`);
+  const arenaIndex = duel.arenaIndex;
+  console.log(`Ending duel ${duelId} in arena ${arenaIndex + 1} with winner ${winnerId || 'none'}`);
   
   // Clear any pending timeouts
   if (duel.drawTimeout) {

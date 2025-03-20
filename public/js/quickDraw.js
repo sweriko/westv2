@@ -2,7 +2,7 @@
  * Quick Draw game mode implementation
  * Players face off in a wild west duel where they must wait for the "draw" signal
  * before pulling their revolvers and shooting at each other.
- * Now with support for up to 5 concurrent lobbies/arenas.
+ * Now with a single portal that automatically assigns players to available arenas.
  */
 
 import { PhysicsSystem } from './physics.js';
@@ -37,8 +37,8 @@ export class QuickDraw {
         // Track arena physics bodies
         this.arenaBoundaries = new Array(this.maxArenas).fill(null);
         
-        // Initialize portals, duel areas, and network handlers
-        this.initPortals();
+        // Initialize the single portal, duel areas, and network handlers
+        this.initPortal();
         this.createDuelAreas();
         this.initNetworkHandlers();
         this.createUI();
@@ -79,7 +79,6 @@ export class QuickDraw {
                 active: false, // Whether this arena is currently in use
                 portalCollider: null, // Will store collision box for the portal
                 duelArea: null, // Will store the THREE.Group for the arena
-                portalGroup: null, // Will store the portal mesh group
                 duelAreaActive: false // Track if this duel area is currently visible
             });
         }
@@ -172,111 +171,436 @@ export class QuickDraw {
     }
     
     /**
-     * Initialize all portals - one for each arena
+     * Initialize the single portal for all Quick Draw arenas
      */
-    initPortals() {
-        for (let i = 0; i < this.maxArenas; i++) {
-            this.initPortal(i);
-        }
-    }
-    
-    /**
-     * Initialize a portal for a specific arena
-     * @param {number} arenaIndex - The arena index (0-4)
-     */
-    initPortal(arenaIndex) {
-        const config = this.arenaConfigs[arenaIndex];
-        const portalGroup = new THREE.Group();
+    initPortal() {
+        this.portalGroup = new THREE.Group();
         
-        // Create a visible portal that players can walk into
-        const portalGeometry = new THREE.RingGeometry(1, 1.2, 32);
-        const portalMaterial = new THREE.MeshBasicMaterial({ 
-            color: config.portalColor,
-            side: THREE.DoubleSide,
-            transparent: true,
-            opacity: 0.8
-        });
-        const portal = new THREE.Mesh(portalGeometry, portalMaterial);
+        // Calculate portal position
+        let portalX = 0;
+        let portalY = 2.5; // Increased Y position for a taller portal
+        let portalZ = 0;
         
-        // Position each portal differently in the town
-        // Calculate a position based on arenaIndex
         // If town dimensions are available, use them for positioning
         if (window.townDimensions) {
             const streetWidth = window.townDimensions.streetWidth;
             const townLength = window.townDimensions.length;
             
-            // Spread portals along the street
-            const zSpacing = townLength * 0.6 / this.maxArenas; 
-            const zOffset = -townLength * 0.3 + arenaIndex * zSpacing;
-            
-            // Alternate portals on left and right side of the street
-            const xPos = (arenaIndex % 2 === 0) ? -streetWidth * 0.3 : streetWidth * 0.3;
-            
-            portal.position.set(xPos, 1.5, zOffset);
-        } else {
-            // Default positions if town dimensions aren't available
-            const xPos = (arenaIndex % 2 === 0) ? -5 : 5;
-            const zPos = -10 + arenaIndex * 5;
-            portal.position.set(xPos, 1.5, zPos);
+            // Position portal on the side of the street in the center of town
+            portalX = streetWidth * 0.4; // Move to the right side of the street
+            portalZ = 0; // Center of town (Z axis)
         }
         
-        portal.rotation.y = Math.PI / 2; // Make it vertical
-        portalGroup.add(portal);
+        // Create a wooden frame portal
+        this.createWoodenFramePortal(portalX, portalY, portalZ);
         
-        // Add text above the portal
-        const textCanvas = document.createElement('canvas');
-        const context = textCanvas.getContext('2d');
-        textCanvas.width = 256;
-        textCanvas.height = 64;
-        context.fillStyle = 'white';
-        context.font = 'bold 28px Arial';
-        context.textAlign = 'center';
-        context.fillText(`QUICK DRAW ${arenaIndex + 1}`, 128, 40);
+        // Create collision detector for the portal - make it larger to match the bigger portal
+        const portalCollider = new THREE.Box3(
+            new THREE.Vector3(portalX - 2.5, 0, portalZ - 1),
+            new THREE.Vector3(portalX + 2.5, portalY * 2, portalZ + 1)
+        );
         
-        const textTexture = new THREE.Texture(textCanvas);
-        textTexture.needsUpdate = true;
+        // Store the collider for all arena configs to reference the same portal
+        for (let i = 0; i < this.maxArenas; i++) {
+            this.arenaConfigs[i].portalCollider = portalCollider;
+        }
         
-        const textMaterial = new THREE.MeshBasicMaterial({
-            map: textTexture,
+        this.scene.add(this.portalGroup);
+        
+        // Create portal instructions
+        this.createPortalInstructions(new THREE.Vector3(portalX, portalY, portalZ));
+    }
+    
+    /**
+     * Creates a wooden frame portal with Minecraft-like portal filling and a wooden sign on top
+     * @param {number} x - X position
+     * @param {number} y - Y position
+     * @param {number} z - Z position
+     */
+    createWoodenFramePortal(x, y, z) {
+        const frameWidth = 5; // Wider frame
+        const frameHeight = 7; // Taller frame
+        const beamThickness = 0.25; // Thicker beams
+        
+        // Create wooden beam material with more texture
+        const woodMaterial = new THREE.MeshStandardMaterial({
+            color: 0x8B4513,  // Brown
+            roughness: 0.9,
+            metalness: 0.1
+        });
+        
+        // Create the wooden frame beams
+        // Top beam
+        const topBeam = new THREE.Mesh(
+            new THREE.BoxGeometry(frameWidth, beamThickness, beamThickness),
+            woodMaterial
+        );
+        topBeam.position.set(0, frameHeight/2, 0);
+        this.portalGroup.add(topBeam);
+        
+        // Bottom beam
+        const bottomBeam = new THREE.Mesh(
+            new THREE.BoxGeometry(frameWidth, beamThickness, beamThickness),
+            woodMaterial
+        );
+        bottomBeam.position.set(0, -frameHeight/2, 0);
+        this.portalGroup.add(bottomBeam);
+        
+        // Left beam
+        const leftBeam = new THREE.Mesh(
+            new THREE.BoxGeometry(beamThickness, frameHeight, beamThickness),
+            woodMaterial
+        );
+        leftBeam.position.set(-frameWidth/2, 0, 0);
+        this.portalGroup.add(leftBeam);
+        
+        // Right beam
+        const rightBeam = new THREE.Mesh(
+            new THREE.BoxGeometry(beamThickness, frameHeight, beamThickness),
+            woodMaterial
+        );
+        rightBeam.position.set(frameWidth/2, 0, 0);
+        this.portalGroup.add(rightBeam);
+        
+        // Create the Minecraft-like portal filling with a more static appearance
+        const fillingGeometry = new THREE.PlaneGeometry(frameWidth - beamThickness, frameHeight - beamThickness, 32, 32); // More segments for wave effect
+        
+        // Create a custom shader material for Minecraft nether portal effect - more static version
+        const fillingMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                time: { value: 0.0 }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                uniform float time;
+                
+                void main() {
+                    vUv = uv;
+                    // Add very subtle displacement to vertices
+                    vec3 pos = position;
+                    pos.x += sin(position.y * 2.0 + time * 0.5) * 0.01;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform float time;
+                varying vec2 vUv;
+                
+                // Simple noise function
+                float noise(vec2 p) {
+                    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+                }
+                
+                void main() {
+                    // Static purple base with subtle animated swirls
+                    vec3 baseColor = vec3(0.5, 0.0, 0.8); // Purple base
+                    
+                    // Add subtle swirl pattern
+                    float swirl = sin(vUv.x * vUv.y * 10.0 + time * 0.2) * 0.1;
+                    
+                    // Add a bit of noise pattern
+                    float noiseVal = noise(vUv * 5.0 + vec2(time * 0.05, time * 0.03));
+                    
+                    // Mix colors for subtle effect
+                    vec3 color = mix(baseColor, vec3(0.7, 0.2, 1.0), swirl + noiseVal * 0.1);
+                    
+                    // Add edge glow
+                    float edgeX = smoothstep(0.0, 0.07, vUv.x) * smoothstep(1.0, 0.93, vUv.x);
+                    float edgeY = smoothstep(0.0, 0.07, vUv.y) * smoothstep(1.0, 0.93, vUv.y);
+                    float edge = edgeX * edgeY;
+                    
+                    // Subtle pulsing
+                    float pulse = 0.9 + sin(time * 0.5) * 0.1;
+                    color = mix(color, vec3(0.8, 0.4, 1.0), (1.0 - edge) * pulse * 0.2);
+                    
+                    gl_FragColor = vec4(color, 0.9); // Slightly transparent
+                }
+            `,
             transparent: true,
             side: THREE.DoubleSide
         });
         
-        const textGeometry = new THREE.PlaneGeometry(2, 0.5);
-        const portalText = new THREE.Mesh(textGeometry, textMaterial);
-        portalText.position.copy(portal.position);
-        portalText.position.y += 1.0; // Position above the portal
-        portalText.rotation.y = Math.PI / 2;
-        portalGroup.add(portalText);
+        const filling = new THREE.Mesh(fillingGeometry, fillingMaterial);
+        filling.position.set(0, 0, -0.05);
+        this.portalGroup.add(filling);
         
-        // Create collision detector for the portal - adjust based on portal position
-        const portalPos = portal.position;
-        const portalCollider = new THREE.Box3(
-            new THREE.Vector3(portalPos.x - 0.5, portalPos.y - 1.5, portalPos.z - 0.5),
-            new THREE.Vector3(portalPos.x + 0.5, portalPos.y + 1.5, portalPos.z + 0.5)
-        );
+        // Update the time uniform in the shader
+        this.animatePortalFilling(fillingMaterial);
         
-        // Store in arena config
-        config.portalCollider = portalCollider;
-        config.portalGroup = portalGroup;
+        // Create a wooden sign on top of the portal
+        this.createWoodenSign(frameWidth, frameHeight);
         
-        // Animate the portal
-        this.animatePortal(portal, arenaIndex);
+        // Add particle effect around the portal
+        this.addPortalParticles(frameWidth, frameHeight);
         
-        // Add instructions
-        this.createPortalInstructions(portal.position, arenaIndex);
-        
-        this.scene.add(portalGroup);
+        // Position the portal
+        this.portalGroup.position.set(x, y, z);
+        this.portalGroup.rotation.y = Math.PI / 2; // Make it vertical and facing the street
     }
     
     /**
-     * Creates a floating instruction panel for a specific arena portal
-     * @param {THREE.Vector3} portalPosition - The position of the portal
-     * @param {number} arenaIndex - The arena index (0-4)
+     * Creates a wooden sign on top of the portal with text visible from both sides
+     * @param {number} frameWidth - Width of the portal frame
+     * @param {number} frameHeight - Height of the portal frame
      */
-    createPortalInstructions(portalPosition, arenaIndex) {
-        // Create a container for the instructions (will be shown on demand in updatePortalInstructions)
-        const instructionsId = `portal-instructions-${arenaIndex}`;
+    createWoodenSign(frameWidth, frameHeight) {
+        // Create wooden sign material
+        const woodMaterial = new THREE.MeshStandardMaterial({
+            color: 0x8B4513,  // Brown
+            roughness: 0.9,
+            metalness: 0.1
+        });
+        
+        // Create sign post
+        const signWidth = frameWidth * 0.8;
+        const signHeight = 0.8;
+        const signDepth = 0.1;
+        
+        // Create the wooden sign board
+        const signGeometry = new THREE.BoxGeometry(signWidth, signHeight, signDepth);
+        const sign = new THREE.Mesh(signGeometry, woodMaterial);
+        
+        // Position the sign above the portal
+        sign.position.set(0, frameHeight/2 + signHeight/2 + 0.1, 0);
+        
+        // Create two small posts to connect the sign to the portal frame
+        const postGeometry = new THREE.BoxGeometry(0.2, 0.4, 0.2);
+        
+        // Left post
+        const leftPost = new THREE.Mesh(postGeometry, woodMaterial);
+        leftPost.position.set(-signWidth/3, frameHeight/2 + 0.2, 0);
+        
+        // Right post
+        const rightPost = new THREE.Mesh(postGeometry, woodMaterial);
+        rightPost.position.set(signWidth/3, frameHeight/2 + 0.2, 0);
+        
+        // Create text for both sides of the sign
+        const createSignText = (isBack) => {
+            const textCanvas = document.createElement('canvas');
+            const context = textCanvas.getContext('2d');
+            textCanvas.width = 512;
+            textCanvas.height = 128;
+            
+            // Clear background
+            context.fillStyle = '#8B4513'; // Match the wood color
+            context.fillRect(0, 0, textCanvas.width, textCanvas.height);
+            
+            // Add wood grain texture
+            context.strokeStyle = '#6B3F13'; // Darker wood color for grain
+            context.lineWidth = 2;
+            for (let i = 0; i < 20; i++) {
+                const y = i * 7;
+                context.beginPath();
+                context.moveTo(0, y);
+                // Wavy line for wood grain
+                for (let x = 0; x < textCanvas.width; x += 20) {
+                    context.lineTo(x + 10, y + (Math.random() * 4 - 2));
+                }
+                context.stroke();
+            }
+            
+            // Add text
+            context.fillStyle = 'white';
+            context.font = 'bold 70px Western, Arial, sans-serif';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText('Join 1v1', 256, 64);
+            
+            // Add a slightly darker stroke to make text more readable
+            context.strokeStyle = 'rgba(0,0,0,0.5)';
+            context.lineWidth = 2;
+            context.strokeText('Join 1v1', 256, 64);
+            
+            const texture = new THREE.CanvasTexture(textCanvas);
+            texture.needsUpdate = true;
+            
+            const material = new THREE.MeshBasicMaterial({
+                map: texture,
+                side: THREE.FrontSide
+            });
+            
+            // Create text plane slightly larger than the sign to avoid z-fighting
+            const textGeometry = new THREE.PlaneGeometry(signWidth - 0.05, signHeight - 0.05);
+            const textMesh = new THREE.Mesh(textGeometry, material);
+            
+            // Position text just in front of the sign
+            const zOffset = isBack ? -signDepth/2 - 0.01 : signDepth/2 + 0.01;
+            textMesh.position.set(0, 0, zOffset);
+            
+            // If this is the back face, rotate it 180 degrees
+            if (isBack) {
+                textMesh.rotation.y = Math.PI;
+            }
+            
+            return textMesh;
+        };
+        
+        // Create front and back text
+        const frontText = createSignText(false);
+        const backText = createSignText(true);
+        
+        // Add text to sign
+        sign.add(frontText);
+        sign.add(backText);
+        
+        // Add everything to the portal group
+        this.portalGroup.add(sign);
+        this.portalGroup.add(leftPost);
+        this.portalGroup.add(rightPost);
+    }
+    
+    /**
+     * Adds particle effects around the portal to enhance the Minecraft feel
+     * @param {number} width - Width of the portal
+     * @param {number} height - Height of the portal
+     */
+    addPortalParticles(width, height) {
+        const particleCount = 50;
+        const particleGroup = new THREE.Group();
+        
+        // Create particle material (purple to match portal)
+        const particleMaterial = new THREE.PointsMaterial({
+            color: 0xB000FF,
+            size: 0.15,
+            transparent: true,
+            opacity: 0.7,
+            blending: THREE.AdditiveBlending
+        });
+        
+        // Create particle geometry
+        const particleGeometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+        const velocities = []; // Store velocities for animation
+        
+        // Create particles around the frame
+        for (let i = 0; i < particleCount; i++) {
+            // Position particles around the portal frame
+            const side = Math.floor(Math.random() * 4); // 0: top, 1: right, 2: bottom, 3: left
+            let x, y;
+            
+            switch(side) {
+                case 0: // top
+                    x = (Math.random() - 0.5) * width;
+                    y = height/2 + Math.random() * 0.5;
+                    break;
+                case 1: // right
+                    x = width/2 + Math.random() * 0.5;
+                    y = (Math.random() - 0.5) * height;
+                    break;
+                case 2: // bottom
+                    x = (Math.random() - 0.5) * width;
+                    y = -height/2 - Math.random() * 0.5;
+                    break;
+                case 3: // left
+                    x = -width/2 - Math.random() * 0.5;
+                    y = (Math.random() - 0.5) * height;
+                    break;
+            }
+            
+            positions[i * 3] = x;
+            positions[i * 3 + 1] = y;
+            positions[i * 3 + 2] = (Math.random() - 0.5) * 0.2; // Small Z variation
+            
+            // Random velocities moving toward the portal
+            velocities.push({
+                x: -x * 0.01 * (0.5 + Math.random() * 0.5),
+                y: -y * 0.01 * (0.5 + Math.random() * 0.5),
+                z: (Math.random() - 0.5) * 0.01,
+                life: 0,
+                maxLife: 60 + Math.floor(Math.random() * 60) // Random lifetime
+            });
+        }
+        
+        particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const particles = new THREE.Points(particleGeometry, particleMaterial);
+        particleGroup.add(particles);
+        this.portalGroup.add(particleGroup);
+        
+        // Animate particles
+        const animateParticles = () => {
+            const positions = particles.geometry.attributes.position.array;
+            
+            // Update each particle
+            for (let i = 0; i < particleCount; i++) {
+                // Update position based on velocity
+                positions[i * 3] += velocities[i].x;
+                positions[i * 3 + 1] += velocities[i].y;
+                positions[i * 3 + 2] += velocities[i].z;
+                
+                // Update life
+                velocities[i].life++;
+                
+                // If particle has reached end of life or center of portal, reset it
+                if (velocities[i].life >= velocities[i].maxLife || 
+                    (Math.abs(positions[i * 3]) < 0.3 && Math.abs(positions[i * 3 + 1]) < 0.3)) {
+                    
+                    // Reset to edge of portal
+                    const side = Math.floor(Math.random() * 4);
+                    let x, y;
+                    
+                    switch(side) {
+                        case 0: // top
+                            x = (Math.random() - 0.5) * width;
+                            y = height/2 + Math.random() * 0.5;
+                            break;
+                        case 1: // right
+                            x = width/2 + Math.random() * 0.5;
+                            y = (Math.random() - 0.5) * height;
+                            break;
+                        case 2: // bottom
+                            x = (Math.random() - 0.5) * width;
+                            y = -height/2 - Math.random() * 0.5;
+                            break;
+                        case 3: // left
+                            x = -width/2 - Math.random() * 0.5;
+                            y = (Math.random() - 0.5) * height;
+                            break;
+                    }
+                    
+                    positions[i * 3] = x;
+                    positions[i * 3 + 1] = y;
+                    positions[i * 3 + 2] = (Math.random() - 0.5) * 0.2;
+                    
+                    // New velocity
+                    velocities[i] = {
+                        x: -x * 0.01 * (0.5 + Math.random() * 0.5),
+                        y: -y * 0.01 * (0.5 + Math.random() * 0.5),
+                        z: (Math.random() - 0.5) * 0.01,
+                        life: 0,
+                        maxLife: 60 + Math.floor(Math.random() * 60)
+                    };
+                }
+            }
+            
+            // Update geometry
+            particles.geometry.attributes.position.needsUpdate = true;
+            
+            requestAnimationFrame(animateParticles);
+        };
+        
+        requestAnimationFrame(animateParticles);
+    }
+    
+    /**
+     * Animate the portal filling shader
+     * @param {THREE.ShaderMaterial} material - The shader material to animate
+     */
+    animatePortalFilling(material) {
+        const animate = () => {
+            material.uniforms.time.value += 0.01;
+            requestAnimationFrame(animate);
+        };
+        
+        requestAnimationFrame(animate);
+    }
+    
+    /**
+     * Creates a floating instruction panel for the portal
+     * @param {THREE.Vector3} portalPosition - The position of the portal
+     */
+    createPortalInstructions(portalPosition) {
+        // Create a container for the instructions
+        const instructionsId = 'portal-instructions';
         
         // Check if it already exists
         let instructionsElement = document.getElementById(instructionsId);
@@ -299,7 +623,7 @@ export class QuickDraw {
             instructionsElement.style.fontFamily = 'Arial, sans-serif';
             
             instructionsElement.innerHTML = `
-                <h2 style="color:#FF6B00; margin-bottom:10px;">Quick Draw Duel ${arenaIndex + 1}</h2>
+                <h2 style="color:#FF6B00; margin-bottom:10px;">Quick Draw Duel</h2>
                 <p>Step into the portal to challenge another player to a classic western showdown!</p>
                 <ul style="text-align:left; margin-top:10px; padding-left:20px;">
                     <li>Wait for opponent and follow the "READY?" signal</li>
@@ -315,17 +639,17 @@ export class QuickDraw {
         // Show instructions when player gets close to portal
         // Adjust the proximity box based on portal position
         const proximityBox = new THREE.Box3(
-            new THREE.Vector3(portalPosition.x - 2, portalPosition.y - 2, portalPosition.z - 2),
-            new THREE.Vector3(portalPosition.x + 2, portalPosition.y + 2, portalPosition.z + 2)
+            new THREE.Vector3(portalPosition.x - 4, portalPosition.y - 4, portalPosition.z - 4),
+            new THREE.Vector3(portalPosition.x + 4, portalPosition.y + 4, portalPosition.z + 4)
         );
         
-        // Store the box reference and element in the arena config
-        this.arenaConfigs[arenaIndex].portalProximityBox = proximityBox;
-        this.arenaConfigs[arenaIndex].instructionsElement = instructionsElement;
+        // Store the box reference and element for the portal
+        this.portalProximityBox = proximityBox;
+        this.instructionsElement = instructionsElement;
     }
     
     /**
-     * Check if player is near any portal and show appropriate instructions
+     * Check if player is near the portal and show appropriate instructions
      */
     updatePortalInstructions() {
         if (!this.localPlayer || !this.localPlayer.group) {
@@ -333,64 +657,20 @@ export class QuickDraw {
         }
         
         const playerPos = this.localPlayer.group.position.clone();
-        let nearAnyPortal = false;
-        let nearPortalIndex = -1;
         
-        // Check each portal
-        for (let i = 0; i < this.maxArenas; i++) {
-            const config = this.arenaConfigs[i];
-            // Skip if no proximity box
-            if (!config.portalProximityBox) continue;
-            
-            const isNearPortal = config.portalProximityBox.containsPoint(playerPos);
-            
-            if (isNearPortal && !this.inLobby && !this.inDuel) {
-                nearAnyPortal = true;
-                nearPortalIndex = i;
-                
-                // Show this portal's instructions
-                if (config.instructionsElement) {
-                    config.instructionsElement.style.display = 'block';
-                }
-            } else {
-                // Hide instructions for this portal
-                if (config.instructionsElement) {
-                    config.instructionsElement.style.display = 'none';
-                }
+        // Check if near portal
+        if (this.portalProximityBox && this.portalProximityBox.containsPoint(playerPos) && 
+            !this.inLobby && !this.inDuel) {
+            // Show portal instructions
+            if (this.instructionsElement) {
+                this.instructionsElement.style.display = 'block';
+            }
+        } else {
+            // Hide instructions
+            if (this.instructionsElement) {
+                this.instructionsElement.style.display = 'none';
             }
         }
-        
-        // Update any UI that depends on being near a portal
-        if (nearAnyPortal) {
-            // Additional UI updates could go here
-        }
-    }
-    
-    /**
-     * Animate a specific portal with a pulsing effect
-     * @param {THREE.Mesh} portal - The portal mesh to animate
-     * @param {number} arenaIndex - The arena index for color variations
-     */
-    animatePortal(portal, arenaIndex) {
-        const duration = 2000; // ms
-        const startTime = performance.now();
-        const baseHue = (arenaIndex * 60) % 360; // Different base hue for each portal
-        
-        const animate = (time) => {
-            const elapsed = time - startTime;
-            const progress = (elapsed % duration) / duration;
-            
-            const scale = 1 + 0.1 * Math.sin(progress * Math.PI * 2);
-            portal.scale.set(scale, scale, scale);
-            
-            const hue = (progress * 30) + baseHue; // Cycle through hues based on arena index
-            const color = new THREE.Color(`hsl(${hue}, 100%, 50%)`);
-            portal.material.color = color;
-            
-            requestAnimationFrame(animate);
-        };
-        
-        requestAnimationFrame(animate);
     }
     
     /**
@@ -673,7 +953,7 @@ export class QuickDraw {
         
         // If there's a boundary for this arena, remove it
         if (this.arenaBoundaries[arenaIndex]) {
-            this.physics.removeQuickDrawArenaBoundary();
+            this.physics.removeQuickDrawArenaBoundaryByIndex(arenaIndex);
             this.arenaBoundaries[arenaIndex] = null;
         }
     }
@@ -728,6 +1008,88 @@ export class QuickDraw {
     }
     
     /**
+     * Find the optimal arena index to join by checking where other players are waiting
+     * @returns {number} - The arena index to join
+     */
+    getOptimalArenaIndex() {
+        // Get information about other players from the network manager
+        const arenaPlayerCounts = Array(this.maxArenas).fill(0);
+        let foundWaitingPlayer = false;
+        
+        // If we can access the other players through networkManager
+        if (this.networkManager && this.networkManager.otherPlayers) {
+            // Count players in each lobby/queue
+            for (const [_, playerData] of this.networkManager.otherPlayers) {
+                // Check if player is in a Quick Draw lobby but not in a duel
+                if (playerData.quickDrawLobbyIndex >= 0 && 
+                    playerData.quickDrawLobbyIndex < this.maxArenas) {
+                    arenaPlayerCounts[playerData.quickDrawLobbyIndex]++;
+                    
+                    // If this player appears to be waiting alone in a queue
+                    if (arenaPlayerCounts[playerData.quickDrawLobbyIndex] === 1) {
+                        foundWaitingPlayer = true;
+                    }
+                }
+            }
+            
+            // If we found at least one player waiting in a queue
+            if (foundWaitingPlayer) {
+                // Find all arenas with exactly one player waiting
+                const queuesWithOnePlayer = [];
+                for (let i = 0; i < this.maxArenas; i++) {
+                    if (arenaPlayerCounts[i] === 1) {
+                        queuesWithOnePlayer.push(i);
+                    }
+                }
+                
+                // If we found arenas with one player waiting, join one of them
+                if (queuesWithOnePlayer.length > 0) {
+                    // If multiple arenas have one player, pick one randomly
+                    const randomIndex = Math.floor(Math.random() * queuesWithOnePlayer.length);
+                    return queuesWithOnePlayer[randomIndex];
+                }
+            }
+        }
+        
+        // If we couldn't find a player waiting or couldn't access player data,
+        // look for completely empty arenas
+        const emptyArenas = [];
+        for (let i = 0; i < this.maxArenas; i++) {
+            if (arenaPlayerCounts[i] === 0) {
+                emptyArenas.push(i);
+            }
+        }
+        
+        // If we found empty arenas, pick one randomly
+        if (emptyArenas.length > 0) {
+            const randomIndex = Math.floor(Math.random() * emptyArenas.length);
+            return emptyArenas[randomIndex];
+        }
+        
+        // If all arenas have players, pick the one with the fewest players
+        let minPlayers = Infinity;
+        let minArenas = [];
+        
+        for (let i = 0; i < this.maxArenas; i++) {
+            if (arenaPlayerCounts[i] < minPlayers) {
+                minPlayers = arenaPlayerCounts[i];
+                minArenas = [i];
+            } else if (arenaPlayerCounts[i] === minPlayers) {
+                minArenas.push(i);
+            }
+        }
+        
+        // If we found arenas with the minimum number of players, pick one randomly
+        if (minArenas.length > 0) {
+            const randomIndex = Math.floor(Math.random() * minArenas.length);
+            return minArenas[randomIndex];
+        }
+        
+        // Fallback to a random arena if something went wrong
+        return Math.floor(Math.random() * this.maxArenas);
+    }
+    
+    /**
      * Update method called from main animation loop.
      */
     update(deltaTime) {
@@ -761,27 +1123,13 @@ export class QuickDraw {
             }
         }
         
-        // Check for portal collisions when not in lobby or duel
+        // Check for portal collision when not in lobby or duel
         if (!this.inLobby && !this.inDuel) {
             const playerPos = this.localPlayer.group.position.clone();
             
-            // Check each portal for collision
-            for (let i = 0; i < this.maxArenas; i++) {
-                const config = this.arenaConfigs[i];
-                if (!config.portalCollider) continue;
-                
-                if (config.portalCollider.containsPoint(playerPos)) {
-                    this.joinQueue(i);
-                    break;
-                }
-            }
-        }
-        
-        // Animate portals
-        for (let i = 0; i < this.maxArenas; i++) {
-            const config = this.arenaConfigs[i];
-            if (config.portalGroup) {
-                // Could add additional animations here if needed
+            // Check if player is colliding with the single portal
+            if (this.arenaConfigs[0].portalCollider && this.arenaConfigs[0].portalCollider.containsPoint(playerPos)) {
+                this.joinQueue(this.getOptimalArenaIndex());
             }
         }
         
@@ -1227,24 +1575,24 @@ export class QuickDraw {
      * Cleanup resources.
      */
     cleanup() {
-        // Remove portals and indicators for each arena
+        // Remove the portal group
+        if (this.portalGroup) {
+            this.scene.remove(this.portalGroup);
+            this.portalGroup.traverse(child => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) {
+                    if (Array.isArray(child.material)) {
+                        child.material.forEach(mat => mat.dispose());
+                    } else {
+                        child.material.dispose();
+                    }
+                }
+            });
+        }
+        
+        // Remove duel areas
         for (let i = 0; i < this.maxArenas; i++) {
             const config = this.arenaConfigs[i];
-            
-            // Remove portal
-            if (config.portalGroup) {
-                this.scene.remove(config.portalGroup);
-                config.portalGroup.traverse(child => {
-                    if (child.geometry) child.geometry.dispose();
-                    if (child.material) {
-                        if (Array.isArray(child.material)) {
-                            child.material.forEach(mat => mat.dispose());
-                        } else {
-                            child.material.dispose();
-                        }
-                    }
-                });
-            }
             
             // Remove duel area
             if (config.duelArea) {
@@ -1261,13 +1609,13 @@ export class QuickDraw {
                 });
             }
             
-            // Remove instruction elements
-            if (config.instructionsElement && config.instructionsElement.parentNode) {
-                config.instructionsElement.parentNode.removeChild(config.instructionsElement);
-            }
-            
             // Remove physics boundary
             this.removeQuickDrawArenaBoundary(i);
+        }
+        
+        // Remove instruction elements
+        if (this.instructionsElement && this.instructionsElement.parentNode) {
+            this.instructionsElement.parentNode.removeChild(this.instructionsElement);
         }
         
         // Clean up physics
