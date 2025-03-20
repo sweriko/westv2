@@ -520,30 +520,43 @@ export class PhysicsSystem {
    * @param {boolean} enabled - Whether debug mode should be enabled
    */
   setDebugMode(enabled) {
+    // Store previous debug mode to detect changes
+    const previousDebugMode = this.debugMode;
     this.debugMode = enabled;
     
-    // If enabling, create meshes for existing bodies
-    if (enabled) {
+    // If enabling and we weren't previously in debug mode
+    if (enabled && !previousDebugMode) {
+      // Create meshes for existing physics bodies
       this.bodies.forEach(body => {
         this.createDebugMesh(body);
       });
       
-      // Enable hit zone debugging (by setting a global flag)
+      // Set a global flag to signal hit zone debug should be created
+      // This is important for making bullet.js know it should show hitboxes
+      window.showHitZoneDebug = true;
+      
       console.log("Physics debug mode enabled - hit zones visible");
     }
-    // If disabling, remove all debug meshes
-    else {
+    // If disabling and we were previously in debug mode
+    else if (!enabled && previousDebugMode) {
+      // Remove all physics debug meshes
       this.debugMeshes.forEach(item => {
-        window.scene.remove(item.mesh);
-        item.mesh.traverse(child => {
-          if (child.geometry) child.geometry.dispose();
-          if (child.material) child.material.dispose();
-        });
+        if (item.mesh && window.scene) {
+          window.scene.remove(item.mesh);
+          item.mesh.traverse(child => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) child.material.dispose();
+          });
+        }
       });
       this.debugMeshes = [];
       
       // Remove any hit zone debug visualizations
       this.cleanupHitZoneDebug();
+      
+      // Clear the global flag for hit zone debugging
+      window.showHitZoneDebug = false;
+      
       console.log("Physics debug mode disabled - hit zones hidden");
     }
   }
@@ -592,6 +605,40 @@ export class PhysicsSystem {
   }
   
   /**
+   * Force recreation of hit zone debug boxes for all players
+   * Called when needed to refresh the visualizations
+   */
+  refreshHitZoneDebug() {
+    if (!this.debugMode || !window.scene) return;
+    
+    console.log("Refreshing hit zone debug visualizations");
+    
+    // First clean up existing hit zone debug objects
+    this.cleanupHitZoneDebug();
+    
+    // Then force recreation for local player and all remote players
+    // Create a dummy bullet to use for hit zone checks
+    const dummyBullet = new window.Bullet(
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 1, 0)
+    );
+    
+    // Check local player
+    if (window.localPlayer) {
+      dummyBullet.checkPlayerHitZones(window.localPlayer, new THREE.Vector3(0, 0, 0));
+    }
+    
+    // Check remote players
+    if (window.remotePlayers) {
+      window.remotePlayers.forEach(player => {
+        if (player) {
+          dummyBullet.checkPlayerHitZones(player, new THREE.Vector3(0, 0, 0));
+        }
+      });
+    }
+  }
+  
+  /**
    * Cleans up all physics resources
    */
   cleanup() {
@@ -603,11 +650,13 @@ export class PhysicsSystem {
     // Remove all debug meshes
     if (this.debugMode) {
       this.debugMeshes.forEach(item => {
-        window.scene.remove(item.mesh);
-        item.mesh.traverse(child => {
-          if (child.geometry) child.geometry.dispose();
-          if (child.material) child.material.dispose();
-        });
+        if (window.scene) {
+          window.scene.remove(item.mesh);
+          item.mesh.traverse(child => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) child.material.dispose();
+          });
+        }
       });
     }
     

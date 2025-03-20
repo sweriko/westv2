@@ -1,5 +1,6 @@
 import { ThirdPersonModel } from './playerModel.js';
 import { networkManager } from './network.js';
+import { updateHealthUI, showDamageIndicator } from './ui.js';
 
 /**
  * Manages all remote players (their models, animations, etc.) but NOT bullets.
@@ -61,8 +62,6 @@ export class MultiplayerManager {
       }
     };
 
-    // We no longer handle bullets here (onPlayerShoot) – that's handled in main.js
-
     // Anti-cheat: Player got hit (local player) - server validated
     networkManager.onPlayerHit = (sourceId, hitData, newHealth, hitZone) => {
       console.log(`I was hit by player ${sourceId} in the ${hitZone || 'body'}!`);
@@ -75,11 +74,15 @@ export class MultiplayerManager {
       
       // Reduce local player's health (using value from server)
       if (window.localPlayer) {
+        // Calculate damage based on the health difference or hit zone
+        let damage = 20; // Default damage
+        
         if (newHealth !== undefined) {
+          // Calculate damage from previous health
+          damage = window.localPlayer.health - newHealth;
           window.localPlayer.health = newHealth;
         } else {
           // Calculate damage based on hit zone if provided
-          let damage = 20; // Default damage
           if (hitZone === 'head') {
             damage = 100;
           } else if (hitZone === 'body') {
@@ -89,7 +92,17 @@ export class MultiplayerManager {
           }
           
           // Apply damage
-          window.localPlayer.takeDamage(damage);
+          window.localPlayer.takeDamage(damage, hitZone);
+        }
+        
+        // Show damage indicator with proper hit zone
+        if (typeof window.showDamageIndicator === 'function') {
+          window.showDamageIndicator(damage, hitZone);
+        }
+        
+        // Ensure health UI is updated
+        if (typeof window.updateHealthUI === 'function') {
+          window.updateHealthUI(window.localPlayer);
         }
       }
     };
@@ -106,24 +119,32 @@ export class MultiplayerManager {
           this.soundManager.playSound("headshotmarker", 100);
         }
         
+        // Calculate damage based on hit zone
+        let damage = 20; // Default damage
+        if (hitZone === 'head') {
+          damage = 100;
+        } else if (hitZone === 'body') {
+          damage = 40;
+        } else if (hitZone === 'limbs') {
+          damage = 20;
+        }
+        
         // Update health directly from server value if provided
         if (newHealth !== undefined) {
           tPlayer.health = newHealth;
         } else {
-          // Calculate damage based on hit zone if provided
-          let damage = 20; // Default damage
-          if (hitZone === 'head') {
-            damage = 100;
-          } else if (hitZone === 'body') {
-            damage = 40;
-          } else if (hitZone === 'limbs') {
-            damage = 20;
-          }
-          
           // Apply damage
           if (typeof tPlayer.takeDamage === 'function') {
-            tPlayer.takeDamage(damage);
+            tPlayer.takeDamage(damage, hitZone);
+          } else {
+            // If takeDamage is not defined, manually update health
+            tPlayer.health = Math.max((tPlayer.health || 100) - damage, 0);
           }
+        }
+        
+        // Create a hit marker or effect at the hit position if available
+        if (hitPos && window.scene) {
+          this.createHitMarker(hitPos, hitZone);
         }
       }
     };
@@ -156,6 +177,82 @@ export class MultiplayerManager {
     if (this.soundManager) {
       this.soundManager.playSound("aimclick");
     }
+  }
+
+  /**
+   * Creates a visual hit marker at the hit position
+   * @param {Object} position - The hit position
+   * @param {string} hitZone - The hit zone ('head', 'body', 'limbs')
+   */
+  createHitMarker(position, hitZone) {
+    // Only create if we have THREE.js and a scene
+    if (!window.THREE || !window.scene) return;
+    
+    // Choose color based on hit zone
+    let color = 0xFFFFFF; // Default white
+    if (hitZone === 'head') {
+      color = 0xFF0000; // Red for headshots
+    } else if (hitZone === 'body') {
+      color = 0xFF6600; // Orange for body shots
+    } else if (hitZone === 'limbs') {
+      color = 0xFFFF00; // Yellow for limb shots
+    }
+    
+    // Create a particle system for the hit marker
+    const geometry = new THREE.BufferGeometry();
+    const vertices = [];
+    
+    // Create particles in a small sphere
+    const particleCount = 10;
+    const radius = 0.1;
+    
+    for (let i = 0; i < particleCount; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.random() * Math.PI;
+      const x = radius * Math.sin(phi) * Math.cos(theta);
+      const y = radius * Math.sin(phi) * Math.sin(theta);
+      const z = radius * Math.cos(phi);
+      
+      vertices.push(x, y, z);
+    }
+    
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    
+    const material = new THREE.PointsMaterial({
+      color: color,
+      size: 0.05,
+      transparent: true,
+      opacity: 1
+    });
+    
+    const particles = new THREE.Points(geometry, material);
+    particles.position.copy(position);
+    window.scene.add(particles);
+    
+    // Animate the particles
+    const startTime = performance.now();
+    const duration = 500; // ms
+    
+    function animateParticles() {
+      const elapsed = performance.now() - startTime;
+      const progress = elapsed / duration;
+      
+      if (progress < 1) {
+        // Expand particles
+        particles.scale.set(1 + progress * 2, 1 + progress * 2, 1 + progress * 2);
+        // Fade out
+        material.opacity = 1 - progress;
+        
+        requestAnimationFrame(animateParticles);
+      } else {
+        // Clean up
+        window.scene.remove(particles);
+        geometry.dispose();
+        material.dispose();
+      }
+    }
+    
+    requestAnimationFrame(animateParticles);
   }
 
   addPlayer(playerId, data) {

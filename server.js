@@ -222,7 +222,14 @@ wss.on('connection', (ws, req) => {
           break;
           
         case 'quickDrawShoot':
-          handleQuickDrawShoot(playerId, data.opponentId, data.arenaIndex);
+          // Pass the hit zone and damage if provided
+          handleQuickDrawShoot(
+            playerId, 
+            data.opponentId, 
+            data.arenaIndex, 
+            data.hitZone || 'body', 
+            data.damage || 40
+          );
           break;
 
         default:
@@ -504,8 +511,25 @@ function handlePlayerHit(playerId, data) {
     }
   }
   
+  // Calculate damage based on hit zone if provided
+  let damage = GAME_CONSTANTS.DAMAGE_PER_HIT; // Default damage
+  const hitZone = data.hitData && data.hitData.hitZone ? data.hitData.hitZone : null;
+  
+  if (hitZone) {
+    if (hitZone === 'head') {
+      damage = 100; // Headshot is always lethal
+    } else if (hitZone === 'body') {
+      damage = 40; // Body shot deals 40 damage
+    } else if (hitZone === 'limbs') {
+      damage = 20; // Limb shot deals 20 damage
+    }
+  } else if (data.hitData && data.hitData.damage) {
+    // If explicit damage is provided, use that
+    damage = data.hitData.damage;
+  }
+  
   // Apply hit effects: reduce health
-  targetPlayer.health = Math.max(targetPlayer.health - GAME_CONSTANTS.DAMAGE_PER_HIT, 0);
+  targetPlayer.health = Math.max(targetPlayer.health - damage, 0);
   
   // Inform the target
   if (targetPlayer.ws.readyState === WebSocket.OPEN) {
@@ -513,7 +537,8 @@ function handlePlayerHit(playerId, data) {
       type: 'hit',
       sourceId: playerId,
       hitData: data.hitData,
-      health: targetPlayer.health
+      health: targetPlayer.health,
+      hitZone: hitZone
     }));
   }
   
@@ -522,9 +547,11 @@ function handlePlayerHit(playerId, data) {
     type: 'playerHit',
     targetId: targetId,
     sourceId: playerId,
-    hitPosition: data.hitData.position,
+    hitPosition: data.hitData ? data.hitData.position : null,
     health: targetPlayer.health,
-    bulletId: bulletId
+    bulletId: bulletId,
+    hitZone: hitZone,
+    damage: damage
   });
   
   // Check for player death
@@ -868,6 +895,10 @@ function checkQuickDrawQueue(arenaIndex) {
   player2.inQuickDrawDuel = true;
   player2.quickDrawDuelId = duelId;
   
+  // Reset player health to full at the start of the duel
+  player1.health = 100;
+  player2.health = 100;
+  
   // Notify players of the match
   player1.ws.send(JSON.stringify({
     type: 'quickDrawMatch',
@@ -1001,12 +1032,14 @@ function sendDrawSignal(duelId) {
  * @param {number} playerId - The player's ID
  * @param {number} targetId - The target player's ID
  * @param {number} arenaIndex - The arena index for the duel
+ * @param {string} hitZone - The hit zone ('head', 'body', 'limbs')
+ * @param {number} damage - The damage amount
  */
-function handleQuickDrawShoot(playerId, targetId, arenaIndex) {
+function handleQuickDrawShoot(playerId, targetId, arenaIndex, hitZone = 'body', damage = 40) {
     playerId = Number(playerId);
     targetId = Number(targetId);
     
-    console.log(`Quick Draw shoot: Player ${playerId} shot player ${targetId} in arena ${arenaIndex + 1}`);
+    console.log(`Quick Draw shoot: Player ${playerId} shot player ${targetId} in arena ${arenaIndex + 1} (${hitZone}, ${damage} damage)`);
     
     const playerData = players.get(playerId);
     
@@ -1043,10 +1076,68 @@ function handleQuickDrawShoot(playerId, targetId, arenaIndex) {
         return; // Not shooting at the opponent
     }
     
-    console.log(`Quick Draw shoot ACCEPTED: Player ${playerId} hit player ${targetId}. Ending duel ${duelId} with ${playerId} as winner`);
+    // Get the target player to check their health
+    const targetPlayer = players.get(targetId);
+    if (!targetPlayer) {
+        console.log(`Quick Draw shoot rejected: Target player ${targetId} not found`);
+        return;
+    }
     
-    // End the duel with this player as the winner
-    endQuickDrawDuel(duelId, playerId);
+    console.log(`Quick Draw shoot ACCEPTED: Player ${playerId} hit player ${targetId} in duel ${duelId}`);
+    
+    // Calculate damage based on hit zone if not explicitly provided
+    let finalDamage = damage;
+    if (!finalDamage) {
+        if (hitZone === 'head') {
+            finalDamage = 100; // Headshot is fatal
+        } else if (hitZone === 'body') {
+            finalDamage = 40;  // Body shot
+        } else if (hitZone === 'limbs') {
+            finalDamage = 20;  // Limb shot
+        } else {
+            finalDamage = 40;  // Default to body shot damage
+        }
+    }
+    
+    // Apply the damage to the target player
+    const previousHealth = targetPlayer.health;
+    targetPlayer.health = Math.max(targetPlayer.health - finalDamage, 0);
+    console.log(`Applied ${finalDamage} damage to player ${targetId}. Health reduced from ${previousHealth} to ${targetPlayer.health}`);
+    
+    // Notify the hit player
+    if (targetPlayer.ws.readyState === WebSocket.OPEN) {
+        targetPlayer.ws.send(JSON.stringify({
+            type: 'hit',
+            sourceId: playerId,
+            hitData: { 
+                position: targetPlayer.position, 
+                hitZone: hitZone,
+                damage: finalDamage
+            },
+            health: targetPlayer.health,
+            hitZone: hitZone
+        }));
+    }
+    
+    // Broadcast hit to all players
+    broadcastToAll({
+        type: 'playerHit',
+        targetId: targetId,
+        sourceId: playerId,
+        hitPosition: targetPlayer.position,
+        health: targetPlayer.health,
+        hitZone: hitZone,
+        damage: finalDamage
+    });
+    
+    // Only end the duel if the target's health is 0
+    if (targetPlayer.health <= 0) {
+        console.log(`Player ${targetId} was killed. Ending duel ${duelId} with ${playerId} as winner`);
+        endQuickDrawDuel(duelId, playerId);
+    } else {
+        console.log(`Player ${targetId} was hit but survived with ${targetPlayer.health} health. Duel continues.`);
+        // Don't end the duel, just let the game continue
+    }
 }
 
 /**
@@ -1174,8 +1265,29 @@ function updateBullets() {
       if (isPlayerHitByBullet(player, bullet)) {
         bullet.active = false;
         
+        // Calculate damage based on hit position (simplified for server-side)
+        // This is a simplified version; the client sends more detailed hit zone info
+        let damage = GAME_CONSTANTS.DAMAGE_PER_HIT;
+        let hitZone = 'body'; // Default to body hit
+        
+        // Very basic hit zone detection based on bullet height
+        const playerBottom = player.position.y - 1.6;
+        const playerTop = playerBottom + 2.0;
+        const relativeHeight = (bullet.position.y - playerBottom) / (playerTop - playerBottom);
+        
+        if (relativeHeight > 0.8) {
+          hitZone = 'head';
+          damage = 100; // Headshot is fatal
+        } else if (relativeHeight > 0.4) {
+          hitZone = 'body';
+          damage = 40; // Body shot
+        } else {
+          hitZone = 'limbs';
+          damage = 20; // Limb shot
+        }
+        
         // Handle the hit
-        player.health = Math.max(player.health - GAME_CONSTANTS.DAMAGE_PER_HIT, 0);
+        player.health = Math.max(player.health - damage, 0);
         
         // Notify the hit player
         if (player.ws.readyState === WebSocket.OPEN) {
@@ -1183,12 +1295,13 @@ function updateBullets() {
             type: 'hit',
             sourceId: bullet.sourcePlayerId,
             bulletId: bulletId,
-            health: player.health
+            health: player.health,
+            hitZone: hitZone
           }));
         }
         
         // Broadcast hit to all players
-        broadcastBulletImpact(bulletId, 'player', playerId, bullet.position);
+        broadcastBulletImpact(bulletId, 'player', playerId, bullet.position, hitZone);
         
         // Check for player death
         if (player.health <= 0) {
@@ -1209,13 +1322,14 @@ function updateBullets() {
 }
 
 // Anti-cheat: Broadcast bullet impact to all players
-function broadcastBulletImpact(bulletId, hitType, targetId, position) {
+function broadcastBulletImpact(bulletId, hitType, targetId, position, hitZone) {
   broadcastToAll({
     type: 'bulletImpact',
     bulletId: bulletId,
     hitType: hitType,
     targetId: targetId,
-    position: position
+    position: position,
+    hitZone: hitZone
   });
 }
 

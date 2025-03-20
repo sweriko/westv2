@@ -389,6 +389,105 @@ body {
   font-style: normal;
 }
 
+/* Health counter styling */
+#health-counter {
+  position: absolute;
+  bottom: 50px;
+  right: 20px;
+  color: #4CAF50;
+  font-size: 24px;
+  background-color: rgba(0,0,0,0.5);
+  padding: 10px;
+  border-radius: 5px;
+  transition: color 0.3s ease;
+}
+
+/* Damage indicator (added dynamically) */
+#damage-indicator {
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: red;
+  font-size: 48px;
+  font-weight: bold;
+  opacity: 0;
+  text-shadow: 2px 2px 4px #000000;
+  transition: opacity 0.3s ease-in, opacity 0.5s ease-out;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+/* Different damage types */
+.damage-headshot {
+  color: #FF0000 !important;
+  font-size: 64px !important;
+}
+
+.damage-body {
+  color: #FF4500 !important;
+}
+
+.damage-limb {
+  color: #FFA500 !important;
+}
+
+/* Health bar (alternative to text) */
+#health-bar-container {
+  position: absolute;
+  bottom: 85px;
+  right: 20px;
+  width: 200px;
+  height: 20px;
+  background-color: rgba(0,0,0,0.5);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+#health-bar {
+  height: 100%;
+  width: 100%;
+  background-color: #4CAF50;
+  border-radius: 10px;
+  transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+/* Hit marker */
+.hit-marker {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(45deg);
+  pointer-events: none;
+}
+
+.hit-marker::before,
+.hit-marker::after {
+  content: '';
+  position: absolute;
+  background-color: white;
+}
+
+.hit-marker::before {
+  width: 2px;
+  height: 16px;
+  left: 7px;
+  top: 0;
+}
+
+.hit-marker::after {
+  width: 16px;
+  height: 2px;
+  left: 0;
+  top: 7px;
+}
+
+/* Headshot marker */
+.hit-marker-headshot::before,
+.hit-marker-headshot::after {
+  background-color: red;
+}
+
 ================================================
 File: /public/index.html
 ================================================
@@ -498,8 +597,9 @@ export class Bullet {
     // FIRST CHECK: Before moving, check if bullet is already within arena but from an unauthorized player
     if (window.quickDraw && window.quickDraw.isPointInArena(this.mesh.position)) {
       const isLocalPlayerBullet = Number(this.sourcePlayerId) === Number(window.localPlayer.id);
-      const isPlayerInDuel = window.quickDraw.inDuel;
-      const isOpponentBullet = window.quickDraw.duelOpponentId === Number(this.sourcePlayerId);
+      const isPlayerInDuel = window.quickDraw && window.quickDraw.inDuel;
+      const isOpponentBullet = window.quickDraw && 
+                               window.quickDraw.duelOpponentId === Number(this.sourcePlayerId);
       
       // If bullet is inside arena but not from a duel player, destroy it immediately
       if (!(isPlayerInDuel && isLocalPlayerBullet) && !isOpponentBullet) {
@@ -615,44 +715,35 @@ export class Bullet {
         if (Number(playerId) === Number(this.sourcePlayerId)) continue;
         if (!playerObj || !playerObj.group) continue;
 
-        // Get player's base position for collision box.
-        // For local players (first-person), group.position is at eye-level so subtract 1.6.
-        // Remote players (third-person) have group.position at the base.
-        const playerPos = playerObj.group.position.clone();
-        let baseY = playerPos.y;
-        if (playerObj.camera) { // local player
-          baseY = playerPos.y - 1.6;
+        // Prevent hits across arena boundary
+        // Only allow hits if both players are in the same area (both in arena or both outside)
+        const bulletPlayerInArena = window.quickDraw && window.quickDraw.inDuel;
+        const targetPlayerInArena = window.quickDraw && 
+                                   window.quickDraw.duelOpponentId === Number(playerId);
+        
+        if (bulletPlayerInArena !== targetPlayerInArena) {
+          continue; // Skip collision check if players are in different areas
         }
-        const boxMin = new THREE.Vector3(
-          playerPos.x - 0.5,
-          baseY,
-          playerPos.z - 0.5
-        );
-        const boxMax = new THREE.Vector3(
-          playerPos.x + 0.5,
-          baseY + 2.0,
-          playerPos.z + 0.5
-        );
-        const playerBox = new THREE.Box3(boxMin, boxMax);
-        if (playerBox.containsPoint(endPos)) {
+        
+        // Detect which hit zone was hit (head, body, limbs)
+        const hitResult = this.checkPlayerHitZones(playerObj, endPos);
+        
+        if (hitResult.hit) {
+          // Create the impact effect
           createImpactEffect(endPos, this.direction, scene, 'player');
           
-          // Prevent hits across arena boundary
-          // Only allow hits if both players are in the same area (both in arena or both outside)
-          const bulletPlayerInArena = window.quickDraw && window.quickDraw.inDuel;
-          const targetPlayerInArena = window.quickDraw && 
-                                     window.quickDraw.duelOpponentId === Number(playerId);
-          
-          if (bulletPlayerInArena !== targetPlayerInArena) {
-            console.log("Bullet hit blocked - players in different areas");
-            return { active: false, hit: { type: 'arena', position: endPos } };
+          // Play headshot sound if it was a headshot
+          if (hitResult.zone === 'head' && window.localPlayer && window.localPlayer.soundManager) {
+            window.localPlayer.soundManager.playSound("headshotmarker", 100);
           }
           
           // Anti-cheat: For local bullets, send hit to server and let server decide
           if (this.isLocalBullet && window.networkManager) {
             window.networkManager.sendPlayerHit(playerId, {
               position: { x: endPos.x, y: endPos.y, z: endPos.z },
-              sourcePlayerId: this.sourcePlayerId
+              sourcePlayerId: this.sourcePlayerId,
+              hitZone: hitResult.zone, // Send the hit zone to the server
+              damage: hitResult.damage // Send the damage amount to the server
             }, this.bulletId);
             
             // Quick Draw duels with better logging
@@ -661,13 +752,28 @@ export class Bullet {
                 Number(playerId) === Number(window.quickDraw.duelOpponentId) && 
                 Number(this.sourcePlayerId) === Number(window.localPlayer.id)) {
                 
-                console.log('Quick Draw hit detected! Notifying server player ' + this.sourcePlayerId + ' hit player ' + playerId);
-                // Send special Quick Draw hit notification
-                window.networkManager.sendQuickDrawShoot(playerId);
+                console.log(`Quick Draw hit detected! Player ${this.sourcePlayerId} hit player ${playerId} in the ${hitResult.zone} for ${hitResult.damage} damage`);
+                
+                // Send special Quick Draw hit notification with hit zone information
+                window.networkManager.sendQuickDrawShoot(
+                  playerId, 
+                  window.quickDraw.activeArenaIndex,
+                  hitResult.zone,
+                  hitResult.damage
+                );
             }
           }
           
-          return { active: false, hit: { type: 'player', playerId, bulletId: this.bulletId } };
+          return { 
+            active: false, 
+            hit: { 
+              type: 'player', 
+              playerId, 
+              bulletId: this.bulletId,
+              zone: hitResult.zone,
+              damage: hitResult.damage
+            } 
+          };
         }
       }
     }
@@ -688,6 +794,359 @@ export class Bullet {
   }
   
   /**
+   * Checks which part of the player model was hit and returns damage amount.
+   * Implements hit zones for head, body, and limbs.
+   * @param {object} playerObj - The player object to check
+   * @param {THREE.Vector3} bulletPos - The bullet position
+   * @returns {object} - Contains hit (boolean), zone (string), and damage (number)
+   */
+  checkPlayerHitZones(playerObj, bulletPos) {
+    // Get player's base position for collision box
+    // For local players (first-person), group.position is at eye-level so subtract 1.6
+    // Remote players (third-person) have group.position at the base
+    const playerPos = playerObj.group.position.clone();
+    let baseY = playerPos.y;
+    if (playerObj.camera) { // local player
+      baseY = playerPos.y - 1.6;
+    }
+    
+    // Define hit zone dimensions
+    const headSize = 0.4; // Head is a smaller target
+    const bodyWidth = 0.5;
+    const bodyHeight = 0.9;
+    const limbWidth = 0.2;
+    const limbHeight = 0.6;
+    
+    // Calculate vertical positions of each zone
+    // Using the adjusted values for better alignment
+    const headBottom = baseY + 1.8 - headSize;
+    const headTop = baseY + 1.8;
+    const bodyBottom = baseY + 0.9;
+    const bodyTop = baseY + 1.8 - headSize;
+    const legBottom = baseY + 0.2;
+    const legTop = baseY + 0.8;
+    const armBottom = baseY + 0.8;
+    const armTop = baseY + 1.4;
+    
+    // Create debug visualization if physics debug mode is enabled or global debug flag is set
+    if ((window.physics && window.physics.debugMode) || window.showHitZoneDebug) {
+      if (!playerObj._hitZoneDebug) {
+        this.createHitZoneDebugBoxes(playerObj, {
+          playerPos, baseY, 
+          headSize, bodyWidth, bodyHeight, limbWidth, limbHeight,
+          headBottom, headTop, bodyBottom, bodyTop, 
+          legBottom, legTop, armBottom, armTop
+        });
+      }
+    }
+    
+    // First do a quick test with the overall player bounding box
+    const overallMin = new THREE.Vector3(
+      playerPos.x - bodyWidth,
+      baseY + 0.2, // Adjusted to match new bottom height
+      playerPos.z - bodyWidth
+    );
+    const overallMax = new THREE.Vector3(
+      playerPos.x + bodyWidth,
+      baseY + 1.8, // Adjusted to match new top height
+      playerPos.z + bodyWidth
+    );
+    const overallBox = new THREE.Box3(overallMin, overallMax);
+    
+    if (!overallBox.containsPoint(bulletPos)) {
+      return { hit: false, zone: null, damage: 0 };
+    }
+    
+    // Check head zone (highest damage)
+    const headMin = new THREE.Vector3(
+      playerPos.x - headSize/2,
+      headBottom,
+      playerPos.z - headSize/2
+    );
+    const headMax = new THREE.Vector3(
+      playerPos.x + headSize/2,
+      headTop,
+      playerPos.z + headSize/2
+    );
+    const headBox = new THREE.Box3(headMin, headMax);
+    
+    if (headBox.containsPoint(bulletPos)) {
+      return { hit: true, zone: 'head', damage: 100 };
+    }
+    
+    // Check body zone (medium damage)
+    const bodyMin = new THREE.Vector3(
+      playerPos.x - bodyWidth/2,
+      bodyBottom,
+      playerPos.z - bodyWidth/2
+    );
+    const bodyMax = new THREE.Vector3(
+      playerPos.x + bodyWidth/2,
+      bodyTop,
+      playerPos.z + bodyWidth/2
+    );
+    const bodyBox = new THREE.Box3(bodyMin, bodyMax);
+    
+    if (bodyBox.containsPoint(bulletPos)) {
+      return { hit: true, zone: 'body', damage: 40 };
+    }
+    
+    // Check arms (low damage, simplified to two boxes on sides)
+    // Left arm
+    const leftArmMin = new THREE.Vector3(
+      playerPos.x - bodyWidth/2 - limbWidth,
+      armBottom,
+      playerPos.z - limbWidth/2
+    );
+    const leftArmMax = new THREE.Vector3(
+      playerPos.x - bodyWidth/2,
+      armTop,
+      playerPos.z + limbWidth/2
+    );
+    const leftArmBox = new THREE.Box3(leftArmMin, leftArmMax);
+    
+    // Right arm
+    const rightArmMin = new THREE.Vector3(
+      playerPos.x + bodyWidth/2,
+      armBottom,
+      playerPos.z - limbWidth/2
+    );
+    const rightArmMax = new THREE.Vector3(
+      playerPos.x + bodyWidth/2 + limbWidth,
+      armTop,
+      playerPos.z + limbWidth/2
+    );
+    const rightArmBox = new THREE.Box3(rightArmMin, rightArmMax);
+    
+    if (leftArmBox.containsPoint(bulletPos) || rightArmBox.containsPoint(bulletPos)) {
+      return { hit: true, zone: 'limbs', damage: 20 };
+    }
+    
+    // Check legs (low damage)
+    // Left leg
+    const leftLegMin = new THREE.Vector3(
+      playerPos.x - bodyWidth/4 - limbWidth/2,
+      legBottom,
+      playerPos.z - limbWidth/2
+    );
+    const leftLegMax = new THREE.Vector3(
+      playerPos.x - bodyWidth/4 + limbWidth/2,
+      legTop,
+      playerPos.z + limbWidth/2
+    );
+    const leftLegBox = new THREE.Box3(leftLegMin, leftLegMax);
+    
+    // Right leg
+    const rightLegMin = new THREE.Vector3(
+      playerPos.x + bodyWidth/4 - limbWidth/2,
+      legBottom,
+      playerPos.z - limbWidth/2
+    );
+    const rightLegMax = new THREE.Vector3(
+      playerPos.x + bodyWidth/4 + limbWidth/2,
+      legTop,
+      playerPos.z + limbWidth/2
+    );
+    const rightLegBox = new THREE.Box3(rightLegMin, rightLegMax);
+    
+    if (leftLegBox.containsPoint(bulletPos) || rightLegBox.containsPoint(bulletPos)) {
+      return { hit: true, zone: 'limbs', damage: 20 };
+    }
+    
+    // If we reach here but hit the overall box, it's a glancing hit to the body
+    return { hit: true, zone: 'body', damage: 40 };
+  }
+  
+  /**
+   * Creates visible debug boxes for hit zones when physics debug mode is enabled
+   * @param {object} playerObj - The player object
+   * @param {object} dims - Dimensions and positions for the hit zones
+   */
+  createHitZoneDebugBoxes(playerObj, dims) {
+    // Only used in debug mode
+    if (!window.scene) return;
+    
+    // Remove any existing debug boxes for this player
+    if (playerObj._hitZoneDebug) {
+      window.scene.remove(playerObj._hitZoneDebug);
+      playerObj._hitZoneDebug.traverse(child => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) child.material.dispose();
+      });
+    }
+    
+    // Create a new group for hitbox visualization
+    const hitZoneGroup = new THREE.Group();
+    hitZoneGroup.name = "hitZoneDebug_" + playerObj.id;
+    
+    // Create helper function to make box helpers
+    const createBoxHelper = (min, max, color) => {
+      // Use BoxGeometry instead of Box3Helper for more reliable visual feedback
+      const sizeX = max.x - min.x;
+      const sizeY = max.y - min.y;
+      const sizeZ = max.z - min.z;
+      
+      const geometry = new THREE.BoxGeometry(sizeX, sizeY, sizeZ);
+      const material = new THREE.MeshBasicMaterial({
+        color: color,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.7
+      });
+      
+      const mesh = new THREE.Mesh(geometry, material);
+      // Position at the center of the box
+      mesh.position.set(
+        min.x + sizeX/2,
+        min.y + sizeY/2,
+        min.z + sizeZ/2
+      );
+      
+      hitZoneGroup.add(mesh);
+      return mesh;
+    };
+    
+    // Calculate all zones relative to player position
+    // Note: these are local to the player, not world positions
+    
+    // Head zone - red
+    const headMin = new THREE.Vector3(
+      -dims.headSize/2,
+      dims.headBottom - dims.baseY,
+      -dims.headSize/2
+    );
+    const headMax = new THREE.Vector3(
+      dims.headSize/2,
+      dims.headTop - dims.baseY,
+      dims.headSize/2
+    );
+    const headHelper = createBoxHelper(headMin, headMax, 0xff0000);
+    
+    // Body zone - orange
+    const bodyMin = new THREE.Vector3(
+      -dims.bodyWidth/2,
+      dims.bodyBottom - dims.baseY,
+      -dims.bodyWidth/2
+    );
+    const bodyMax = new THREE.Vector3(
+      dims.bodyWidth/2,
+      dims.bodyTop - dims.baseY,
+      dims.bodyWidth/2
+    );
+    const bodyHelper = createBoxHelper(bodyMin, bodyMax, 0xff7700);
+    
+    // Left arm - yellow
+    const leftArmMin = new THREE.Vector3(
+      -dims.bodyWidth/2 - dims.limbWidth,
+      dims.armBottom - dims.baseY,
+      -dims.limbWidth/2
+    );
+    const leftArmMax = new THREE.Vector3(
+      -dims.bodyWidth/2,
+      dims.armTop - dims.baseY,
+      dims.limbWidth/2
+    );
+    const leftArmHelper = createBoxHelper(leftArmMin, leftArmMax, 0xffff00);
+    
+    // Right arm - green
+    const rightArmMin = new THREE.Vector3(
+      dims.bodyWidth/2,
+      dims.armBottom - dims.baseY,
+      -dims.limbWidth/2
+    );
+    const rightArmMax = new THREE.Vector3(
+      dims.bodyWidth/2 + dims.limbWidth,
+      dims.armTop - dims.baseY,
+      dims.limbWidth/2
+    );
+    const rightArmHelper = createBoxHelper(rightArmMin, rightArmMax, 0x00ff00);
+    
+    // Left leg - blue
+    const leftLegMin = new THREE.Vector3(
+      -dims.bodyWidth/4 - dims.limbWidth/2,
+      dims.legBottom - dims.baseY,
+      -dims.limbWidth/2
+    );
+    const leftLegMax = new THREE.Vector3(
+      -dims.bodyWidth/4 + dims.limbWidth/2,
+      dims.legTop - dims.baseY,
+      dims.limbWidth/2
+    );
+    const leftLegHelper = createBoxHelper(leftLegMin, leftLegMax, 0x0000ff);
+    
+    // Right leg - purple
+    const rightLegMin = new THREE.Vector3(
+      dims.bodyWidth/4 - dims.limbWidth/2,
+      dims.legBottom - dims.baseY,
+      -dims.limbWidth/2
+    );
+    const rightLegMax = new THREE.Vector3(
+      dims.bodyWidth/4 + dims.limbWidth/2,
+      dims.legTop - dims.baseY,
+      dims.limbWidth/2
+    );
+    const rightLegHelper = createBoxHelper(rightLegMin, rightLegMax, 0x800080);
+    
+    // Add the hitzone group to the scene
+    window.scene.add(hitZoneGroup);
+    
+    // Store reference to debug visualization group
+    playerObj._hitZoneDebug = hitZoneGroup;
+    
+    // Update hitbox position immediately
+    this.updateHitZoneDebugPosition(playerObj);
+
+    // Add an update function to the player object
+    if (!playerObj._updateHitZoneDebug) {
+      const self = this;
+      playerObj._updateHitZoneDebug = function() {
+        if (this._hitZoneDebug) {
+          self.updateHitZoneDebugPosition(this);
+        }
+      };
+      
+      // Modify the player's update function to include hitbox updates
+      if (playerObj.update && typeof playerObj.update === 'function') {
+        const originalUpdate = playerObj.update;
+        playerObj.update = function(deltaTime) {
+          // Call original update
+          originalUpdate.call(this, deltaTime);
+          // Update hit zone debug
+          if (this._updateHitZoneDebug) {
+            this._updateHitZoneDebug();
+          }
+        };
+      }
+    }
+  }
+  
+  /**
+   * Updates the position of a player's hit zone debug visualization
+   * @param {object} playerObj - The player object
+   */
+  updateHitZoneDebugPosition(playerObj) {
+    if (!playerObj || !playerObj._hitZoneDebug || !playerObj.group) return;
+    
+    const hitZoneDebug = playerObj._hitZoneDebug;
+    const playerPos = playerObj.group.position.clone();
+    
+    // Adjust height based on whether this is a local (first-person) or remote player
+    let baseY = playerPos.y;
+    if (playerObj.camera) {
+      // Local player's group position is at eye level, so subtract 1.6
+      baseY = playerPos.y - 1.6;
+    }
+    
+    // Position the debug group at the player's position
+    hitZoneDebug.position.set(playerPos.x, baseY, playerPos.z);
+    
+    // Apply the player's rotation
+    if (playerObj.group.rotation) {
+      hitZoneDebug.rotation.y = playerObj.group.rotation.y;
+    }
+  }
+  
+  /**
    * Directly handles a server-reported impact for this bullet.
    * @param {string} hitType - Type of impact: 'player', 'npc', 'ground', 'boundary', 'arena'
    * @param {string|number|null} targetId - ID of hit target (for player hits)
@@ -699,6 +1158,14 @@ export class Bullet {
     // Create visual effect based on hit type
     if (position) {
       createImpactEffect(position, this.direction, scene, hitType);
+      
+      // Play headshot sound if the server reports it was a headshot
+      if (hitType === 'player' && window.localPlayer && window.localPlayer.soundManager) {
+        // If hitZone data is available and it's a headshot
+        if (this.lastHitZone === 'head') {
+          window.localPlayer.soundManager.playSound("headshotmarker", 100);
+        }
+      }
     } else {
       // If no position provided, use current bullet position
       createImpactEffect(this.mesh.position, this.direction, scene, hitType);
@@ -706,6 +1173,14 @@ export class Bullet {
     
     // Always deactivate the bullet
     return { active: false, hit: { type: hitType, targetId, position } };
+  }
+  
+  /**
+   * Sets the last hit zone information for this bullet (for server validation)
+   * @param {string} zone - The hit zone ('head', 'body', 'limbs')
+   */
+  setLastHitZone(zone) {
+    this.lastHitZone = zone;
   }
 }
 
@@ -1524,6 +1999,9 @@ let lastTime = 0;
 let smokeRings = [];
 let maxSmokeRings = 10; // Limit to prevent performance issues
 
+// Add a flag to track debug visualization mode
+window.showHitZoneDebug = false;
+
 function init() {
   try {
     const sceneSetup = initScene();
@@ -1543,6 +2021,14 @@ function init() {
     // Load impact sounds
     soundManager.loadSound("woodimpact", "sounds/woodimpact.mp3");
     soundManager.loadSound("fleshimpact", "sounds/fleshimpact.mp3");
+    
+    // Load footstep and jump sounds
+    soundManager.loadSound("leftstep", "sounds/leftstep.mp3");
+    soundManager.loadSound("rightstep", "sounds/rightstep.mp3");
+    soundManager.loadSound("jump", "sounds/jump.mp3");
+    
+    // Load headshot marker sound
+    soundManager.loadSound("headshotmarker", "sounds/headshotmarker.mp3");
     
     // Initialize physics system
     physics = new PhysicsSystem();
@@ -1599,6 +2085,37 @@ function init() {
           const isDebugMode = !physics.debugMode;
           physics.setDebugMode(isDebugMode);
           console.log(`Physics debug mode: ${isDebugMode ? 'ENABLED' : 'DISABLED'}`);
+          
+          // Set the global debug flag
+          window.showHitZoneDebug = isDebugMode;
+          
+          // If turning on debug mode, update hit zone debug for all existing players
+          if (isDebugMode) {
+            // Create debug boxes for remote players and local player with a delay
+            // (to allow for physics debug state to be fully set)
+            setTimeout(() => {
+              // First trigger hit zone debugging on the local player
+              if (localPlayer) {
+                const dummyBullet = new Bullet(
+                  new THREE.Vector3(0, 0, 0),
+                  new THREE.Vector3(0, 1, 0)
+                );
+                dummyBullet.checkPlayerHitZones(localPlayer, new THREE.Vector3(0, 0, 0));
+              }
+              
+              // Then create debug boxes for all remote players
+              for (const [playerId, remotePlayer] of remotePlayers.entries()) {
+                // Force a collision check to create debug boxes
+                const dummyBullet = new Bullet(
+                  new THREE.Vector3(0, 0, 0),
+                  new THREE.Vector3(0, 1, 0)
+                );
+                dummyBullet.checkPlayerHitZones(remotePlayer, new THREE.Vector3(0, 0, 0));
+              }
+              
+              console.log("Hit zone debug boxes created for all players");
+            }, 50);
+          }
         }
       }
     });
@@ -1638,8 +2155,8 @@ function init() {
     };
 
     // Anti-cheat: Listen for bullet impact notifications from server
-    networkManager.onBulletImpact = (bulletId, hitType, targetId, position) => {
-      handleBulletImpact(bulletId, hitType, targetId, position);
+    networkManager.onBulletImpact = (bulletId, hitType, targetId, position, hitZone) => {
+      handleBulletImpact(bulletId, hitType, targetId, position, hitZone);
     };
 
     // Anti-cheat: Listen for position corrections from server
@@ -1681,6 +2198,15 @@ function init() {
     // Listen for updates to the remotePlayers map so we can refresh the master map
     multiplayerManager.onRemotePlayersUpdated = () => {
       updatePlayersMap();
+      
+      // If debug mode is on, make sure new players have hit zone debug boxes
+      if (window.showHitZoneDebug && physics && physics.debugMode) {
+        setTimeout(() => {
+          if (physics.refreshHitZoneDebug && typeof physics.refreshHitZoneDebug === 'function') {
+            physics.refreshHitZoneDebug();
+          }
+        }, 100);
+      }
     };
 
     // Start the animation loop
@@ -1736,7 +2262,12 @@ function animate(time) {
     if (!result.active) {
       // If bullet hit something or traveled too far
       if (result.hit && result.hit.type === 'player') {
-        console.log(`Bullet hit player ${result.hit.playerId}`);
+        console.log(`Bullet hit player ${result.hit.playerId} in the ${result.hit.zone || 'body'} for ${result.hit.damage || 'unknown'} damage`);
+        
+        // Set the last hit zone for server validation
+        if (bullet.bulletId !== null && result.hit.zone) {
+          bullet.setLastHitZone(result.hit.zone);
+        }
       }
       scene.remove(bullet.mesh);
       bullets.splice(i, 1);
@@ -1804,8 +2335,9 @@ function handleRemotePlayerShoot(playerId, bulletData, bulletId) {
  * @param {string} hitType - Type of impact (player, npc, ground, etc.)
  * @param {string|number|null} targetId - Target ID (for player hits)
  * @param {Object} position - Impact position {x, y, z}
+ * @param {string} hitZone - Hit zone (head, body, limbs)
  */
-function handleBulletImpact(bulletId, hitType, targetId, position) {
+function handleBulletImpact(bulletId, hitType, targetId, position, hitZone) {
   // Convert position to THREE.Vector3 if provided
   let impactPosition = null;
   if (position) {
@@ -1816,6 +2348,11 @@ function handleBulletImpact(bulletId, hitType, targetId, position) {
   const bullet = bulletMap.get(bulletId);
   
   if (bullet) {
+    // Store hit zone information for potential headshot sound
+    if (hitZone) {
+      bullet.setLastHitZone(hitZone);
+    }
+    
     // Create appropriate visual effect and deactivate bullet
     const result = bullet.handleServerImpact(hitType, targetId, impactPosition, scene);
     
@@ -1836,6 +2373,11 @@ function handleBulletImpact(bulletId, hitType, targetId, position) {
       // Create a default direction vector (upward)
       const defaultDir = new THREE.Vector3(0, 1, 0);
       createImpactEffect(impactPosition, defaultDir, scene, hitType);
+      
+      // Play headshot sound if it was a headshot
+      if (hitZone === 'head' && localPlayer && localPlayer.soundManager) {
+        localPlayer.soundManager.playSound("headshotmarker", 100);
+      }
     }
   }
 }
@@ -1936,7 +2478,8 @@ function showGameInstructions() {
     <p>P: Toggle physics debug visualization</p>
     <p><strong>Click anywhere to start</strong></p>
     <p><strong>New:</strong> Find the Quick Draw portal near spawn to duel other players!</p>
-    <p><strong>Town Boundary:</strong> You must stay within the town limits and can only access the duel arena through the portal.</p>`;
+    <p><strong>Town Boundary:</strong> You must stay within the town limits and can only access the duel arena through the portal.</p>
+    <p><strong>Hit Zones:</strong> Headshots deal 100 damage, body shots 40, and limb shots 20.</p>`;
   
   document.getElementById('game-container').appendChild(instructions);
   
@@ -1965,6 +2508,9 @@ window.addEventListener('beforeunload', () => {
   smokeRings = [];
 });
 
+// Make Bullet constructor globally available for hit zone debug creation
+window.Bullet = Bullet;
+
 init();
 
 ================================================
@@ -1972,6 +2518,7 @@ File: /public/js/multiplayerManager.js
 ================================================
 import { ThirdPersonModel } from './playerModel.js';
 import { networkManager } from './network.js';
+import { updateHealthUI, showDamageIndicator } from './ui.js';
 
 /**
  * Manages all remote players (their models, animations, etc.) but NOT bullets.
@@ -2033,39 +2580,89 @@ export class MultiplayerManager {
       }
     };
 
-    // We no longer handle bullets here (onPlayerShoot) – that's handled in main.js
-
     // Anti-cheat: Player got hit (local player) - server validated
-    networkManager.onPlayerHit = (sourceId, hitData, newHealth) => {
-      console.log(`I was hit by player ${sourceId}!`);
+    networkManager.onPlayerHit = (sourceId, hitData, newHealth, hitZone) => {
+      console.log(`I was hit by player ${sourceId} in the ${hitZone || 'body'}!`);
       this.showHitFeedback();
+      
+      // Play headshot sound if appropriate
+      if (hitZone === 'head' && this.soundManager) {
+        this.soundManager.playSound("headshotmarker", 100);
+      }
       
       // Reduce local player's health (using value from server)
       if (window.localPlayer) {
+        // Calculate damage based on the health difference or hit zone
+        let damage = 20; // Default damage
+        
         if (newHealth !== undefined) {
+          // Calculate damage from previous health
+          damage = window.localPlayer.health - newHealth;
           window.localPlayer.health = newHealth;
         } else {
-          // Fallback to default damage amount if server didn't provide health
-          window.localPlayer.takeDamage(20);
+          // Calculate damage based on hit zone if provided
+          if (hitZone === 'head') {
+            damage = 100;
+          } else if (hitZone === 'body') {
+            damage = 40;
+          } else if (hitZone === 'limbs') {
+            damage = 20;
+          }
+          
+          // Apply damage
+          window.localPlayer.takeDamage(damage, hitZone);
+        }
+        
+        // Show damage indicator with proper hit zone
+        if (typeof window.showDamageIndicator === 'function') {
+          window.showDamageIndicator(damage, hitZone);
+        }
+        
+        // Ensure health UI is updated
+        if (typeof window.updateHealthUI === 'function') {
+          window.updateHealthUI(window.localPlayer);
         }
       }
     };
 
     // Anti-cheat: Broadcast that some player was hit (server validated)
-    networkManager.onPlayerHitBroadcast = (targetId, sourceId, hitPos, newHealth) => {
-      console.log(`Player ${targetId} was hit by ${sourceId}`);
+    networkManager.onPlayerHitBroadcast = (targetId, sourceId, hitPos, newHealth, hitZone) => {
+      console.log(`Player ${targetId} was hit by ${sourceId} in the ${hitZone || 'body'}`);
       const tPlayer = this.remotePlayers.get(parseInt(targetId));
       if (tPlayer) {
         tPlayer.showHitFeedback();
+        
+        // Play headshot sound if appropriate
+        if (hitZone === 'head' && this.soundManager) {
+          this.soundManager.playSound("headshotmarker", 100);
+        }
+        
+        // Calculate damage based on hit zone
+        let damage = 20; // Default damage
+        if (hitZone === 'head') {
+          damage = 100;
+        } else if (hitZone === 'body') {
+          damage = 40;
+        } else if (hitZone === 'limbs') {
+          damage = 20;
+        }
         
         // Update health directly from server value if provided
         if (newHealth !== undefined) {
           tPlayer.health = newHealth;
         } else {
-          // Fallback to default damage amount
+          // Apply damage
           if (typeof tPlayer.takeDamage === 'function') {
-            tPlayer.takeDamage(20);
+            tPlayer.takeDamage(damage, hitZone);
+          } else {
+            // If takeDamage is not defined, manually update health
+            tPlayer.health = Math.max((tPlayer.health || 100) - damage, 0);
           }
+        }
+        
+        // Create a hit marker or effect at the hit position if available
+        if (hitPos && window.scene) {
+          this.createHitMarker(hitPos, hitZone);
         }
       }
     };
@@ -2098,6 +2695,82 @@ export class MultiplayerManager {
     if (this.soundManager) {
       this.soundManager.playSound("aimclick");
     }
+  }
+
+  /**
+   * Creates a visual hit marker at the hit position
+   * @param {Object} position - The hit position
+   * @param {string} hitZone - The hit zone ('head', 'body', 'limbs')
+   */
+  createHitMarker(position, hitZone) {
+    // Only create if we have THREE.js and a scene
+    if (!window.THREE || !window.scene) return;
+    
+    // Choose color based on hit zone
+    let color = 0xFFFFFF; // Default white
+    if (hitZone === 'head') {
+      color = 0xFF0000; // Red for headshots
+    } else if (hitZone === 'body') {
+      color = 0xFF6600; // Orange for body shots
+    } else if (hitZone === 'limbs') {
+      color = 0xFFFF00; // Yellow for limb shots
+    }
+    
+    // Create a particle system for the hit marker
+    const geometry = new THREE.BufferGeometry();
+    const vertices = [];
+    
+    // Create particles in a small sphere
+    const particleCount = 10;
+    const radius = 0.1;
+    
+    for (let i = 0; i < particleCount; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.random() * Math.PI;
+      const x = radius * Math.sin(phi) * Math.cos(theta);
+      const y = radius * Math.sin(phi) * Math.sin(theta);
+      const z = radius * Math.cos(phi);
+      
+      vertices.push(x, y, z);
+    }
+    
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    
+    const material = new THREE.PointsMaterial({
+      color: color,
+      size: 0.05,
+      transparent: true,
+      opacity: 1
+    });
+    
+    const particles = new THREE.Points(geometry, material);
+    particles.position.copy(position);
+    window.scene.add(particles);
+    
+    // Animate the particles
+    const startTime = performance.now();
+    const duration = 500; // ms
+    
+    function animateParticles() {
+      const elapsed = performance.now() - startTime;
+      const progress = elapsed / duration;
+      
+      if (progress < 1) {
+        // Expand particles
+        particles.scale.set(1 + progress * 2, 1 + progress * 2, 1 + progress * 2);
+        // Fade out
+        material.opacity = 1 - progress;
+        
+        requestAnimationFrame(animateParticles);
+      } else {
+        // Clean up
+        window.scene.remove(particles);
+        geometry.dispose();
+        material.dispose();
+      }
+    }
+    
+    requestAnimationFrame(animateParticles);
   }
 
   addPlayer(playerId, data) {
@@ -2376,21 +3049,23 @@ export class NetworkManager {
 
       // This client was hit by another player
       case 'hit':
-        console.log(`I was hit by player ${message.sourceId}`);
+        console.log(`I was hit by player ${message.sourceId} in the ${message.hitZone || 'body'} for ${message.hitData?.damage || 20} damage`);
         if (this.onPlayerHit) {
-          this.onPlayerHit(message.sourceId, message.hitData, message.health);
+          this.onPlayerHit(message.sourceId, message.hitData, message.health, message.hitZone);
         }
         break;
 
       // A broadcast that someone was hit
       case 'playerHit':
-        console.log(`Player ${message.targetId} was hit by player ${message.sourceId}`);
+        console.log(`Player ${message.targetId} was hit by player ${message.sourceId} in the ${message.hitZone || 'body'}`);
         if (this.onPlayerHitBroadcast) {
           this.onPlayerHitBroadcast(
             message.targetId,
             message.sourceId,
             message.hitPosition,
-            message.health
+            message.health,
+            message.hitZone,
+            message.damage
           );
         }
         break;
@@ -2410,7 +3085,8 @@ export class NetworkManager {
             message.bulletId, 
             message.hitType, 
             message.targetId, 
-            message.position
+            message.position,
+            message.hitZone
           );
         }
         break;
@@ -2481,7 +3157,7 @@ export class NetworkManager {
   /**
    * Notifies server that we hit another player.
    * @param {number|string} hitPlayerId
-   * @param {Object} hitData - { position: {x,y,z}, sourcePlayerId: ... }
+   * @param {Object} hitData - { position: {x,y,z}, sourcePlayerId: ..., hitZone: 'head'|'body'|'limbs', damage: number }
    * @param {number|string} bulletId - Optional bulletId if known
    */
   sendPlayerHit(hitPlayerId, hitData, bulletId = null) {
@@ -2579,23 +3255,25 @@ export class NetworkManager {
    * Notifies the server that the player has shot their opponent in a Quick Draw duel.
    * @param {number|string} opponentId - The opponent's player ID
    * @param {number} arenaIndex - The arena index for the duel
+   * @param {string} hitZone - The hit zone ('head', 'body', 'limbs')
+   * @param {number} damage - The damage amount
    */
-  sendQuickDrawShoot(opponentId, arenaIndex) {
+  sendQuickDrawShoot(opponentId, arenaIndex, hitZone = 'body', damage = 40) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       // Anti-cheat: Add sequence number and nonce for replay protection
       this.sequenceNumber++;
       const nonce = this._generateNonce();
       
-      console.log(`Sending Quick Draw hit notification to server: player ${this.playerId} hit player ${opponentId} in arena ${arenaIndex + 1}`);
-      this.socket.send(
-        JSON.stringify({
-          type: 'quickDrawShoot',
-          sequenceNumber: this.sequenceNumber,
-          nonce: nonce,
-          opponentId: opponentId,
-          arenaIndex: arenaIndex
-        })
-      );
+      console.log(`Sending Quick Draw hit notification to server: player ${this.playerId} hit player ${opponentId} in the ${hitZone} for ${damage} damage`);
+      this.socket.send(JSON.stringify({
+        type: 'quickDrawShoot',
+        sequenceNumber: this.sequenceNumber,
+        nonce: nonce,
+        opponentId: opponentId,
+        arenaIndex: arenaIndex,
+        hitZone: hitZone,
+        damage: damage
+      }));
     }
   }
 
@@ -2626,569 +3304,671 @@ File: /public/js/physics.js
  * Focused on creating invisible boundaries for the QuickDraw arenas and town.
  */
 export class PhysicsSystem {
-    constructor() {
-      // Create a physics world with gravity
-      this.world = new CANNON.World();
-      this.world.gravity.set(0, -9.8, 0);
-      
-      // Set default contact material properties
-      this.defaultMaterial = new CANNON.Material('default');
-      const defaultContactMaterial = new CANNON.ContactMaterial(
-        this.defaultMaterial,
-        this.defaultMaterial,
-        {
-          friction: 0.3,
-          restitution: 0.3 // Slightly bouncy
-        }
-      );
-      this.world.addContactMaterial(defaultContactMaterial);
-      this.world.defaultContactMaterial = defaultContactMaterial;
-      
-      // Collection of bodies
-      this.bodies = [];
-      
-      // Debug helper for visualizing physics bodies
-      this.debugMeshes = [];
-      this.debugMode = false;
-      
-      // Track arena boundaries separately
-      this.arenaBoundaryBodies = [];
-      
-      // Initialize ground
-      this.initGround();
+  constructor() {
+    // Create a physics world with gravity
+    this.world = new CANNON.World();
+    this.world.gravity.set(0, -9.8, 0);
+    
+    // Set default contact material properties
+    this.defaultMaterial = new CANNON.Material('default');
+    const defaultContactMaterial = new CANNON.ContactMaterial(
+      this.defaultMaterial,
+      this.defaultMaterial,
+      {
+        friction: 0.3,
+        restitution: 0.3 // Slightly bouncy
+      }
+    );
+    this.world.addContactMaterial(defaultContactMaterial);
+    this.world.defaultContactMaterial = defaultContactMaterial;
+    
+    // Collection of bodies
+    this.bodies = [];
+    
+    // Debug helper for visualizing physics bodies
+    this.debugMeshes = [];
+    this.debugMode = false;
+    
+    // Track arena boundaries separately
+    this.arenaBoundaryBodies = [];
+    
+    // Initialize ground
+    this.initGround();
+  }
+  
+  /**
+   * Initialize the ground plane
+   */
+  initGround() {
+    const groundBody = new CANNON.Body({
+      mass: 0, // Static body
+      shape: new CANNON.Plane(),
+      material: this.defaultMaterial
+    });
+    groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2); // Rotate to be flat
+    this.world.addBody(groundBody);
+    this.bodies.push(groundBody);
+  }
+  
+  /**
+   * Creates an invisible boundary for the town to prevent players from leaving
+   * @param {number} width - Width of the town
+   * @param {number} length - Length of the town
+   * @param {number} height - Height of the barrier
+   * @returns {CANNON.Body} - The created physics body
+   */
+  createTownBoundary(width, length, height) {
+    // First remove any existing town boundaries
+    this.removeTownBoundary();
+    
+    // Create a physics body for the town boundary
+    const boundaryBody = new CANNON.Body({
+      mass: 0, // Static body
+      material: this.defaultMaterial
+    });
+    
+    // Add a box shape for each border
+    const halfWidth = width / 2;
+    const halfLength = length / 2;
+    const borderThickness = 0.5;
+    
+    // Left border (negative X)
+    const leftBorderShape = new CANNON.Box(new CANNON.Vec3(
+      borderThickness / 2, 
+      height / 2, 
+      length / 2
+    ));
+    boundaryBody.addShape(
+      leftBorderShape, 
+      new CANNON.Vec3(-halfWidth, height / 2, 0)
+    );
+    
+    // Right border (positive X)
+    const rightBorderShape = new CANNON.Box(new CANNON.Vec3(
+      borderThickness / 2, 
+      height / 2, 
+      length / 2
+    ));
+    boundaryBody.addShape(
+      rightBorderShape, 
+      new CANNON.Vec3(halfWidth, height / 2, 0)
+    );
+    
+    // Front border (negative Z)
+    const frontBorderShape = new CANNON.Box(new CANNON.Vec3(
+      width / 2, 
+      height / 2, 
+      borderThickness / 2
+    ));
+    boundaryBody.addShape(
+      frontBorderShape, 
+      new CANNON.Vec3(0, height / 2, -halfLength)
+    );
+    
+    // Back border (positive Z)
+    const backBorderShape = new CANNON.Box(new CANNON.Vec3(
+      width / 2, 
+      height / 2, 
+      borderThickness / 2
+    ));
+    boundaryBody.addShape(
+      backBorderShape, 
+      new CANNON.Vec3(0, height / 2, halfLength)
+    );
+    
+    boundaryBody.townBoundary = true; // Tag this body as a town boundary
+    boundaryBody.collisionFilterGroup = 2; // Group 2 for boundaries
+    
+    // Add the boundary body to the world
+    this.world.addBody(boundaryBody);
+    this.bodies.push(boundaryBody);
+    
+    // Create a reference to easily find this body later
+    this.townBoundaryBody = boundaryBody;
+    
+    // If debug mode is enabled, create a visual representation
+    if (this.debugMode) {
+      this.createDebugMesh(boundaryBody);
     }
     
-    /**
-     * Initialize the ground plane
-     */
-    initGround() {
-      const groundBody = new CANNON.Body({
-        mass: 0, // Static body
-        shape: new CANNON.Plane(),
-        material: this.defaultMaterial
-      });
-      groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2); // Rotate to be flat
-      this.world.addBody(groundBody);
-      this.bodies.push(groundBody);
-    }
+    console.log("Created town boundary with width", width, "and length", length);
     
-    /**
-     * Creates an invisible boundary for the town to prevent players from leaving
-     * @param {number} width - Width of the town
-     * @param {number} length - Length of the town
-     * @param {number} height - Height of the barrier
-     * @returns {CANNON.Body} - The created physics body
-     */
-    createTownBoundary(width, length, height) {
-      // First remove any existing town boundaries
-      this.removeTownBoundary();
+    return boundaryBody;
+  }
+  
+  /**
+   * Removes the town boundary if it exists
+   */
+  removeTownBoundary() {
+    if (this.townBoundaryBody) {
+      this.world.removeBody(this.townBoundaryBody);
       
-      // Create a physics body for the town boundary
-      const boundaryBody = new CANNON.Body({
-        mass: 0, // Static body
-        material: this.defaultMaterial
-      });
-      
-      // Add a box shape for each border
-      const halfWidth = width / 2;
-      const halfLength = length / 2;
-      const borderThickness = 0.5;
-      
-      // Left border (negative X)
-      const leftBorderShape = new CANNON.Box(new CANNON.Vec3(
-        borderThickness / 2, 
-        height / 2, 
-        length / 2
-      ));
-      boundaryBody.addShape(
-        leftBorderShape, 
-        new CANNON.Vec3(-halfWidth, height / 2, 0)
-      );
-      
-      // Right border (positive X)
-      const rightBorderShape = new CANNON.Box(new CANNON.Vec3(
-        borderThickness / 2, 
-        height / 2, 
-        length / 2
-      ));
-      boundaryBody.addShape(
-        rightBorderShape, 
-        new CANNON.Vec3(halfWidth, height / 2, 0)
-      );
-      
-      // Front border (negative Z)
-      const frontBorderShape = new CANNON.Box(new CANNON.Vec3(
-        width / 2, 
-        height / 2, 
-        borderThickness / 2
-      ));
-      boundaryBody.addShape(
-        frontBorderShape, 
-        new CANNON.Vec3(0, height / 2, -halfLength)
-      );
-      
-      // Back border (positive Z)
-      const backBorderShape = new CANNON.Box(new CANNON.Vec3(
-        width / 2, 
-        height / 2, 
-        borderThickness / 2
-      ));
-      boundaryBody.addShape(
-        backBorderShape, 
-        new CANNON.Vec3(0, height / 2, halfLength)
-      );
-      
-      boundaryBody.townBoundary = true; // Tag this body as a town boundary
-      boundaryBody.collisionFilterGroup = 2; // Group 2 for boundaries
-      
-      // Add the boundary body to the world
-      this.world.addBody(boundaryBody);
-      this.bodies.push(boundaryBody);
-      
-      // Create a reference to easily find this body later
-      this.townBoundaryBody = boundaryBody;
-      
-      // If debug mode is enabled, create a visual representation
-      if (this.debugMode) {
-        this.createDebugMesh(boundaryBody);
+      // Remove from our bodies array
+      const index = this.bodies.indexOf(this.townBoundaryBody);
+      if (index !== -1) {
+        this.bodies.splice(index, 1);
       }
       
-      console.log("Created town boundary with width", width, "and length", length);
-      
-      return boundaryBody;
-    }
-    
-    /**
-     * Removes the town boundary if it exists
-     */
-    removeTownBoundary() {
-      if (this.townBoundaryBody) {
-        this.world.removeBody(this.townBoundaryBody);
-        
-        // Remove from our bodies array
-        const index = this.bodies.indexOf(this.townBoundaryBody);
-        if (index !== -1) {
-          this.bodies.splice(index, 1);
-        }
-        
-        // Clear the reference
-        this.townBoundaryBody = null;
-        console.log("Removed town boundary");
-      }
-    }
-    
-    /**
-     * Creates an invisible cylindrical boundary for a QuickDraw arena
-     * @param {THREE.Vector3} center - Center position of the arena
-     * @param {number} radius - Radius of the cylindrical arena
-     * @param {number} height - Height of the cylindrical arena
-     * @param {number} arenaIndex - Index of the arena (0-4)
-     * @returns {CANNON.Body} - The created physics body
-     */
-    createQuickDrawArenaBoundary(center, radius, height, arenaIndex = 0) {
-      // First remove any existing arena boundary for this index
-      this.removeQuickDrawArenaBoundaryByIndex(arenaIndex);
-      
-      // Create a physics body for the arena boundary
-      const arenaBody = new CANNON.Body({
-        mass: 0, // Static body
-        material: this.defaultMaterial
-      });
-      
-      // Position at the center
-      arenaBody.position.set(center.x, center.y + height/2, center.z);
-      
-      // Use a hollow cylinder (cylinder + inverted cylinder)
-      // We make the walls a bit thick (0.5 units) to ensure reliable collision detection
-      const wallThickness = 0.5;
-      
-      // Outer cylinder (pushing inward)
-      const outerRadius = radius + wallThickness;
-      const segments = 16; // Number of sides for the cylinder approximation
-      
-      // Create segments around the circle to approximate the cylinder
-      for (let i = 0; i < segments; i++) {
-        const angle1 = (i / segments) * Math.PI * 2;
-        const angle2 = ((i + 1) / segments) * Math.PI * 2;
-        
-        const x1 = Math.cos(angle1) * radius;
-        const z1 = Math.sin(angle1) * radius;
-        const x2 = Math.cos(angle2) * radius;
-        const z2 = Math.sin(angle2) * radius;
-        
-        // Calculate the position and orientation of this wall segment
-        const segCenter = {
-          x: (x1 + x2) / 2,
-          z: (z1 + z2) / 2
-        };
-        
-        const length = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(z2 - z1, 2));
-        
-        // Create a box shape for this wall segment
-        const halfExtents = new CANNON.Vec3(length/2, height/2, wallThickness/2);
-        const wallShape = new CANNON.Box(halfExtents);
-        
-        // Get the angle to rotate this wall segment
-        const rotationY = Math.atan2(z2 - z1, x2 - x1) + Math.PI/2;
-        
-        // Add the shape to the body with the appropriate offset and rotation
-        const offset = new CANNON.Vec3(segCenter.x, 0, segCenter.z);
-        const quaternion = new CANNON.Quaternion();
-        quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), rotationY);
-        
-        arenaBody.addShape(wallShape, offset, quaternion);
-      }
-      
-      // Bottom circle to prevent falling through
-      const bottomShape = new CANNON.Cylinder(radius, radius, wallThickness, segments);
-      const bottomOffset = new CANNON.Vec3(0, -height/2, 0);
-      const bottomQuaternion = new CANNON.Quaternion();
-      bottomQuaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI / 2);
-      arenaBody.addShape(bottomShape, bottomOffset, bottomQuaternion);
-      
-      arenaBody.arenaBoundary = true; // Tag this body as an arena boundary
-      arenaBody.arenaIndex = arenaIndex; // Store which arena this belongs to
-      arenaBody.collisionFilterGroup = 2; // Group 2 for arena boundaries
-      
-      // Add the arena body to the world
-      this.world.addBody(arenaBody);
-      this.bodies.push(arenaBody);
-      
-      // Store in our array of arena boundaries
-      this.arenaBoundaryBodies[arenaIndex] = arenaBody;
-      
-      // If debug mode is enabled, create a visual representation
-      if (this.debugMode) {
-        this.createDebugMesh(arenaBody);
-      }
-      
-      console.log(`Created QuickDraw arena boundary ${arenaIndex + 1} at`, center, "with radius", radius, "and height", height);
-      
-      return arenaBody;
-    }
-    
-    /**
-     * Removes a QuickDraw arena boundary for a specific arena index
-     * @param {number} arenaIndex - The index of the arena (0-4)
-     */
-    removeQuickDrawArenaBoundaryByIndex(arenaIndex) {
-      if (this.arenaBoundaryBodies[arenaIndex]) {
-        this.world.removeBody(this.arenaBoundaryBodies[arenaIndex]);
-        
-        // Remove from our bodies array
-        const index = this.bodies.indexOf(this.arenaBoundaryBodies[arenaIndex]);
-        if (index !== -1) {
-          this.bodies.splice(index, 1);
-        }
-        
-        // Clear the reference in our arena boundaries array
-        this.arenaBoundaryBodies[arenaIndex] = null;
-        console.log(`Removed QuickDraw arena boundary ${arenaIndex + 1}`);
-      }
-    }
-    
-    /**
-     * Removes the QuickDraw arena boundary (legacy method for backward compatibility)
-     */
-    removeQuickDrawArenaBoundary() {
-      // Remove all arena boundaries
-      for (let i = 0; i < this.arenaBoundaryBodies.length; i++) {
-        this.removeQuickDrawArenaBoundaryByIndex(i);
-      }
-    }
-    
-    /**
-     * Create a physics body for a player
-     * @param {THREE.Vector3} position - Initial position
-     * @param {number} radius - Player collision radius
-     * @param {number} height - Player height
-     * @returns {CANNON.Body} - The created physics body
-     */
-    createPlayerBody(position, radius = 0.3, height = 1.8) {
-      // Create a capsule shape (cylinder with spheres at ends)
-      const playerBody = new CANNON.Body({
-        mass: 70, // Player mass in kg
-        material: this.defaultMaterial,
-        fixedRotation: true, // Don't rotate the player when colliding
-        linearDamping: 0.9 // Add some damping to prevent excessive sliding
-      });
-      
-      // Use a cylinder for the body
-      playerBody.addShape(new CANNON.Cylinder(radius, radius, height, 8));
-      
-      // Position the player body
-      playerBody.position.set(position.x, position.y, position.z);
-      
-      // Add to world
-      this.world.addBody(playerBody);
-      this.bodies.push(playerBody);
-      
-      // If debug mode is enabled, create a visual representation
-      if (this.debugMode) {
-        this.createDebugMesh(playerBody);
-      }
-      
-      return playerBody;
-    }
-    
-    /**
-     * Checks if a point is inside any active arena boundary
-     * @param {THREE.Vector3} point - The point to check
-     * @returns {boolean} - True if inside, false if outside
-     */
-    isPointInArenaBoundary(point) {
-      // Check all arena boundaries
-      for (let i = 0; i < this.arenaBoundaryBodies.length; i++) {
-        if (this.isPointInSpecificArenaBoundary(point, i)) {
-          return true;
-        }
-      }
-      return false;
-    }
-    
-    /**
-     * Checks if a point is inside a specific arena boundary
-     * @param {THREE.Vector3} point - The point to check
-     * @param {number} arenaIndex - The arena index to check
-     * @returns {boolean} - True if inside, false if outside
-     */
-    isPointInSpecificArenaBoundary(point, arenaIndex) {
-      // If no arena boundary exists for this index, return false
-      if (!this.arenaBoundaryBodies[arenaIndex]) return false;
-      
-      // Get arena position
-      const arenaPos = this.arenaBoundaryBodies[arenaIndex].position;
-      const pointVec = new CANNON.Vec3(point.x, point.y, point.z);
-      
-      // Calculate horizontal distance (ignoring Y) from arena center
-      const dx = pointVec.x - arenaPos.x;
-      const dz = pointVec.z - arenaPos.z;
-      const horizontalDist = Math.sqrt(dx * dx + dz * dz);
-      
-      // Get the radius - assuming 15 is the standard radius for all arenas
-      const radius = 15;
-      
-      // Check if point is inside the cylinder horizontally
-      return horizontalDist < radius;
-    }
-
-    /**
-     * Checks if a point is inside the town boundary
-     * @param {THREE.Vector3} point - The point to check
-     * @returns {boolean} - True if inside, false if outside
-     */
-    isPointInTown(point) {
-      // If no town boundary exists, return true (no restriction)
-      if (!window.townDimensions) return true;
-      
-      // Get town dimensions
-      const width = window.townDimensions.width;
-      const length = window.townDimensions.length;
-      
-      // Check if the point is within the town boundaries
-      return (
-        point.x > -width / 2 && 
-        point.x < width / 2 && 
-        point.z > -length / 2 && 
-        point.z < length / 2
-      );
-    }
-    
-    /**
-     * Creates a debug mesh to visualize a physics body
-     * @param {CANNON.Body} body - The physics body to visualize
-     */
-    createDebugMesh(body) {
-      // Only used in debug mode
-      if (!this.debugMode) return;
-      
-      // For each shape in the body, create a wireframe mesh
-      body.shapes.forEach((shape, i) => {
-        let geometry;
-        let mesh;
-        
-        // Get the shape's offset and orientation
-        const offset = body.shapeOffsets[i];
-        const orientation = body.shapeOrientations[i];
-        
-        // Create different geometries based on shape type
-        if (shape instanceof CANNON.Box) {
-          geometry = new THREE.BoxGeometry(
-            shape.halfExtents.x * 2,
-            shape.halfExtents.y * 2,
-            shape.halfExtents.z * 2
-          );
-          
-          mesh = new THREE.Mesh(
-            geometry,
-            new THREE.MeshBasicMaterial({
-              color: 0x00ff00,
-              wireframe: true
-            })
-          );
-          
-          // Apply offset and orientation
-          mesh.position.set(offset.x, offset.y, offset.z);
-          mesh.quaternion.set(
-            orientation.x,
-            orientation.y,
-            orientation.z,
-            orientation.w
-          );
-        }
-        else if (shape instanceof CANNON.Sphere) {
-          geometry = new THREE.SphereGeometry(shape.radius, 16, 16);
-          
-          mesh = new THREE.Mesh(
-            geometry,
-            new THREE.MeshBasicMaterial({
-              color: 0x00ff00,
-              wireframe: true
-            })
-          );
-          
-          // Apply offset
-          mesh.position.set(offset.x, offset.y, offset.z);
-        }
-        else if (shape instanceof CANNON.Cylinder) {
-          geometry = new THREE.CylinderGeometry(
-            shape.radiusTop,
-            shape.radiusBottom,
-            shape.height,
-            shape.numSegments
-          );
-          
-          mesh = new THREE.Mesh(
-            geometry,
-            new THREE.MeshBasicMaterial({
-              color: 0x00ff00,
-              wireframe: true
-            })
-          );
-          
-          // Rotate to match cannon.js cylinders
-          mesh.rotation.x = Math.PI / 2;
-          
-          // Apply offset and orientation
-          mesh.position.set(offset.x, offset.y, offset.z);
-          const quat = new THREE.Quaternion(
-            orientation.x,
-            orientation.y,
-            orientation.z,
-            orientation.w
-          );
-          mesh.quaternion.multiply(quat);
-        }
-        
-        if (mesh) {
-          // Add to the body's group
-          const group = new THREE.Group();
-          group.add(mesh);
-          
-          // Store reference for updating
-          this.debugMeshes.push({
-            mesh: group,
-            body: body
-          });
-          
-          // Add to scene
-          window.scene.add(group);
-        }
-      });
-    }
-    
-    /**
-     * Update the physics world
-     * @param {number} deltaTime - Time step in seconds
-     */
-    update(deltaTime) {
-      // Limit delta time to prevent large jumps
-      const timeStep = Math.min(deltaTime, 0.1);
-      
-      // Update physics world
-      this.world.step(timeStep);
-      
-      // Update debug meshes if in debug mode
-      if (this.debugMode) {
-        this.updateDebugMeshes();
-      }
-    }
-    
-    /**
-     * Update debug mesh positions to match their physics bodies
-     */
-    updateDebugMeshes() {
-      if (!this.debugMode) return;
-      
-      this.debugMeshes.forEach(item => {
-        // Update position
-        item.mesh.position.set(
-          item.body.position.x,
-          item.body.position.y,
-          item.body.position.z
-        );
-        
-        // Update orientation
-        item.mesh.quaternion.set(
-          item.body.quaternion.x,
-          item.body.quaternion.y,
-          item.body.quaternion.z,
-          item.body.quaternion.w
-        );
-      });
-    }
-    
-    /**
-     * Enables or disables debug visualization
-     * @param {boolean} enabled - Whether debug mode should be enabled
-     */
-    setDebugMode(enabled) {
-      this.debugMode = enabled;
-      
-      // If enabling, create meshes for existing bodies
-      if (enabled) {
-        this.bodies.forEach(body => {
-          this.createDebugMesh(body);
-        });
-      }
-      // If disabling, remove all debug meshes
-      else {
-        this.debugMeshes.forEach(item => {
-          window.scene.remove(item.mesh);
-          item.mesh.traverse(child => {
-            if (child.geometry) child.geometry.dispose();
-            if (child.material) child.material.dispose();
-          });
-        });
-        this.debugMeshes = [];
-      }
-    }
-    
-    /**
-     * Cleans up all physics resources
-     */
-    cleanup() {
-      // Remove all bodies
-      this.bodies.forEach(body => {
-        this.world.removeBody(body);
-      });
-      
-      // Remove all debug meshes
-      if (this.debugMode) {
-        this.debugMeshes.forEach(item => {
-          window.scene.remove(item.mesh);
-          item.mesh.traverse(child => {
-            if (child.geometry) child.geometry.dispose();
-            if (child.material) child.material.dispose();
-          });
-        });
-      }
-      
-      this.bodies = [];
-      this.debugMeshes = [];
-      this.arenaBoundaryBodies = [];
+      // Clear the reference
+      this.townBoundaryBody = null;
+      console.log("Removed town boundary");
     }
   }
+  
+  /**
+   * Creates an invisible cylindrical boundary for a QuickDraw arena
+   * @param {THREE.Vector3} center - Center position of the arena
+   * @param {number} radius - Radius of the cylindrical arena
+   * @param {number} height - Height of the cylindrical arena
+   * @param {number} arenaIndex - Index of the arena (0-4)
+   * @returns {CANNON.Body} - The created physics body
+   */
+  createQuickDrawArenaBoundary(center, radius, height, arenaIndex = 0) {
+    // First remove any existing arena boundary for this index
+    this.removeQuickDrawArenaBoundaryByIndex(arenaIndex);
+    
+    // Create a physics body for the arena boundary
+    const arenaBody = new CANNON.Body({
+      mass: 0, // Static body
+      material: this.defaultMaterial
+    });
+    
+    // Position at the center
+    arenaBody.position.set(center.x, center.y + height/2, center.z);
+    
+    // Use a hollow cylinder (cylinder + inverted cylinder)
+    // We make the walls a bit thick (0.5 units) to ensure reliable collision detection
+    const wallThickness = 0.5;
+    
+    // Outer cylinder (pushing inward)
+    const outerRadius = radius + wallThickness;
+    const segments = 16; // Number of sides for the cylinder approximation
+    
+    // Create segments around the circle to approximate the cylinder
+    for (let i = 0; i < segments; i++) {
+      const angle1 = (i / segments) * Math.PI * 2;
+      const angle2 = ((i + 1) / segments) * Math.PI * 2;
+      
+      const x1 = Math.cos(angle1) * radius;
+      const z1 = Math.sin(angle1) * radius;
+      const x2 = Math.cos(angle2) * radius;
+      const z2 = Math.sin(angle2) * radius;
+      
+      // Calculate the position and orientation of this wall segment
+      const segCenter = {
+        x: (x1 + x2) / 2,
+        z: (z1 + z2) / 2
+      };
+      
+      const length = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(z2 - z1, 2));
+      
+      // Create a box shape for this wall segment
+      const halfExtents = new CANNON.Vec3(length/2, height/2, wallThickness/2);
+      const wallShape = new CANNON.Box(halfExtents);
+      
+      // Get the angle to rotate this wall segment
+      const rotationY = Math.atan2(z2 - z1, x2 - x1) + Math.PI/2;
+      
+      // Add the shape to the body with the appropriate offset and rotation
+      const offset = new CANNON.Vec3(segCenter.x, 0, segCenter.z);
+      const quaternion = new CANNON.Quaternion();
+      quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), rotationY);
+      
+      arenaBody.addShape(wallShape, offset, quaternion);
+    }
+    
+    // Bottom circle to prevent falling through
+    const bottomShape = new CANNON.Cylinder(radius, radius, wallThickness, segments);
+    const bottomOffset = new CANNON.Vec3(0, -height/2, 0);
+    const bottomQuaternion = new CANNON.Quaternion();
+    bottomQuaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI / 2);
+    arenaBody.addShape(bottomShape, bottomOffset, bottomQuaternion);
+    
+    arenaBody.arenaBoundary = true; // Tag this body as an arena boundary
+    arenaBody.arenaIndex = arenaIndex; // Store which arena this belongs to
+    arenaBody.collisionFilterGroup = 2; // Group 2 for arena boundaries
+    
+    // Add the arena body to the world
+    this.world.addBody(arenaBody);
+    this.bodies.push(arenaBody);
+    
+    // Store in our array of arena boundaries
+    this.arenaBoundaryBodies[arenaIndex] = arenaBody;
+    
+    // If debug mode is enabled, create a visual representation
+    if (this.debugMode) {
+      this.createDebugMesh(arenaBody);
+    }
+    
+    console.log(`Created QuickDraw arena boundary ${arenaIndex + 1} at`, center, "with radius", radius, "and height", height);
+    
+    return arenaBody;
+  }
+  
+  /**
+   * Removes a QuickDraw arena boundary for a specific arena index
+   * @param {number} arenaIndex - The index of the arena (0-4)
+   */
+  removeQuickDrawArenaBoundaryByIndex(arenaIndex) {
+    if (this.arenaBoundaryBodies[arenaIndex]) {
+      this.world.removeBody(this.arenaBoundaryBodies[arenaIndex]);
+      
+      // Remove from our bodies array
+      const index = this.bodies.indexOf(this.arenaBoundaryBodies[arenaIndex]);
+      if (index !== -1) {
+        this.bodies.splice(index, 1);
+      }
+      
+      // Clear the reference in our arena boundaries array
+      this.arenaBoundaryBodies[arenaIndex] = null;
+      console.log(`Removed QuickDraw arena boundary ${arenaIndex + 1}`);
+    }
+  }
+  
+  /**
+   * Removes the QuickDraw arena boundary (legacy method for backward compatibility)
+   */
+  removeQuickDrawArenaBoundary() {
+    // Remove all arena boundaries
+    for (let i = 0; i < this.arenaBoundaryBodies.length; i++) {
+      this.removeQuickDrawArenaBoundaryByIndex(i);
+    }
+  }
+  
+  /**
+   * Create a physics body for a player
+   * @param {THREE.Vector3} position - Initial position
+   * @param {number} radius - Player collision radius
+   * @param {number} height - Player height
+   * @returns {CANNON.Body} - The created physics body
+   */
+  createPlayerBody(position, radius = 0.3, height = 1.8) {
+    // Create a capsule shape (cylinder with spheres at ends)
+    const playerBody = new CANNON.Body({
+      mass: 70, // Player mass in kg
+      material: this.defaultMaterial,
+      fixedRotation: true, // Don't rotate the player when colliding
+      linearDamping: 0.9 // Add some damping to prevent excessive sliding
+    });
+    
+    // Use a cylinder for the body
+    playerBody.addShape(new CANNON.Cylinder(radius, radius, height, 8));
+    
+    // Position the player body
+    playerBody.position.set(position.x, position.y, position.z);
+    
+    // Add to world
+    this.world.addBody(playerBody);
+    this.bodies.push(playerBody);
+    
+    // If debug mode is enabled, create a visual representation
+    if (this.debugMode) {
+      this.createDebugMesh(playerBody);
+    }
+    
+    return playerBody;
+  }
+  
+  /**
+   * Checks if a point is inside any active arena boundary
+   * @param {THREE.Vector3} point - The point to check
+   * @returns {boolean} - True if inside, false if outside
+   */
+  isPointInArenaBoundary(point) {
+    // Check all arena boundaries
+    for (let i = 0; i < this.arenaBoundaryBodies.length; i++) {
+      if (this.isPointInSpecificArenaBoundary(point, i)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  
+  /**
+   * Checks if a point is inside a specific arena boundary
+   * @param {THREE.Vector3} point - The point to check
+   * @param {number} arenaIndex - The arena index to check
+   * @returns {boolean} - True if inside, false if outside
+   */
+  isPointInSpecificArenaBoundary(point, arenaIndex) {
+    // If no arena boundary exists for this index, return false
+    if (!this.arenaBoundaryBodies[arenaIndex]) return false;
+    
+    // Get arena position
+    const arenaPos = this.arenaBoundaryBodies[arenaIndex].position;
+    const pointVec = new CANNON.Vec3(point.x, point.y, point.z);
+    
+    // Calculate horizontal distance (ignoring Y) from arena center
+    const dx = pointVec.x - arenaPos.x;
+    const dz = pointVec.z - arenaPos.z;
+    const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+    
+    // Get the radius - assuming 15 is the standard radius for all arenas
+    const radius = 15;
+    
+    // Check if point is inside the cylinder horizontally
+    return horizontalDist < radius;
+  }
+
+  /**
+   * Checks if a point is inside the town boundary
+   * @param {THREE.Vector3} point - The point to check
+   * @returns {boolean} - True if inside, false if outside
+   */
+  isPointInTown(point) {
+    // If no town boundary exists, return true (no restriction)
+    if (!window.townDimensions) return true;
+    
+    // Get town dimensions
+    const width = window.townDimensions.width;
+    const length = window.townDimensions.length;
+    
+    // Check if the point is within the town boundaries
+    return (
+      point.x > -width / 2 && 
+      point.x < width / 2 && 
+      point.z > -length / 2 && 
+      point.z < length / 2
+    );
+  }
+  
+  /**
+   * Creates a debug mesh to visualize a physics body
+   * @param {CANNON.Body} body - The physics body to visualize
+   */
+  createDebugMesh(body) {
+    // Only used in debug mode
+    if (!this.debugMode) return;
+    
+    // For each shape in the body, create a wireframe mesh
+    body.shapes.forEach((shape, i) => {
+      let geometry;
+      let mesh;
+      
+      // Get the shape's offset and orientation
+      const offset = body.shapeOffsets[i];
+      const orientation = body.shapeOrientations[i];
+      
+      // Create different geometries based on shape type
+      if (shape instanceof CANNON.Box) {
+        geometry = new THREE.BoxGeometry(
+          shape.halfExtents.x * 2,
+          shape.halfExtents.y * 2,
+          shape.halfExtents.z * 2
+        );
+        
+        mesh = new THREE.Mesh(
+          geometry,
+          new THREE.MeshBasicMaterial({
+            color: 0x00ff00,
+            wireframe: true
+          })
+        );
+        
+        // Apply offset and orientation
+        mesh.position.set(offset.x, offset.y, offset.z);
+        mesh.quaternion.set(
+          orientation.x,
+          orientation.y,
+          orientation.z,
+          orientation.w
+        );
+      }
+      else if (shape instanceof CANNON.Sphere) {
+        geometry = new THREE.SphereGeometry(shape.radius, 16, 16);
+        
+        mesh = new THREE.Mesh(
+          geometry,
+          new THREE.MeshBasicMaterial({
+            color: 0x00ff00,
+            wireframe: true
+          })
+        );
+        
+        // Apply offset
+        mesh.position.set(offset.x, offset.y, offset.z);
+      }
+      else if (shape instanceof CANNON.Cylinder) {
+        geometry = new THREE.CylinderGeometry(
+          shape.radiusTop,
+          shape.radiusBottom,
+          shape.height,
+          shape.numSegments
+        );
+        
+        mesh = new THREE.Mesh(
+          geometry,
+          new THREE.MeshBasicMaterial({
+            color: 0x00ff00,
+            wireframe: true
+          })
+        );
+        
+        // Rotate to match cannon.js cylinders
+        mesh.rotation.x = Math.PI / 2;
+        
+        // Apply offset and orientation
+        mesh.position.set(offset.x, offset.y, offset.z);
+        const quat = new THREE.Quaternion(
+          orientation.x,
+          orientation.y,
+          orientation.z,
+          orientation.w
+        );
+        mesh.quaternion.multiply(quat);
+      }
+      
+      if (mesh) {
+        // Add to the body's group
+        const group = new THREE.Group();
+        group.add(mesh);
+        
+        // Store reference for updating
+        this.debugMeshes.push({
+          mesh: group,
+          body: body
+        });
+        
+        // Add to scene
+        window.scene.add(group);
+      }
+    });
+  }
+  
+  /**
+   * Update the physics world
+   * @param {number} deltaTime - Time step in seconds
+   */
+  update(deltaTime) {
+    // Limit delta time to prevent large jumps
+    const timeStep = Math.min(deltaTime, 0.1);
+    
+    // Update physics world
+    this.world.step(timeStep);
+    
+    // Update debug meshes if in debug mode
+    if (this.debugMode) {
+      this.updateDebugMeshes();
+    }
+  }
+  
+  /**
+   * Update debug mesh positions to match their physics bodies
+   */
+  updateDebugMeshes() {
+    if (!this.debugMode) return;
+    
+    this.debugMeshes.forEach(item => {
+      // Update position
+      item.mesh.position.set(
+        item.body.position.x,
+        item.body.position.y,
+        item.body.position.z
+      );
+      
+      // Update orientation
+      item.mesh.quaternion.set(
+        item.body.quaternion.x,
+        item.body.quaternion.y,
+        item.body.quaternion.z,
+        item.body.quaternion.w
+      );
+    });
+  }
+  
+  /**
+   * Enables or disables debug visualization
+   * @param {boolean} enabled - Whether debug mode should be enabled
+   */
+  setDebugMode(enabled) {
+    // Store previous debug mode to detect changes
+    const previousDebugMode = this.debugMode;
+    this.debugMode = enabled;
+    
+    // If enabling and we weren't previously in debug mode
+    if (enabled && !previousDebugMode) {
+      // Create meshes for existing physics bodies
+      this.bodies.forEach(body => {
+        this.createDebugMesh(body);
+      });
+      
+      // Set a global flag to signal hit zone debug should be created
+      // This is important for making bullet.js know it should show hitboxes
+      window.showHitZoneDebug = true;
+      
+      console.log("Physics debug mode enabled - hit zones visible");
+    }
+    // If disabling and we were previously in debug mode
+    else if (!enabled && previousDebugMode) {
+      // Remove all physics debug meshes
+      this.debugMeshes.forEach(item => {
+        if (item.mesh && window.scene) {
+          window.scene.remove(item.mesh);
+          item.mesh.traverse(child => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) child.material.dispose();
+          });
+        }
+      });
+      this.debugMeshes = [];
+      
+      // Remove any hit zone debug visualizations
+      this.cleanupHitZoneDebug();
+      
+      // Clear the global flag for hit zone debugging
+      window.showHitZoneDebug = false;
+      
+      console.log("Physics debug mode disabled - hit zones hidden");
+    }
+  }
+  
+  /**
+   * Clean up hit zone debug visualizations
+   */
+  cleanupHitZoneDebug() {
+    // Find and remove all hit zone debug objects
+    if (window.scene) {
+      const hitZoneObjects = [];
+      window.scene.traverse(obj => {
+        if (obj.name && obj.name.startsWith("hitZoneDebug_")) {
+          hitZoneObjects.push(obj);
+        }
+      });
+      
+      // Remove each hit zone debug object
+      hitZoneObjects.forEach(obj => {
+        window.scene.remove(obj);
+        // Clean up materials and geometries
+        obj.traverse(child => {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) child.material.dispose();
+        });
+      });
+      
+      if (hitZoneObjects.length > 0) {
+        console.log(`Removed ${hitZoneObjects.length} hit zone debug visualizations`);
+      }
+    }
+    
+    // Clear player hit zone debug references
+    // Find all player objects
+    if (window.localPlayer) {
+      window.localPlayer._hitZoneDebug = null;
+    }
+    // Remote players
+    if (window.remotePlayers) {
+      window.remotePlayers.forEach(player => {
+        if (player) {
+          player._hitZoneDebug = null;
+        }
+      });
+    }
+  }
+  
+  /**
+   * Force recreation of hit zone debug boxes for all players
+   * Called when needed to refresh the visualizations
+   */
+  refreshHitZoneDebug() {
+    if (!this.debugMode || !window.scene) return;
+    
+    console.log("Refreshing hit zone debug visualizations");
+    
+    // First clean up existing hit zone debug objects
+    this.cleanupHitZoneDebug();
+    
+    // Then force recreation for local player and all remote players
+    // Create a dummy bullet to use for hit zone checks
+    const dummyBullet = new window.Bullet(
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 1, 0)
+    );
+    
+    // Check local player
+    if (window.localPlayer) {
+      dummyBullet.checkPlayerHitZones(window.localPlayer, new THREE.Vector3(0, 0, 0));
+    }
+    
+    // Check remote players
+    if (window.remotePlayers) {
+      window.remotePlayers.forEach(player => {
+        if (player) {
+          dummyBullet.checkPlayerHitZones(player, new THREE.Vector3(0, 0, 0));
+        }
+      });
+    }
+  }
+  
+  /**
+   * Cleans up all physics resources
+   */
+  cleanup() {
+    // Remove all bodies
+    this.bodies.forEach(body => {
+      this.world.removeBody(body);
+    });
+    
+    // Remove all debug meshes
+    if (this.debugMode) {
+      this.debugMeshes.forEach(item => {
+        if (window.scene) {
+          window.scene.remove(item.mesh);
+          item.mesh.traverse(child => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) child.material.dispose();
+          });
+        }
+      });
+    }
+    
+    // Clean up hit zone debug visualizations
+    this.cleanupHitZoneDebug();
+    
+    this.bodies = [];
+    this.debugMeshes = [];
+    this.arenaBoundaryBodies = [];
+  }
+}
 
 ================================================
 File: /public/js/player.js
@@ -3293,6 +4073,20 @@ export class Player {
     this.isReconciling = false;
     this.reconciliationLerpFactor = 0.3; // How quickly to move to server position
 
+    // Footstep sound system
+    this.lastFootstepTime = 0; // Time of last footstep sound
+    this.footstepInterval = 0.5; // Base interval in seconds between steps
+    this.isLeftFoot = true; // Track which foot is next
+    this.isMovingLastFrame = false; // Track if player was moving in the last frame
+    this.isJumping = false; // Track jumping state
+    
+    // Hit zones for damage calculations
+    this.hitZones = {
+      head: { damage: 100 },
+      body: { damage: 40 },
+      limbs: { damage: 20 }
+    };
+    
     // Initialize network & UI
     this.initNetworking();
     updateAmmoUI(this);
@@ -3418,11 +4212,30 @@ export class Player {
 
     // Gravity
     this.velocity.y -= 20 * deltaTime;
+    
+    // Check if player is jumping
+    const wasOnGround = this.canJump;
+    const isJumping = this.velocity.y > 0 && !this.canJump;
+    
+    // Store the previous jumping state to detect when we first start jumping
+    const wasJumping = this.isJumping || false;
+    this.isJumping = isJumping;
+    
     this.group.position.y += this.velocity.y * deltaTime;
     if (this.group.position.y < 1.6) {
+      // Player landed
+      if (this.velocity.y < -3 && !wasOnGround) {
+        // Play landing sound if falling fast enough
+        if (this.soundManager) {
+          // Use regular footstep sound for landing, but play it directly for reliability
+          this.soundManager.playSound("leftstep", 0, 1.2);
+        }
+      }
+      
       this.velocity.y = 0;
       this.group.position.y = 1.6;
       this.canJump = true;
+      this.isJumping = false;
     }
 
     // Movement - now with sprint capability
@@ -3435,6 +4248,9 @@ export class Player {
     const right = new THREE.Vector3();
     right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
 
+    // Store position before movement to check if we actually moved
+    const positionBeforeMovement = this.group.position.clone();
+    
     // Calculate new position based on movement input
     const newPosition = this.group.position.clone();
     
@@ -3467,6 +4283,14 @@ export class Player {
         }
       }
     }
+    
+    // Footstep sounds logic
+    this.updateFootstepSounds(deltaTime, positionBeforeMovement);
+    
+    // Handle jump sound - only play when we first start jumping (not previously jumping)
+    if (isJumping && !wasJumping && this.soundManager) {
+      this.soundManager.playSound("jump", 300); // Play jump sound with 300ms cooldown
+    }
 
     // Send periodic network updates
     const now = performance.now();
@@ -3474,6 +4298,72 @@ export class Player {
       this.lastNetworkUpdate = now;
       this.sendNetworkUpdate();
     }
+  }
+
+  /**
+   * Update footstep sounds based on movement
+   * @param {number} deltaTime - Time elapsed since last frame
+   * @param {THREE.Vector3} previousPosition - Position before movement this frame
+   */
+  updateFootstepSounds(deltaTime, previousPosition) {
+    // Only play footstep sounds if we're on the ground and actually moving
+    const isMovingNow = this.isMoving() && this.canJump;
+    
+    // Calculate how far we've moved this frame
+    const distanceMoved = this.group.position.distanceTo(previousPosition);
+    
+    // Skip if not moving or not on ground
+    if (!isMovingNow || distanceMoved < 0.001) {
+      this.isMovingLastFrame = false;
+      return;
+    }
+    
+    // Calculate the appropriate footstep interval based on speed
+    let currentInterval = this.footstepInterval;
+    if (this.isSprinting) {
+      currentInterval = 0.3; // Faster steps when sprinting
+    } else {
+      currentInterval = 0.5; // Normal walking pace
+    }
+    
+    // Accumulate time since last footstep
+    this.lastFootstepTime += deltaTime;
+    
+    // Check if it's time for a footstep sound
+    if (this.lastFootstepTime >= currentInterval) {
+      // Reset the timer, with a small random variation for naturalness
+      this.lastFootstepTime = -0.05 + Math.random() * 0.1;
+      
+      // Determine which foot and play the appropriate sound
+      if (this.soundManager) {
+        // Temporary debug log
+        console.log(`Playing ${this.isLeftFoot ? 'left' : 'right'} footstep`);
+        
+        // Use direct sound play instead of positional audio for now
+        this.soundManager.playSound(
+          this.isLeftFoot ? 'leftstep' : 'rightstep',
+          0, // No cooldown
+          this.isSprinting ? 1.2 : 0.8 // Adjust volume based on speed
+        );
+        
+        // Try positional audio as fallback
+        try {
+          this.soundManager.playSoundAt(
+            this.isLeftFoot ? 'leftstep' : 'rightstep',
+            this.group.position,
+            0, // No cooldown
+            this.isSprinting ? 1.2 : 0.8 // Adjust volume based on speed
+          );
+        } catch (err) {
+          console.log("Fallback to positional audio failed:", err);
+        }
+      }
+      
+      // Switch feet for next step
+      this.isLeftFoot = !this.isLeftFoot;
+    }
+    
+    this.isMovingLastFrame = true;
   }
 
   /**
@@ -3675,17 +4565,69 @@ export class Player {
   /**
    * Called when the player takes damage.
    * @param {number} amount - Damage amount.
+   * @param {string} hitZone - Hit zone ('head', 'body', 'limbs')
    */
-  takeDamage(amount) {
+  takeDamage(amount, hitZone) {
+    const previousHealth = this.health;
     this.health = Math.max(this.health - amount, 0);
-    console.log(`Player ${this.id} took ${amount} damage. Health is now ${this.health}`);
-    updateHealthUI(this);
-    // You could add death/respawn logic here
-    if (this.health === 0) {
-      console.log('Game Over');
-      // Optionally, disable input or show a Game Over screen.
-      this.respawn();
+    console.log(`Player ${this.id} took ${amount} damage in the ${hitZone || 'body'}. Health is now ${this.health}`);
+    
+    // Show damage indicator with damage amount and hit zone
+    if (typeof window.showDamageIndicator === 'function') {
+      window.showDamageIndicator(amount, hitZone);
     }
+    
+    // Update health UI
+    updateHealthUI(this);
+    
+    // Add screen flash effect based on damage amount
+    this.showDamageEffect(amount);
+    
+    // If health reached zero, handle death
+    if (previousHealth > 0 && this.health === 0) {
+      console.log('Game Over');
+      // Respawn after a delay
+      setTimeout(() => {
+        this.respawn();
+      }, 1500);
+    }
+  }
+
+  /**
+   * Shows a screen flash effect when taking damage
+   * @param {number} amount - The damage amount
+   */
+  showDamageEffect(amount) {
+    // Create a full-screen flash effect
+    const flash = document.createElement('div');
+    flash.style.position = 'absolute';
+    flash.style.top = '0';
+    flash.style.left = '0';
+    flash.style.width = '100%';
+    flash.style.height = '100%';
+    flash.style.backgroundColor = 'rgba(255, 0, 0, 0.3)';
+    flash.style.opacity = '0';
+    flash.style.transition = 'opacity 0.1s ease-in, opacity 0.4s ease-out';
+    flash.style.pointerEvents = 'none';
+    flash.style.zIndex = '900';
+    document.getElementById('game-container').appendChild(flash);
+    
+    // Adjust intensity based on damage
+    const intensity = Math.min(amount / 100, 0.8);
+    flash.style.backgroundColor = `rgba(255, 0, 0, ${intensity})`;
+    
+    // Show and fade out
+    setTimeout(() => {
+      flash.style.opacity = '1';
+      setTimeout(() => {
+        flash.style.opacity = '0';
+        setTimeout(() => {
+          if (flash.parentNode) {
+            flash.parentNode.removeChild(flash);
+          }
+        }, 400);
+      }, 100);
+    }, 0);
   }
 
   /**
@@ -6725,6 +7667,17 @@ export class SoundManager {
     // For positional playback using Web Audio API
     this.buffers = {};
     this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    
+    // For footstep optimization - preload audio nodes for footsteps
+    this.footstepSources = {
+      left: [],
+      right: []
+    };
+    this.footstepPoolSize = 3; // Number of audio nodes to cycle through
+    this.currentFootstepIndex = 0;
+    
+    // For sound cooldowns (prevent sound spam)
+    this.soundCooldowns = {};
   }
   
   /**
@@ -6741,16 +7694,49 @@ export class SoundManager {
       audio.src = url;
       audio.load();
       this.sounds[name] = audio;
+      
+      console.log(`Loaded sound "${name}" as HTMLAudioElement from ${url}`);
     } catch (error) {
       console.error(`Error loading sound "${name}" from ${url}:`, error);
     }
     
     // Also load using fetch for positional audio
     fetch(url)
-      .then(response => response.arrayBuffer())
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`Network response failed for sound ${name}: ${response.status} ${response.statusText}`);
+        }
+        return response.arrayBuffer();
+      })
       .then(arrayBuffer => this.audioContext.decodeAudioData(arrayBuffer))
       .then(audioBuffer => {
         this.buffers[name] = audioBuffer;
+        console.log(`Loaded sound "${name}" as AudioBuffer from ${url}`);
+        
+        // Preload footstep sources if this is a footstep sound
+        if (name === 'leftstep' || name === 'rightstep') {
+          const footType = name === 'leftstep' ? 'left' : 'right';
+          console.log(`Preloading ${footType} footstep sources`);
+          // Create a pool of audio sources for footsteps
+          for (let i = 0; i < this.footstepPoolSize; i++) {
+            this.footstepSources[footType][i] = {
+              source: null,
+              gainNode: this.audioContext.createGain(),
+              panner: this.audioContext.createPanner()
+            };
+            
+            // Set up the audio chain
+            this.footstepSources[footType][i].gainNode.connect(this.audioContext.destination);
+            this.footstepSources[footType][i].panner.connect(this.footstepSources[footType][i].gainNode);
+            
+            // Configure panner for 3D audio
+            this.footstepSources[footType][i].panner.panningModel = 'HRTF';
+            this.footstepSources[footType][i].panner.distanceModel = 'inverse';
+            this.footstepSources[footType][i].panner.refDistance = 1;
+            this.footstepSources[footType][i].panner.maxDistance = 10000;
+            this.footstepSources[footType][i].panner.rolloffFactor = 1;
+          }
+        }
       })
       .catch(error => {
         console.error(`Error loading sound buffer "${name}" from ${url}:`, error);
@@ -6760,10 +7746,25 @@ export class SoundManager {
   /**
    * Plays a cached sound by cloning the HTMLAudioElement.
    * @param {string} name - Sound key.
+   * @param {number} cooldown - Optional cooldown in milliseconds to prevent rapid repetition.
+   * @param {number} volume - Optional volume multiplier (0-1)
    */
-  playSound(name) {
+  playSound(name, cooldown = 0, volume = 1.0) {
     if (this.sounds[name]) {
+      // Check cooldown if specified
+      if (cooldown > 0) {
+        const now = Date.now();
+        if (this.soundCooldowns[name] && now - this.soundCooldowns[name] < cooldown) {
+          // Still in cooldown period
+          return;
+        }
+        this.soundCooldowns[name] = now;
+      }
+      
       const audioClone = this.sounds[name].cloneNode();
+      // Apply volume adjustment
+      audioClone.volume = Math.max(0, Math.min(1, volume));
+      
       audioClone.play().catch(error => {
         console.error(`Error playing sound "${name}":`, error);
       });
@@ -6776,12 +7777,25 @@ export class SoundManager {
    * Plays a sound at a given 3D position using the Web Audio API.
    * @param {string} name - Sound key.
    * @param {THREE.Vector3} position - 3D position for the sound.
+   * @param {number} cooldown - Optional cooldown in milliseconds.
+   * @param {number} volume - Optional volume multiplier.
    */
-  playSoundAt(name, position) {
+  playSoundAt(name, position, cooldown = 0, volume = 1.0) {
     if (!this.buffers[name]) {
       console.error(`Positional sound "${name}" not found in buffers.`);
       return;
     }
+    
+    // Check cooldown if specified
+    if (cooldown > 0) {
+      const now = Date.now();
+      if (this.soundCooldowns[name] && now - this.soundCooldowns[name] < cooldown) {
+        // Still in cooldown period
+        return;
+      }
+      this.soundCooldowns[name] = now;
+    }
+    
     try {
       const source = this.audioContext.createBufferSource();
       source.buffer = this.buffers[name];
@@ -6797,11 +7811,62 @@ export class SoundManager {
       panner.coneOuterGain = 0;
       panner.setPosition(position.x, position.y, position.z);
       
+      // Add volume control gain node
+      const gainNode = this.audioContext.createGain();
+      gainNode.gain.value = volume;
+      
       source.connect(panner);
-      panner.connect(this.audioContext.destination);
+      panner.connect(gainNode);
+      gainNode.connect(this.audioContext.destination);
       source.start(0);
     } catch (error) {
       console.error(`Error playing positional sound "${name}":`, error);
+    }
+  }
+  
+  /**
+   * Efficiently plays footstep sounds by reusing audio nodes.
+   * Optimized for frequent calls during walking.
+   * @param {string} foot - 'left' or 'right' to determine which sound to play.
+   * @param {THREE.Vector3} position - 3D position for the sound.
+   * @param {number} volume - Volume multiplier based on movement speed.
+   */
+  playFootstep(foot, position, volume = 1.0) {
+    const footType = foot === 'left' ? 'left' : 'right';
+    const soundName = foot === 'left' ? 'leftstep' : 'rightstep';
+    
+    if (!this.buffers[soundName]) {
+      console.error(`Footstep sound "${soundName}" not found in buffers.`);
+      return;
+    }
+    
+    try {
+      // Get the next footstep source from the pool
+      const sourceObj = this.footstepSources[footType][this.currentFootstepIndex];
+      this.currentFootstepIndex = (this.currentFootstepIndex + 1) % this.footstepPoolSize;
+      
+      // If there's an existing source playing, stop it
+      if (sourceObj.source !== null) {
+        try {
+          sourceObj.source.stop();
+        } catch (e) {
+          // Ignore errors if the source was already stopped
+        }
+      }
+      
+      // Create a new source
+      sourceObj.source = this.audioContext.createBufferSource();
+      sourceObj.source.buffer = this.buffers[soundName];
+      
+      // Update position and volume
+      sourceObj.panner.setPosition(position.x, position.y, position.z);
+      sourceObj.gainNode.gain.value = volume;
+      
+      // Connect and play
+      sourceObj.source.connect(sourceObj.panner);
+      sourceObj.source.start(0);
+    } catch (error) {
+      console.error(`Error playing footstep sound "${soundName}":`, error);
     }
   }
   
@@ -6826,7 +7891,6 @@ export class SoundManager {
   }
 }
 
-
 ================================================
 File: /public/js/ui.js
 ================================================
@@ -6835,23 +7899,103 @@ File: /public/js/ui.js
  * @param {Player} player - The player instance.
  */
 export function updateAmmoUI(player) {
-    const ammoCounter = document.getElementById('ammo-counter');
-    if (ammoCounter && player) {
-      ammoCounter.textContent = `Bullets: ${player.bullets}/${player.maxBullets}`;
-    }
+  const ammoCounter = document.getElementById('ammo-counter');
+  if (ammoCounter && player) {
+    ammoCounter.textContent = `Bullets: ${player.bullets}/${player.maxBullets}`;
+  }
 }
 
 /**
- * Updates the health counter in the UI.
- * @param {Player|ThirdPersonModel} player - The player instance.
- */
+* Updates the health counter in the UI.
+* @param {Player|ThirdPersonModel} player - The player instance.
+*/
 export function updateHealthUI(player) {
-    const healthCounter = document.getElementById('health-counter');
-    if (healthCounter && player) {
-      healthCounter.textContent = `Health: ${player.health}`;
+  const healthCounter = document.getElementById('health-counter');
+  if (healthCounter && player) {
+    const healthText = `Health: ${player.health}`;
+    healthCounter.textContent = healthText;
+    
+    // Add visual indication of health level
+    if (player.health > 75) {
+      healthCounter.style.color = '#4CAF50'; // Green for good health
+    } else if (player.health > 30) {
+      healthCounter.style.color = '#FFC107'; // Yellow/amber for medium health
+    } else {
+      healthCounter.style.color = '#F44336'; // Red for low health
     }
+  }
 }
 
+/**
+* Creates a temporary damage indicator overlay when player takes damage.
+* @param {number} damage - The amount of damage taken.
+* @param {string} hitZone - The hit zone ('head', 'body', 'limbs').
+*/
+export function showDamageIndicator(damage, hitZone) {
+  // Create damage indicator element if it doesn't exist
+  let damageIndicator = document.getElementById('damage-indicator');
+  if (!damageIndicator) {
+      damageIndicator = document.createElement('div');
+      damageIndicator.id = 'damage-indicator';
+      damageIndicator.style.position = 'absolute';
+      damageIndicator.style.top = '40%';
+      damageIndicator.style.left = '50%';
+      damageIndicator.style.transform = 'translate(-50%, -50%)';
+      damageIndicator.style.color = 'red';
+      damageIndicator.style.fontSize = '48px';
+      damageIndicator.style.fontWeight = 'bold';
+      damageIndicator.style.opacity = '0';
+      damageIndicator.style.textShadow = '2px 2px 4px #000000';
+      damageIndicator.style.transition = 'opacity 0.3s ease-in, opacity 0.5s ease-out';
+      damageIndicator.style.zIndex = '1000';
+      damageIndicator.style.pointerEvents = 'none';
+      document.getElementById('game-container').appendChild(damageIndicator);
+  }
+  
+  // Set text based on hit zone
+  let hitText = `-${damage}`;
+  if (hitZone) {
+      switch (hitZone) {
+          case 'head':
+              hitText += ' HEADSHOT!';
+              break;
+          case 'body':
+              hitText += ' (Body Shot)';
+              break;
+          case 'limbs':
+              hitText += ' (Limb Shot)';
+              break;
+      }
+  }
+  
+  // Display damage indicator
+  damageIndicator.textContent = hitText;
+  damageIndicator.style.opacity = '1';
+  
+  // Set color based on damage
+  if (damage >= 100) {
+      damageIndicator.style.color = '#FF0000'; // Bright red for headshots
+      damageIndicator.style.fontSize = '64px';
+  } else if (damage >= 40) {
+      damageIndicator.style.color = '#FF4500'; // Orange-red for body shots
+  } else {
+      damageIndicator.style.color = '#FFA500'; // Orange for limb shots
+  }
+  
+  // Fade out after a delay
+  setTimeout(() => {
+      damageIndicator.style.opacity = '0';
+  }, 800);
+}
+
+/**
+* Updates all UI elements related to player status.
+* @param {Player} player - The player instance.
+*/
+export function updatePlayerUI(player) {
+  updateAmmoUI(player);
+  updateHealthUI(player);
+}
 
 ================================================
 File: /server.js
@@ -7080,7 +8224,14 @@ wss.on('connection', (ws, req) => {
           break;
           
         case 'quickDrawShoot':
-          handleQuickDrawShoot(playerId, data.opponentId, data.arenaIndex);
+          // Pass the hit zone and damage if provided
+          handleQuickDrawShoot(
+            playerId, 
+            data.opponentId, 
+            data.arenaIndex, 
+            data.hitZone || 'body', 
+            data.damage || 40
+          );
           break;
 
         default:
@@ -7362,8 +8513,25 @@ function handlePlayerHit(playerId, data) {
     }
   }
   
+  // Calculate damage based on hit zone if provided
+  let damage = GAME_CONSTANTS.DAMAGE_PER_HIT; // Default damage
+  const hitZone = data.hitData && data.hitData.hitZone ? data.hitData.hitZone : null;
+  
+  if (hitZone) {
+    if (hitZone === 'head') {
+      damage = 100; // Headshot is always lethal
+    } else if (hitZone === 'body') {
+      damage = 40; // Body shot deals 40 damage
+    } else if (hitZone === 'limbs') {
+      damage = 20; // Limb shot deals 20 damage
+    }
+  } else if (data.hitData && data.hitData.damage) {
+    // If explicit damage is provided, use that
+    damage = data.hitData.damage;
+  }
+  
   // Apply hit effects: reduce health
-  targetPlayer.health = Math.max(targetPlayer.health - GAME_CONSTANTS.DAMAGE_PER_HIT, 0);
+  targetPlayer.health = Math.max(targetPlayer.health - damage, 0);
   
   // Inform the target
   if (targetPlayer.ws.readyState === WebSocket.OPEN) {
@@ -7371,7 +8539,8 @@ function handlePlayerHit(playerId, data) {
       type: 'hit',
       sourceId: playerId,
       hitData: data.hitData,
-      health: targetPlayer.health
+      health: targetPlayer.health,
+      hitZone: hitZone
     }));
   }
   
@@ -7380,9 +8549,11 @@ function handlePlayerHit(playerId, data) {
     type: 'playerHit',
     targetId: targetId,
     sourceId: playerId,
-    hitPosition: data.hitData.position,
+    hitPosition: data.hitData ? data.hitData.position : null,
     health: targetPlayer.health,
-    bulletId: bulletId
+    bulletId: bulletId,
+    hitZone: hitZone,
+    damage: damage
   });
   
   // Check for player death
@@ -7726,6 +8897,10 @@ function checkQuickDrawQueue(arenaIndex) {
   player2.inQuickDrawDuel = true;
   player2.quickDrawDuelId = duelId;
   
+  // Reset player health to full at the start of the duel
+  player1.health = 100;
+  player2.health = 100;
+  
   // Notify players of the match
   player1.ws.send(JSON.stringify({
     type: 'quickDrawMatch',
@@ -7859,12 +9034,14 @@ function sendDrawSignal(duelId) {
  * @param {number} playerId - The player's ID
  * @param {number} targetId - The target player's ID
  * @param {number} arenaIndex - The arena index for the duel
+ * @param {string} hitZone - The hit zone ('head', 'body', 'limbs')
+ * @param {number} damage - The damage amount
  */
-function handleQuickDrawShoot(playerId, targetId, arenaIndex) {
+function handleQuickDrawShoot(playerId, targetId, arenaIndex, hitZone = 'body', damage = 40) {
     playerId = Number(playerId);
     targetId = Number(targetId);
     
-    console.log(`Quick Draw shoot: Player ${playerId} shot player ${targetId} in arena ${arenaIndex + 1}`);
+    console.log(`Quick Draw shoot: Player ${playerId} shot player ${targetId} in arena ${arenaIndex + 1} (${hitZone}, ${damage} damage)`);
     
     const playerData = players.get(playerId);
     
@@ -7901,10 +9078,68 @@ function handleQuickDrawShoot(playerId, targetId, arenaIndex) {
         return; // Not shooting at the opponent
     }
     
-    console.log(`Quick Draw shoot ACCEPTED: Player ${playerId} hit player ${targetId}. Ending duel ${duelId} with ${playerId} as winner`);
+    // Get the target player to check their health
+    const targetPlayer = players.get(targetId);
+    if (!targetPlayer) {
+        console.log(`Quick Draw shoot rejected: Target player ${targetId} not found`);
+        return;
+    }
     
-    // End the duel with this player as the winner
-    endQuickDrawDuel(duelId, playerId);
+    console.log(`Quick Draw shoot ACCEPTED: Player ${playerId} hit player ${targetId} in duel ${duelId}`);
+    
+    // Calculate damage based on hit zone if not explicitly provided
+    let finalDamage = damage;
+    if (!finalDamage) {
+        if (hitZone === 'head') {
+            finalDamage = 100; // Headshot is fatal
+        } else if (hitZone === 'body') {
+            finalDamage = 40;  // Body shot
+        } else if (hitZone === 'limbs') {
+            finalDamage = 20;  // Limb shot
+        } else {
+            finalDamage = 40;  // Default to body shot damage
+        }
+    }
+    
+    // Apply the damage to the target player
+    const previousHealth = targetPlayer.health;
+    targetPlayer.health = Math.max(targetPlayer.health - finalDamage, 0);
+    console.log(`Applied ${finalDamage} damage to player ${targetId}. Health reduced from ${previousHealth} to ${targetPlayer.health}`);
+    
+    // Notify the hit player
+    if (targetPlayer.ws.readyState === WebSocket.OPEN) {
+        targetPlayer.ws.send(JSON.stringify({
+            type: 'hit',
+            sourceId: playerId,
+            hitData: { 
+                position: targetPlayer.position, 
+                hitZone: hitZone,
+                damage: finalDamage
+            },
+            health: targetPlayer.health,
+            hitZone: hitZone
+        }));
+    }
+    
+    // Broadcast hit to all players
+    broadcastToAll({
+        type: 'playerHit',
+        targetId: targetId,
+        sourceId: playerId,
+        hitPosition: targetPlayer.position,
+        health: targetPlayer.health,
+        hitZone: hitZone,
+        damage: finalDamage
+    });
+    
+    // Only end the duel if the target's health is 0
+    if (targetPlayer.health <= 0) {
+        console.log(`Player ${targetId} was killed. Ending duel ${duelId} with ${playerId} as winner`);
+        endQuickDrawDuel(duelId, playerId);
+    } else {
+        console.log(`Player ${targetId} was hit but survived with ${targetPlayer.health} health. Duel continues.`);
+        // Don't end the duel, just let the game continue
+    }
 }
 
 /**
@@ -8032,8 +9267,29 @@ function updateBullets() {
       if (isPlayerHitByBullet(player, bullet)) {
         bullet.active = false;
         
+        // Calculate damage based on hit position (simplified for server-side)
+        // This is a simplified version; the client sends more detailed hit zone info
+        let damage = GAME_CONSTANTS.DAMAGE_PER_HIT;
+        let hitZone = 'body'; // Default to body hit
+        
+        // Very basic hit zone detection based on bullet height
+        const playerBottom = player.position.y - 1.6;
+        const playerTop = playerBottom + 2.0;
+        const relativeHeight = (bullet.position.y - playerBottom) / (playerTop - playerBottom);
+        
+        if (relativeHeight > 0.8) {
+          hitZone = 'head';
+          damage = 100; // Headshot is fatal
+        } else if (relativeHeight > 0.4) {
+          hitZone = 'body';
+          damage = 40; // Body shot
+        } else {
+          hitZone = 'limbs';
+          damage = 20; // Limb shot
+        }
+        
         // Handle the hit
-        player.health = Math.max(player.health - GAME_CONSTANTS.DAMAGE_PER_HIT, 0);
+        player.health = Math.max(player.health - damage, 0);
         
         // Notify the hit player
         if (player.ws.readyState === WebSocket.OPEN) {
@@ -8041,12 +9297,13 @@ function updateBullets() {
             type: 'hit',
             sourceId: bullet.sourcePlayerId,
             bulletId: bulletId,
-            health: player.health
+            health: player.health,
+            hitZone: hitZone
           }));
         }
         
         // Broadcast hit to all players
-        broadcastBulletImpact(bulletId, 'player', playerId, bullet.position);
+        broadcastBulletImpact(bulletId, 'player', playerId, bullet.position, hitZone);
         
         // Check for player death
         if (player.health <= 0) {
@@ -8067,13 +9324,14 @@ function updateBullets() {
 }
 
 // Anti-cheat: Broadcast bullet impact to all players
-function broadcastBulletImpact(bulletId, hitType, targetId, position) {
+function broadcastBulletImpact(bulletId, hitType, targetId, position, hitZone) {
   broadcastToAll({
     type: 'bulletImpact',
     bulletId: bulletId,
     hitType: hitType,
     targetId: targetId,
-    position: position
+    position: position,
+    hitZone: hitZone
   });
 }
 

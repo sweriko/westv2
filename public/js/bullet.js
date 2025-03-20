@@ -68,8 +68,9 @@ export class Bullet {
     // FIRST CHECK: Before moving, check if bullet is already within arena but from an unauthorized player
     if (window.quickDraw && window.quickDraw.isPointInArena(this.mesh.position)) {
       const isLocalPlayerBullet = Number(this.sourcePlayerId) === Number(window.localPlayer.id);
-      const isPlayerInDuel = window.quickDraw.inDuel;
-      const isOpponentBullet = window.quickDraw.duelOpponentId === Number(this.sourcePlayerId);
+      const isPlayerInDuel = window.quickDraw && window.quickDraw.inDuel;
+      const isOpponentBullet = window.quickDraw && 
+                               window.quickDraw.duelOpponentId === Number(this.sourcePlayerId);
       
       // If bullet is inside arena but not from a duel player, destroy it immediately
       if (!(isPlayerInDuel && isLocalPlayerBullet) && !isOpponentBullet) {
@@ -223,8 +224,14 @@ export class Bullet {
                 Number(this.sourcePlayerId) === Number(window.localPlayer.id)) {
                 
                 console.log(`Quick Draw hit detected! Player ${this.sourcePlayerId} hit player ${playerId} in the ${hitResult.zone} for ${hitResult.damage} damage`);
-                // Send special Quick Draw hit notification
-                window.networkManager.sendQuickDrawShoot(playerId);
+                
+                // Send special Quick Draw hit notification with hit zone information
+                window.networkManager.sendQuickDrawShoot(
+                  playerId, 
+                  window.quickDraw.activeArenaIndex,
+                  hitResult.zone,
+                  hitResult.damage
+                );
             }
           }
           
@@ -282,34 +289,37 @@ export class Bullet {
     const limbHeight = 0.6;
     
     // Calculate vertical positions of each zone
-    const headBottom = baseY + 2.0 - headSize;
-    const headTop = baseY + 2.0;
-    const bodyBottom = baseY + 1.1;
-    const bodyTop = baseY + 2.0 - headSize;
-    const legBottom = baseY;
-    const legTop = baseY + 0.9;
-    const armBottom = baseY + 1.1;
-    const armTop = baseY + 1.7;
+    // Using the adjusted values for better alignment
+    const headBottom = baseY + 1.8 - headSize;
+    const headTop = baseY + 1.8;
+    const bodyBottom = baseY + 0.9;
+    const bodyTop = baseY + 1.8 - headSize;
+    const legBottom = baseY + 0.2;
+    const legTop = baseY + 0.8;
+    const armBottom = baseY + 0.8;
+    const armTop = baseY + 1.4;
     
-    // Create debug visualization if physics debug mode is enabled
-    if (window.physics && window.physics.debugMode && !playerObj._hitZoneDebug) {
-      this.createHitZoneDebugBoxes(playerObj, {
-        playerPos, baseY, 
-        headSize, bodyWidth, bodyHeight, limbWidth, limbHeight,
-        headBottom, headTop, bodyBottom, bodyTop, 
-        legBottom, legTop, armBottom, armTop
-      });
+    // Create debug visualization if physics debug mode is enabled or global debug flag is set
+    if ((window.physics && window.physics.debugMode) || window.showHitZoneDebug) {
+      if (!playerObj._hitZoneDebug) {
+        this.createHitZoneDebugBoxes(playerObj, {
+          playerPos, baseY, 
+          headSize, bodyWidth, bodyHeight, limbWidth, limbHeight,
+          headBottom, headTop, bodyBottom, bodyTop, 
+          legBottom, legTop, armBottom, armTop
+        });
+      }
     }
     
     // First do a quick test with the overall player bounding box
     const overallMin = new THREE.Vector3(
       playerPos.x - bodyWidth,
-      baseY,
+      baseY + 0.2, // Adjusted to match new bottom height
       playerPos.z - bodyWidth
     );
     const overallMax = new THREE.Vector3(
       playerPos.x + bodyWidth,
-      baseY + 2.0,
+      baseY + 1.8, // Adjusted to match new top height
       playerPos.z + bodyWidth
     );
     const overallBox = new THREE.Box3(overallMin, overallMax);
@@ -424,122 +434,186 @@ export class Bullet {
    * @param {object} dims - Dimensions and positions for the hit zones
    */
   createHitZoneDebugBoxes(playerObj, dims) {
-    // Create a group to hold all hit zone visualizations
+    // Only used in debug mode
     if (!window.scene) return;
     
+    // Remove any existing debug boxes for this player
+    if (playerObj._hitZoneDebug) {
+      window.scene.remove(playerObj._hitZoneDebug);
+      playerObj._hitZoneDebug.traverse(child => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) child.material.dispose();
+      });
+    }
+    
+    // Create a new group for hitbox visualization
     const hitZoneGroup = new THREE.Group();
     hitZoneGroup.name = "hitZoneDebug_" + playerObj.id;
-    window.scene.add(hitZoneGroup);
     
     // Create helper function to make box helpers
     const createBoxHelper = (min, max, color) => {
-      const box = new THREE.Box3(min, max);
-      const helper = new THREE.Box3Helper(box, color);
-      hitZoneGroup.add(helper);
-      return { box, helper };
+      // Use BoxGeometry instead of Box3Helper for more reliable visual feedback
+      const sizeX = max.x - min.x;
+      const sizeY = max.y - min.y;
+      const sizeZ = max.z - min.z;
+      
+      const geometry = new THREE.BoxGeometry(sizeX, sizeY, sizeZ);
+      const material = new THREE.MeshBasicMaterial({
+        color: color,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.7
+      });
+      
+      const mesh = new THREE.Mesh(geometry, material);
+      // Position at the center of the box
+      mesh.position.set(
+        min.x + sizeX/2,
+        min.y + sizeY/2,
+        min.z + sizeZ/2
+      );
+      
+      hitZoneGroup.add(mesh);
+      return mesh;
     };
+    
+    // Calculate all zones relative to player position
+    // Note: these are local to the player, not world positions
     
     // Head zone - red
     const headMin = new THREE.Vector3(
-      dims.playerPos.x - dims.headSize/2,
-      dims.headBottom,
-      dims.playerPos.z - dims.headSize/2
+      -dims.headSize/2,
+      dims.headBottom - dims.baseY,
+      -dims.headSize/2
     );
     const headMax = new THREE.Vector3(
-      dims.playerPos.x + dims.headSize/2,
-      dims.headTop,
-      dims.playerPos.z + dims.headSize/2
+      dims.headSize/2,
+      dims.headTop - dims.baseY,
+      dims.headSize/2
     );
     const headHelper = createBoxHelper(headMin, headMax, 0xff0000);
     
     // Body zone - orange
     const bodyMin = new THREE.Vector3(
-      dims.playerPos.x - dims.bodyWidth/2,
-      dims.bodyBottom,
-      dims.playerPos.z - dims.bodyWidth/2
+      -dims.bodyWidth/2,
+      dims.bodyBottom - dims.baseY,
+      -dims.bodyWidth/2
     );
     const bodyMax = new THREE.Vector3(
-      dims.playerPos.x + dims.bodyWidth/2,
-      dims.bodyTop,
-      dims.playerPos.z + dims.bodyWidth/2
+      dims.bodyWidth/2,
+      dims.bodyTop - dims.baseY,
+      dims.bodyWidth/2
     );
     const bodyHelper = createBoxHelper(bodyMin, bodyMax, 0xff7700);
     
     // Left arm - yellow
     const leftArmMin = new THREE.Vector3(
-      dims.playerPos.x - dims.bodyWidth/2 - dims.limbWidth,
-      dims.armBottom,
-      dims.playerPos.z - dims.limbWidth/2
+      -dims.bodyWidth/2 - dims.limbWidth,
+      dims.armBottom - dims.baseY,
+      -dims.limbWidth/2
     );
     const leftArmMax = new THREE.Vector3(
-      dims.playerPos.x - dims.bodyWidth/2,
-      dims.armTop,
-      dims.playerPos.z + dims.limbWidth/2
+      -dims.bodyWidth/2,
+      dims.armTop - dims.baseY,
+      dims.limbWidth/2
     );
     const leftArmHelper = createBoxHelper(leftArmMin, leftArmMax, 0xffff00);
     
     // Right arm - green
     const rightArmMin = new THREE.Vector3(
-      dims.playerPos.x + dims.bodyWidth/2,
-      dims.armBottom,
-      dims.playerPos.z - dims.limbWidth/2
+      dims.bodyWidth/2,
+      dims.armBottom - dims.baseY,
+      -dims.limbWidth/2
     );
     const rightArmMax = new THREE.Vector3(
-      dims.playerPos.x + dims.bodyWidth/2 + dims.limbWidth,
-      dims.armTop,
-      dims.playerPos.z + dims.limbWidth/2
+      dims.bodyWidth/2 + dims.limbWidth,
+      dims.armTop - dims.baseY,
+      dims.limbWidth/2
     );
     const rightArmHelper = createBoxHelper(rightArmMin, rightArmMax, 0x00ff00);
     
     // Left leg - blue
     const leftLegMin = new THREE.Vector3(
-      dims.playerPos.x - dims.bodyWidth/4 - dims.limbWidth/2,
-      dims.legBottom,
-      dims.playerPos.z - dims.limbWidth/2
+      -dims.bodyWidth/4 - dims.limbWidth/2,
+      dims.legBottom - dims.baseY,
+      -dims.limbWidth/2
     );
     const leftLegMax = new THREE.Vector3(
-      dims.playerPos.x - dims.bodyWidth/4 + dims.limbWidth/2,
-      dims.legTop,
-      dims.playerPos.z + dims.limbWidth/2
+      -dims.bodyWidth/4 + dims.limbWidth/2,
+      dims.legTop - dims.baseY,
+      dims.limbWidth/2
     );
     const leftLegHelper = createBoxHelper(leftLegMin, leftLegMax, 0x0000ff);
     
     // Right leg - purple
     const rightLegMin = new THREE.Vector3(
-      dims.playerPos.x + dims.bodyWidth/4 - dims.limbWidth/2,
-      dims.legBottom,
-      dims.playerPos.z - dims.limbWidth/2
+      dims.bodyWidth/4 - dims.limbWidth/2,
+      dims.legBottom - dims.baseY,
+      -dims.limbWidth/2
     );
     const rightLegMax = new THREE.Vector3(
-      dims.playerPos.x + dims.bodyWidth/4 + dims.limbWidth/2,
-      dims.legTop,
-      dims.playerPos.z + dims.limbWidth/2
+      dims.bodyWidth/4 + dims.limbWidth/2,
+      dims.legTop - dims.baseY,
+      dims.limbWidth/2
     );
     const rightLegHelper = createBoxHelper(rightLegMin, rightLegMax, 0x800080);
+    
+    // Add the hitzone group to the scene
+    window.scene.add(hitZoneGroup);
     
     // Store reference to debug visualization group
     playerObj._hitZoneDebug = hitZoneGroup;
     
-    // Add an update function to the player object to move the boxes with the player
+    // Update hitbox position immediately
+    this.updateHitZoneDebugPosition(playerObj);
+
+    // Add an update function to the player object
     if (!playerObj._updateHitZoneDebug) {
+      const self = this;
       playerObj._updateHitZoneDebug = function() {
         if (this._hitZoneDebug) {
-          this._hitZoneDebug.position.copy(this.group.position);
-          // Apply rotation
-          this._hitZoneDebug.rotation.y = this.group.rotation.y;
+          self.updateHitZoneDebugPosition(this);
         }
       };
       
-      // Add to the update loop
-      const originalUpdate = playerObj.update;
-      playerObj.update = function(deltaTime) {
-        // Call original update
-        originalUpdate.call(this, deltaTime);
-        // Update hit zone debug
-        if (this._updateHitZoneDebug) {
-          this._updateHitZoneDebug();
-        }
-      };
+      // Modify the player's update function to include hitbox updates
+      if (playerObj.update && typeof playerObj.update === 'function') {
+        const originalUpdate = playerObj.update;
+        playerObj.update = function(deltaTime) {
+          // Call original update
+          originalUpdate.call(this, deltaTime);
+          // Update hit zone debug
+          if (this._updateHitZoneDebug) {
+            this._updateHitZoneDebug();
+          }
+        };
+      }
+    }
+  }
+  
+  /**
+   * Updates the position of a player's hit zone debug visualization
+   * @param {object} playerObj - The player object
+   */
+  updateHitZoneDebugPosition(playerObj) {
+    if (!playerObj || !playerObj._hitZoneDebug || !playerObj.group) return;
+    
+    const hitZoneDebug = playerObj._hitZoneDebug;
+    const playerPos = playerObj.group.position.clone();
+    
+    // Adjust height based on whether this is a local (first-person) or remote player
+    let baseY = playerPos.y;
+    if (playerObj.camera) {
+      // Local player's group position is at eye level, so subtract 1.6
+      baseY = playerPos.y - 1.6;
+    }
+    
+    // Position the debug group at the player's position
+    hitZoneDebug.position.set(playerPos.x, baseY, playerPos.z);
+    
+    // Apply the player's rotation
+    if (playerObj.group.rotation) {
+      hitZoneDebug.rotation.y = playerObj.group.rotation.y;
     }
   }
   

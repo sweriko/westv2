@@ -590,17 +590,69 @@ export class Player {
   /**
    * Called when the player takes damage.
    * @param {number} amount - Damage amount.
+   * @param {string} hitZone - Hit zone ('head', 'body', 'limbs')
    */
-  takeDamage(amount) {
+  takeDamage(amount, hitZone) {
+    const previousHealth = this.health;
     this.health = Math.max(this.health - amount, 0);
-    console.log(`Player ${this.id} took ${amount} damage. Health is now ${this.health}`);
-    updateHealthUI(this);
-    // You could add death/respawn logic here
-    if (this.health === 0) {
-      console.log('Game Over');
-      // Optionally, disable input or show a Game Over screen.
-      this.respawn();
+    console.log(`Player ${this.id} took ${amount} damage in the ${hitZone || 'body'}. Health is now ${this.health}`);
+    
+    // Show damage indicator with damage amount and hit zone
+    if (typeof window.showDamageIndicator === 'function') {
+      window.showDamageIndicator(amount, hitZone);
     }
+    
+    // Update health UI
+    updateHealthUI(this);
+    
+    // Add screen flash effect based on damage amount
+    this.showDamageEffect(amount);
+    
+    // If health reached zero, handle death
+    if (previousHealth > 0 && this.health === 0) {
+      console.log('Game Over');
+      // Respawn after a delay
+      setTimeout(() => {
+        this.respawn();
+      }, 1500);
+    }
+  }
+
+  /**
+   * Shows a screen flash effect when taking damage
+   * @param {number} amount - The damage amount
+   */
+  showDamageEffect(amount) {
+    // Create a full-screen flash effect
+    const flash = document.createElement('div');
+    flash.style.position = 'absolute';
+    flash.style.top = '0';
+    flash.style.left = '0';
+    flash.style.width = '100%';
+    flash.style.height = '100%';
+    flash.style.backgroundColor = 'rgba(255, 0, 0, 0.3)';
+    flash.style.opacity = '0';
+    flash.style.transition = 'opacity 0.1s ease-in, opacity 0.4s ease-out';
+    flash.style.pointerEvents = 'none';
+    flash.style.zIndex = '900';
+    document.getElementById('game-container').appendChild(flash);
+    
+    // Adjust intensity based on damage
+    const intensity = Math.min(amount / 100, 0.8);
+    flash.style.backgroundColor = `rgba(255, 0, 0, ${intensity})`;
+    
+    // Show and fade out
+    setTimeout(() => {
+      flash.style.opacity = '1';
+      setTimeout(() => {
+        flash.style.opacity = '0';
+        setTimeout(() => {
+          if (flash.parentNode) {
+            flash.parentNode.removeChild(flash);
+          }
+        }, 400);
+      }, 100);
+    }, 0);
   }
 
   /**

@@ -293,3 +293,102 @@ body {
   font-weight: bold;
   font-style: normal;
 }
+
+/* Health counter styling */
+#health-counter {
+  position: absolute;
+  bottom: 50px;
+  right: 20px;
+  color: #4CAF50;
+  font-size: 24px;
+  background-color: rgba(0,0,0,0.5);
+  padding: 10px;
+  border-radius: 5px;
+  transition: color 0.3s ease;
+}
+
+/* Damage indicator (added dynamically) */
+#damage-indicator {
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: red;
+  font-size: 48px;
+  font-weight: bold;
+  opacity: 0;
+  text-shadow: 2px 2px 4px #000000;
+  transition: opacity 0.3s ease-in, opacity 0.5s ease-out;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+/* Different damage types */
+.damage-headshot {
+  color: #FF0000 !important;
+  font-size: 64px !important;
+}
+
+.damage-body {
+  color: #FF4500 !important;
+}
+
+.damage-limb {
+  color: #FFA500 !important;
+}
+
+/* Health bar (alternative to text) */
+#health-bar-container {
+  position: absolute;
+  bottom: 85px;
+  right: 20px;
+  width: 200px;
+  height: 20px;
+  background-color: rgba(0,0,0,0.5);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+#health-bar {
+  height: 100%;
+  width: 100%;
+  background-color: #4CAF50;
+  border-radius: 10px;
+  transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+/* Hit marker */
+.hit-marker {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(45deg);
+  pointer-events: none;
+}
+
+.hit-marker::before,
+.hit-marker::after {
+  content: '';
+  position: absolute;
+  background-color: white;
+}
+
+.hit-marker::before {
+  width: 2px;
+  height: 16px;
+  left: 7px;
+  top: 0;
+}
+
+.hit-marker::after {
+  width: 16px;
+  height: 2px;
+  left: 0;
+  top: 7px;
+}
+
+/* Headshot marker */
+.hit-marker-headshot::before,
+.hit-marker-headshot::after {
+  background-color: red;
+}

@@ -32,6 +32,9 @@ let lastTime = 0;
 let smokeRings = [];
 let maxSmokeRings = 10; // Limit to prevent performance issues
 
+// Add a flag to track debug visualization mode
+window.showHitZoneDebug = false;
+
 function init() {
   try {
     const sceneSetup = initScene();
@@ -116,17 +119,35 @@ function init() {
           physics.setDebugMode(isDebugMode);
           console.log(`Physics debug mode: ${isDebugMode ? 'ENABLED' : 'DISABLED'}`);
           
+          // Set the global debug flag
+          window.showHitZoneDebug = isDebugMode;
+          
           // If turning on debug mode, update hit zone debug for all existing players
           if (isDebugMode) {
-            // Create debug boxes for all remote players
-            for (const [playerId, remotePlayer] of remotePlayers.entries()) {
-              // Force a collision check to create debug boxes
-              const dummyBullet = new Bullet(
-                new THREE.Vector3(0, 0, 0),
-                new THREE.Vector3(0, 1, 0)
-              );
-              dummyBullet.checkPlayerHitZones(remotePlayer, new THREE.Vector3(0, 0, 0));
-            }
+            // Create debug boxes for remote players and local player with a delay
+            // (to allow for physics debug state to be fully set)
+            setTimeout(() => {
+              // First trigger hit zone debugging on the local player
+              if (localPlayer) {
+                const dummyBullet = new Bullet(
+                  new THREE.Vector3(0, 0, 0),
+                  new THREE.Vector3(0, 1, 0)
+                );
+                dummyBullet.checkPlayerHitZones(localPlayer, new THREE.Vector3(0, 0, 0));
+              }
+              
+              // Then create debug boxes for all remote players
+              for (const [playerId, remotePlayer] of remotePlayers.entries()) {
+                // Force a collision check to create debug boxes
+                const dummyBullet = new Bullet(
+                  new THREE.Vector3(0, 0, 0),
+                  new THREE.Vector3(0, 1, 0)
+                );
+                dummyBullet.checkPlayerHitZones(remotePlayer, new THREE.Vector3(0, 0, 0));
+              }
+              
+              console.log("Hit zone debug boxes created for all players");
+            }, 50);
           }
         }
       }
@@ -210,6 +231,15 @@ function init() {
     // Listen for updates to the remotePlayers map so we can refresh the master map
     multiplayerManager.onRemotePlayersUpdated = () => {
       updatePlayersMap();
+      
+      // If debug mode is on, make sure new players have hit zone debug boxes
+      if (window.showHitZoneDebug && physics && physics.debugMode) {
+        setTimeout(() => {
+          if (physics.refreshHitZoneDebug && typeof physics.refreshHitZoneDebug === 'function') {
+            physics.refreshHitZoneDebug();
+          }
+        }, 100);
+      }
     };
 
     // Start the animation loop
@@ -510,5 +540,8 @@ window.addEventListener('beforeunload', () => {
   }
   smokeRings = [];
 });
+
+// Make Bullet constructor globally available for hit zone debug creation
+window.Bullet = Bullet;
 
 init();

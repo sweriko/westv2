@@ -236,7 +236,7 @@ export class NetworkManager {
 
       // This client was hit by another player
       case 'hit':
-        console.log(`I was hit by player ${message.sourceId} in the ${message.hitZone || 'body'} for ${message.damage || 20} damage`);
+        console.log(`I was hit by player ${message.sourceId} in the ${message.hitZone || 'body'} for ${message.hitData?.damage || 20} damage`);
         if (this.onPlayerHit) {
           this.onPlayerHit(message.sourceId, message.hitData, message.health, message.hitZone);
         }
@@ -251,7 +251,8 @@ export class NetworkManager {
             message.sourceId,
             message.hitPosition,
             message.health,
-            message.hitZone
+            message.hitZone,
+            message.damage
           );
         }
         break;
@@ -441,23 +442,25 @@ export class NetworkManager {
    * Notifies the server that the player has shot their opponent in a Quick Draw duel.
    * @param {number|string} opponentId - The opponent's player ID
    * @param {number} arenaIndex - The arena index for the duel
+   * @param {string} hitZone - The hit zone ('head', 'body', 'limbs')
+   * @param {number} damage - The damage amount
    */
-  sendQuickDrawShoot(opponentId, arenaIndex) {
+  sendQuickDrawShoot(opponentId, arenaIndex, hitZone = 'body', damage = 40) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       // Anti-cheat: Add sequence number and nonce for replay protection
       this.sequenceNumber++;
       const nonce = this._generateNonce();
       
-      console.log(`Sending Quick Draw hit notification to server: player ${this.playerId} hit player ${opponentId} in arena ${arenaIndex + 1}`);
-      this.socket.send(
-        JSON.stringify({
-          type: 'quickDrawShoot',
-          sequenceNumber: this.sequenceNumber,
-          nonce: nonce,
-          opponentId: opponentId,
-          arenaIndex: arenaIndex
-        })
-      );
+      console.log(`Sending Quick Draw hit notification to server: player ${this.playerId} hit player ${opponentId} in the ${hitZone} for ${damage} damage`);
+      this.socket.send(JSON.stringify({
+        type: 'quickDrawShoot',
+        sequenceNumber: this.sequenceNumber,
+        nonce: nonce,
+        opponentId: opponentId,
+        arenaIndex: arenaIndex,
+        hitZone: hitZone,
+        damage: damage
+      }));
     }
   }
 
