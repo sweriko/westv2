@@ -5,7 +5,7 @@ import { Player } from './player.js';
 import { networkManager } from './network.js';
 import { MultiplayerManager } from './multiplayerManager.js';
 import { Bullet } from './bullet.js';
-import { createMuzzleFlash, createSmokeEffect, createShockwaveRing } from './effects.js';
+import { createMuzzleFlash, createSmokeEffect, createShockwaveRing, createImpactEffect } from './effects.js';
 import { QuickDraw } from './quickDraw.js';
 import { updateAmmoUI, updateHealthUI } from './ui.js'; // Added import for updateHealthUI
 
@@ -30,13 +30,18 @@ function init() {
     renderer = sceneSetup.renderer;
 
     const soundManager = new SoundManager();
-    soundManager.loadSound("shot1", "sounds/shot1.mp3");
+    // Load shot sounds
     soundManager.loadSound("shot2", "sounds/shot2.mp3");
+    soundManager.loadSound("shot3", "sounds/shot3.mp3");
+    soundManager.loadSound("shot5", "sounds/shot5.mp3");
     soundManager.loadSound("aimclick", "sounds/aimclick.mp3");
     soundManager.loadSound("shellejection", "sounds/shellejection.mp3");
     soundManager.loadSound("reloading", "sounds/reloading.mp3");
     // Load the bell start sound for Quick Draw start signal
     soundManager.loadSound("bellstart", "sounds/bellstart.mp3");
+    // Load impact sounds
+    soundManager.loadSound("woodimpact", "sounds/woodimpact.mp3");
+    soundManager.loadSound("fleshimpact", "sounds/fleshimpact.mp3");
     
     // Initialize multiplayer manager
     multiplayerManager = new MultiplayerManager(scene, soundManager, remotePlayers);
@@ -224,9 +229,11 @@ function spawnBullet(sourcePlayerId, position, direction) {
   createSmokeEffect(position, direction, scene);
   createShockwaveRing(position, direction, scene);
 
-  // Sound
+  // Sound: randomly choose one of the three shot sounds
   if (localPlayer.soundManager) {
-    const shotSound = Math.random() < 0.5 ? "shot1" : "shot2";
+    const shotSounds = ["shot2", "shot3", "shot5"];
+    const randomIndex = Math.floor(Math.random() * shotSounds.length);
+    const shotSound = shotSounds[randomIndex];
     localPlayer.soundManager.playSound(shotSound);
   }
 

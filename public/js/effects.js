@@ -342,6 +342,10 @@ export function createShockwaveRing(position, direction, scene) {
  *
  * The particle velocities have been reduced so that they stay near the impact point.
  *
+ * Additionally, this function now plays an impact sound:
+ * - If hitType is 'ground', "woodimpact.mp3" is played.
+ * - If hitType is 'player', "fleshimpact.mp3" is played at the impact position.
+ *
  * @param {THREE.Vector3} position - Impact position.
  * @param {THREE.Vector3} direction - Impact (bullet) direction.
  * @param {THREE.Scene} scene - The scene to add the effect.
@@ -351,6 +355,15 @@ export function createImpactEffect(position, direction, scene, hitType) {
   const effectGroup = new THREE.Group();
   effectGroup.position.copy(position);
   scene.add(effectGroup);
+  
+  // Play impact sound based on hit type using positional audio
+  if (window.localPlayer && window.localPlayer.soundManager) {
+    if (hitType === 'ground') {
+      window.localPlayer.soundManager.playSoundAt("woodimpact", position);
+    } else if (hitType === 'player') {
+      window.localPlayer.soundManager.playSoundAt("fleshimpact", position);
+    }
+  }
 
   // Choose color: red for body impacts, brown for ground.
   const color = (hitType === 'ground') ? 0x8B4513 : 0xFF0000;
