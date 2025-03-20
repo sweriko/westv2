@@ -236,21 +236,22 @@ export class NetworkManager {
 
       // This client was hit by another player
       case 'hit':
-        console.log(`I was hit by player ${message.sourceId}`);
+        console.log(`I was hit by player ${message.sourceId} in the ${message.hitZone || 'body'} for ${message.damage || 20} damage`);
         if (this.onPlayerHit) {
-          this.onPlayerHit(message.sourceId, message.hitData, message.health);
+          this.onPlayerHit(message.sourceId, message.hitData, message.health, message.hitZone);
         }
         break;
 
       // A broadcast that someone was hit
       case 'playerHit':
-        console.log(`Player ${message.targetId} was hit by player ${message.sourceId}`);
+        console.log(`Player ${message.targetId} was hit by player ${message.sourceId} in the ${message.hitZone || 'body'}`);
         if (this.onPlayerHitBroadcast) {
           this.onPlayerHitBroadcast(
             message.targetId,
             message.sourceId,
             message.hitPosition,
-            message.health
+            message.health,
+            message.hitZone
           );
         }
         break;
@@ -270,7 +271,8 @@ export class NetworkManager {
             message.bulletId, 
             message.hitType, 
             message.targetId, 
-            message.position
+            message.position,
+            message.hitZone
           );
         }
         break;
@@ -341,7 +343,7 @@ export class NetworkManager {
   /**
    * Notifies server that we hit another player.
    * @param {number|string} hitPlayerId
-   * @param {Object} hitData - { position: {x,y,z}, sourcePlayerId: ... }
+   * @param {Object} hitData - { position: {x,y,z}, sourcePlayerId: ..., hitZone: 'head'|'body'|'limbs', damage: number }
    * @param {number|string} bulletId - Optional bulletId if known
    */
   sendPlayerHit(hitPlayerId, hitData, bulletId = null) {

@@ -381,9 +381,10 @@ body {
   display: none;
 }
 
+/* Fix font loading */
 @font-face {
   font-family: 'Western';
-  src: url('https://fonts.gstatic.com/s/oldstandard/v14/MwQrbh3o1vLImiwAVvYawgcf2eVer2i0.woff2') format('woff2');
+  src: local('Georgia'), local('Times New Roman');
   font-weight: bold;
   font-style: normal;
 }
@@ -430,11 +431,16 @@ File: /public/js/bullet.js
 import { createImpactEffect } from './effects.js';
 
 /**
- * A simple bullet that checks collisions by seeing if its end position
- * is inside bounding boxes (NPC or players).
+ * A bullet class with client-side prediction and server validation.
+ * It lets the server have final authority on collisions and hits.
  */
 export class Bullet {
-  constructor(position, direction) {
+  /**
+   * @param {THREE.Vector3} position - Starting position
+   * @param {THREE.Vector3} direction - Normalized direction vector
+   * @param {string|number} bulletId - Optional server-assigned bullet ID (for remote bullets)
+   */
+  constructor(position, direction, bulletId = null) {
     this.mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.02, 8, 8),
       new THREE.MeshStandardMaterial({ color: 0xB8860B })
@@ -445,12 +451,19 @@ export class Bullet {
     this.speed = 80; // speed units/second
     this.distanceTraveled = 0;
     this.maxDistance = 100;
+    this.timeCreated = performance.now();
 
-    // Remember previous position for some rough continuous detection
+    // Remember previous position for continuous detection
     this.lastPosition = position.clone();
 
     // Track which player fired this bullet
     this.sourcePlayerId = null;
+    
+    // Anti-cheat: Server-assigned bulletId
+    this.bulletId = bulletId;
+    
+    // Anti-cheat: Track whether this bullet is local (created by local player)
+    this.isLocalBullet = true;
     
     // Add collision detection raycaster
     this.raycaster = new THREE.Raycaster(position.clone(), direction.clone(), 0, 0.1);
@@ -462,15 +475,21 @@ export class Bullet {
    */
   setSourcePlayer(playerId) {
     this.sourcePlayerId = playerId;
+    
+    // Anti-cheat: Determine if this is a local bullet
+    if (window.localPlayer) {
+      this.isLocalBullet = Number(playerId) === Number(window.localPlayer.id);
+    }
   }
 
   /**
    * Updates the bullet's movement & handles collisions with NPC or players.
-   * Uses a simpler .containsPoint() approach so it won't throw an error on r128.
+   * Uses client-side prediction with server authority.
    * @param {number} deltaTime
    * @param {THREE.Group} npc
    * @param {THREE.Scene} scene
    * @param {Map<number, object>} allPlayers - Map of local + remote players.
+   * @returns {Object} - Result of the update containing active state and hit info.
    */
   update(deltaTime, npc, scene, allPlayers) {
     // Previous position for boundary crossing detection
@@ -576,6 +595,9 @@ export class Bullet {
       }
     }
 
+    // Anti-cheat: For local bullets, collision detection is only client-side prediction
+    // For remote bullets, we rely on client-side collision for visual effects
+    
     // 1) Check collision with NPC
     if (npc) {
       const npcBox = new THREE.Box3().setFromObject(npc);
@@ -626,12 +648,12 @@ export class Bullet {
             return { active: false, hit: { type: 'arena', position: endPos } };
           }
           
-          // Notify server we hit this player
-          if (window.networkManager) {
+          // Anti-cheat: For local bullets, send hit to server and let server decide
+          if (this.isLocalBullet && window.networkManager) {
             window.networkManager.sendPlayerHit(playerId, {
               position: { x: endPos.x, y: endPos.y, z: endPos.z },
               sourcePlayerId: this.sourcePlayerId
-            });
+            }, this.bulletId);
             
             // Quick Draw duels with better logging
             if (window.quickDraw && window.quickDraw.inDuel && 
@@ -644,7 +666,8 @@ export class Bullet {
                 window.networkManager.sendQuickDrawShoot(playerId);
             }
           }
-          return { active: false, hit: { type: 'player', playerId } };
+          
+          return { active: false, hit: { type: 'player', playerId, bulletId: this.bulletId } };
         }
       }
     }
@@ -662,6 +685,27 @@ export class Bullet {
 
     // Still active
     return { active: true, hit: null };
+  }
+  
+  /**
+   * Directly handles a server-reported impact for this bullet.
+   * @param {string} hitType - Type of impact: 'player', 'npc', 'ground', 'boundary', 'arena'
+   * @param {string|number|null} targetId - ID of hit target (for player hits)
+   * @param {THREE.Vector3} position - Impact position
+   * @param {THREE.Scene} scene - Scene to add effects to
+   * @returns {Object} - Result object with active=false
+   */
+  handleServerImpact(hitType, targetId, position, scene) {
+    // Create visual effect based on hit type
+    if (position) {
+      createImpactEffect(position, this.direction, scene, hitType);
+    } else {
+      // If no position provided, use current bullet position
+      createImpactEffect(this.mesh.position, this.direction, scene, hitType);
+    }
+    
+    // Always deactivate the bullet
+    return { active: false, hit: { type: hitType, targetId, position } };
   }
 }
 
@@ -1461,6 +1505,9 @@ import { PhysicsSystem } from './physics.js';
 // Keep track of all bullets in the game, both local and remote
 let bullets = [];
 
+// Anti-cheat: Map bullets by ID for server authority
+let bulletMap = new Map(); // bulletId -> Bullet object
+
 // We'll keep references to local player, remote players, and a combined map
 let localPlayer;
 let remotePlayers = new Map();  // (playerId => ThirdPersonModel)
@@ -1586,8 +1633,49 @@ function init() {
     });
 
     // Listen for remote players shooting
-    networkManager.onPlayerShoot = (playerId, bulletData) => {
-      handleRemotePlayerShoot(playerId, bulletData);
+    networkManager.onPlayerShoot = (playerId, bulletData, bulletId) => {
+      handleRemotePlayerShoot(playerId, bulletData, bulletId);
+    };
+
+    // Anti-cheat: Listen for bullet impact notifications from server
+    networkManager.onBulletImpact = (bulletId, hitType, targetId, position) => {
+      handleBulletImpact(bulletId, hitType, targetId, position);
+    };
+
+    // Anti-cheat: Listen for position corrections from server
+    networkManager.onPositionCorrection = (correctedPosition) => {
+      if (localPlayer) {
+        // Store the server position for reconciliation
+        localPlayer.serverPosition = new THREE.Vector3(
+          correctedPosition.x,
+          correctedPosition.y,
+          correctedPosition.z
+        );
+        localPlayer.isReconciling = true;
+      }
+    };
+    
+    // Anti-cheat: Listen for server-initiated respawn
+    networkManager.onRespawn = (position, health, bullets) => {
+      if (localPlayer) {
+        // Set position
+        localPlayer.group.position.copy(position);
+        localPlayer.previousPosition.copy(position);
+        
+        // Update health and bullets
+        localPlayer.health = health || 100;
+        localPlayer.bullets = bullets || localPlayer.maxBullets;
+        
+        // Reset states
+        localPlayer.isReloading = false;
+        localPlayer.isAiming = false;
+        localPlayer.velocity.y = 0;
+        localPlayer.canAim = true;
+        
+        // Update UI
+        updateHealthUI(localPlayer);
+        updateAmmoUI(localPlayer);
+      }
     };
 
     // Listen for updates to the remotePlayers map so we can refresh the master map
@@ -1652,6 +1740,11 @@ function animate(time) {
       }
       scene.remove(bullet.mesh);
       bullets.splice(i, 1);
+      
+      // Anti-cheat: Remove from bullet map if it has an ID
+      if (bullet.bulletId !== null) {
+        bulletMap.delete(bullet.bulletId);
+      }
     }
   }
 
@@ -1669,7 +1762,7 @@ function animate(time) {
  * @param {THREE.Vector3} shootDir 
  */
 function handleLocalPlayerShoot(bulletStart, shootDir) {
-  // Spawn bullet in our local game
+  // Spawn bullet in our local game (client-side prediction)
   const bullet = spawnBullet(localPlayer.id, bulletStart, shootDir);
 
   // Send bullet data over network
@@ -1696,12 +1789,55 @@ function handleLocalPlayerShoot(bulletStart, shootDir) {
  * Called whenever a remote player fires (based on network data).
  * @param {number} playerId 
  * @param {Object} bulletData 
+ * @param {string|number} bulletId - Server-assigned bullet ID
  */
-function handleRemotePlayerShoot(playerId, bulletData) {
+function handleRemotePlayerShoot(playerId, bulletData, bulletId) {
   const startPos = new THREE.Vector3(bulletData.position.x, bulletData.position.y, bulletData.position.z);
   const dir = new THREE.Vector3(bulletData.direction.x, bulletData.direction.y, bulletData.direction.z);
 
-  spawnBullet(playerId, startPos, dir);
+  spawnBullet(playerId, startPos, dir, bulletId);
+}
+
+/**
+ * Handles a bullet impact notification from the server.
+ * @param {string|number} bulletId - The bullet ID
+ * @param {string} hitType - Type of impact (player, npc, ground, etc.)
+ * @param {string|number|null} targetId - Target ID (for player hits)
+ * @param {Object} position - Impact position {x, y, z}
+ */
+function handleBulletImpact(bulletId, hitType, targetId, position) {
+  // Convert position to THREE.Vector3 if provided
+  let impactPosition = null;
+  if (position) {
+    impactPosition = new THREE.Vector3(position.x, position.y, position.z);
+  }
+  
+  // Find the bullet in our bullet map
+  const bullet = bulletMap.get(bulletId);
+  
+  if (bullet) {
+    // Create appropriate visual effect and deactivate bullet
+    const result = bullet.handleServerImpact(hitType, targetId, impactPosition, scene);
+    
+    // Find and remove bullet from main array
+    const bulletIndex = bullets.findIndex(b => b === bullet);
+    if (bulletIndex !== -1) {
+      scene.remove(bullet.mesh);
+      bullets.splice(bulletIndex, 1);
+    }
+    
+    // Remove from bullet map
+    bulletMap.delete(bulletId);
+  } else {
+    console.log(`Bullet ${bulletId} not found for impact event`);
+    
+    // If we don't have the bullet object, still create visual effect at impact position
+    if (impactPosition) {
+      // Create a default direction vector (upward)
+      const defaultDir = new THREE.Vector3(0, 1, 0);
+      createImpactEffect(impactPosition, defaultDir, scene, hitType);
+    }
+  }
 }
 
 /**
@@ -1709,12 +1845,19 @@ function handleRemotePlayerShoot(playerId, bulletData) {
  * @param {string|number} sourcePlayerId 
  * @param {THREE.Vector3} position 
  * @param {THREE.Vector3} direction 
+ * @param {string|number} bulletId - Optional server-assigned ID (for remote bullets)
+ * @returns {Bullet} The created bullet object
  */
-function spawnBullet(sourcePlayerId, position, direction) {
-  const bullet = new Bullet(position, direction);
+function spawnBullet(sourcePlayerId, position, direction, bulletId = null) {
+  const bullet = new Bullet(position, direction, bulletId);
   bullet.setSourcePlayer(sourcePlayerId);
   bullets.push(bullet);
   scene.add(bullet.mesh);
+  
+  // Anti-cheat: Store bullet in map if it has a bulletId
+  if (bulletId !== null) {
+    bulletMap.set(bulletId, bullet);
+  }
 
   // Visual effects
   createMuzzleFlash(position, scene);
@@ -1859,7 +2002,7 @@ export class MultiplayerManager {
     // When we get the "init" message, set local player ID and add any existing players
     networkManager.onInit = (initData) => {
       this.localPlayerId = initData.id;
-      console.log(`Local player ID: ${this.localPlayerId}`);
+      console.log(`Local player initialized with ID: ${this.localPlayerId}`);
 
       // Add all existing players (these are remote from our POV)
       initData.players.forEach(playerData => {
@@ -1892,24 +2035,37 @@ export class MultiplayerManager {
 
     // We no longer handle bullets here (onPlayerShoot) – that's handled in main.js
 
-    // Player got hit (local player)
-    networkManager.onPlayerHit = (sourceId, hitData) => {
+    // Anti-cheat: Player got hit (local player) - server validated
+    networkManager.onPlayerHit = (sourceId, hitData, newHealth) => {
       console.log(`I was hit by player ${sourceId}!`);
       this.showHitFeedback();
-      // Reduce local player's health (assumes window.localPlayer is set)
-      if (window.localPlayer && typeof window.localPlayer.takeDamage === 'function') {
-         window.localPlayer.takeDamage(20);
+      
+      // Reduce local player's health (using value from server)
+      if (window.localPlayer) {
+        if (newHealth !== undefined) {
+          window.localPlayer.health = newHealth;
+        } else {
+          // Fallback to default damage amount if server didn't provide health
+          window.localPlayer.takeDamage(20);
+        }
       }
     };
 
-    // Broadcast that some player was hit (for visual effects and health updates)
-    networkManager.onPlayerHitBroadcast = (targetId, sourceId, hitPos) => {
+    // Anti-cheat: Broadcast that some player was hit (server validated)
+    networkManager.onPlayerHitBroadcast = (targetId, sourceId, hitPos, newHealth) => {
       console.log(`Player ${targetId} was hit by ${sourceId}`);
       const tPlayer = this.remotePlayers.get(parseInt(targetId));
       if (tPlayer) {
         tPlayer.showHitFeedback();
-        if (typeof tPlayer.takeDamage === 'function') {
-          tPlayer.takeDamage(20);
+        
+        // Update health directly from server value if provided
+        if (newHealth !== undefined) {
+          tPlayer.health = newHealth;
+        } else {
+          // Fallback to default damage amount
+          if (typeof tPlayer.takeDamage === 'function') {
+            tPlayer.takeDamage(20);
+          }
         }
       }
     };
@@ -1979,7 +2135,6 @@ export class MultiplayerManager {
   }
 }
 
-
 ================================================
 File: /public/js/network.js
 ================================================
@@ -2006,6 +2161,11 @@ export class NetworkManager {
     this.onClose = null;
     this.onError = null;
 
+    // Anti-cheat callbacks
+    this.onPositionCorrection = null;// When server corrects client position
+    this.onBulletImpact = null;      // When a bullet hits something
+    this.onRespawn = null;           // When player respawns
+
     // Automatic reconnect attempts
     this.connectionAttempts = 0;
     this.maxConnectionAttempts = 5;
@@ -2013,6 +2173,12 @@ export class NetworkManager {
 
     // Unique sessionId to prevent multiple tabs from colliding
     this.sessionId = this._generateSessionId();
+    
+    // Anti-cheat: Sequence number for message ordering
+    this.sequenceNumber = 0;
+    
+    // Anti-cheat: Map to track outgoing messages that need nonces
+    this.pendingMessages = new Map();
   }
 
   /**
@@ -2020,6 +2186,15 @@ export class NetworkManager {
    */
   _generateSessionId() {
     return Date.now().toString(36) + Math.random().toString(36).substring(2);
+  }
+  
+  /**
+   * Generates a unique nonce for secure actions.
+   * @returns {string} A unique nonce
+   */
+  _generateNonce() {
+    return Date.now().toString(36) + Math.random().toString(36).substring(2) + 
+           Math.random().toString(36).substring(2);
   }
 
   /**
@@ -2176,6 +2351,8 @@ export class NetworkManager {
               message.isReloading !== undefined ? message.isReloading : existing.isReloading;
             existing.quickDrawLobbyIndex =
               message.quickDrawLobbyIndex !== undefined ? message.quickDrawLobbyIndex : existing.quickDrawLobbyIndex;
+            existing.health =
+              message.health !== undefined ? message.health : existing.health;
           }
           if (this.onPlayerUpdate) {
             this.onPlayerUpdate(message.id, existing);
@@ -2186,7 +2363,7 @@ export class NetworkManager {
       // Remote player fired
       case 'playerShoot':
         if (this.onPlayerShoot) {
-          this.onPlayerShoot(message.id, message.bulletData);
+          this.onPlayerShoot(message.id, message.bulletData, message.bulletId);
         }
         break;
 
@@ -2201,7 +2378,7 @@ export class NetworkManager {
       case 'hit':
         console.log(`I was hit by player ${message.sourceId}`);
         if (this.onPlayerHit) {
-          this.onPlayerHit(message.sourceId, message.hitData);
+          this.onPlayerHit(message.sourceId, message.hitData, message.health);
         }
         break;
 
@@ -2212,8 +2389,37 @@ export class NetworkManager {
           this.onPlayerHitBroadcast(
             message.targetId,
             message.sourceId,
-            message.hitPosition
+            message.hitPosition,
+            message.health
           );
+        }
+        break;
+
+      // Anti-cheat: Server correction of client position
+      case 'positionCorrection':
+        console.log(`Received position correction:`, message.position);
+        if (this.onPositionCorrection) {
+          this.onPositionCorrection(message.position);
+        }
+        break;
+        
+      // Anti-cheat: Bullet impact notification
+      case 'bulletImpact':
+        if (this.onBulletImpact) {
+          this.onBulletImpact(
+            message.bulletId, 
+            message.hitType, 
+            message.targetId, 
+            message.position
+          );
+        }
+        break;
+        
+      // Anti-cheat: Player respawn notification
+      case 'respawn':
+        console.log(`Respawning at:`, message.position);
+        if (this.onRespawn) {
+          this.onRespawn(message.position, message.health, message.bullets);
         }
         break;
 
@@ -2234,13 +2440,17 @@ export class NetworkManager {
 
   /**
    * Sends local player position/rotation etc. to the server.
-   * @param {Object} playerData - { position, rotation, isAiming, isReloading, quickDrawLobbyIndex }
+   * @param {Object} playerData - { position, rotation, isAiming, isReloading, isSprinting, quickDrawLobbyIndex }
    */
   sendUpdate(playerData) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      // Anti-cheat: Add sequence number for message ordering
+      this.sequenceNumber++;
+      
       this.socket.send(
         JSON.stringify({
           type: 'update',
+          sequenceNumber: this.sequenceNumber,
           ...playerData
         })
       );
@@ -2253,9 +2463,15 @@ export class NetworkManager {
    */
   sendShoot(bulletData) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      // Anti-cheat: Add sequence number and nonce for replay protection
+      this.sequenceNumber++;
+      const nonce = this._generateNonce();
+      
       this.socket.send(
         JSON.stringify({
           type: 'shoot',
+          sequenceNumber: this.sequenceNumber,
+          nonce: nonce,
           bulletData
         })
       );
@@ -2266,14 +2482,39 @@ export class NetworkManager {
    * Notifies server that we hit another player.
    * @param {number|string} hitPlayerId
    * @param {Object} hitData - { position: {x,y,z}, sourcePlayerId: ... }
+   * @param {number|string} bulletId - Optional bulletId if known
    */
-  sendPlayerHit(hitPlayerId, hitData) {
+  sendPlayerHit(hitPlayerId, hitData, bulletId = null) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      // Anti-cheat: Add sequence number and nonce for replay protection
+      this.sequenceNumber++;
+      const nonce = this._generateNonce();
+      
       this.socket.send(
         JSON.stringify({
           type: 'playerHit',
+          sequenceNumber: this.sequenceNumber,
+          nonce: nonce,
           targetId: hitPlayerId,
+          bulletId: bulletId,
           hitData
+        })
+      );
+    }
+  }
+  
+  /**
+   * Notifies server that player is starting to reload.
+   */
+  sendReload() {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      // Anti-cheat: Add sequence number for message ordering
+      this.sequenceNumber++;
+      
+      this.socket.send(
+        JSON.stringify({
+          type: 'reload',
+          sequenceNumber: this.sequenceNumber
         })
       );
     }
@@ -2285,9 +2526,13 @@ export class NetworkManager {
    */
   sendQuickDrawJoin(arenaIndex) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      // Anti-cheat: Add sequence number for message ordering
+      this.sequenceNumber++;
+      
       this.socket.send(
         JSON.stringify({
           type: 'quickDrawJoin',
+          sequenceNumber: this.sequenceNumber,
           arenaIndex: arenaIndex
         })
       );
@@ -2299,9 +2544,13 @@ export class NetworkManager {
    */
   sendQuickDrawLeave() {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      // Anti-cheat: Add sequence number for message ordering
+      this.sequenceNumber++;
+      
       this.socket.send(
         JSON.stringify({
-          type: 'quickDrawLeave'
+          type: 'quickDrawLeave',
+          sequenceNumber: this.sequenceNumber
         })
       );
     }
@@ -2313,9 +2562,13 @@ export class NetworkManager {
    */
   sendQuickDrawReady(arenaIndex) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      // Anti-cheat: Add sequence number for message ordering
+      this.sequenceNumber++;
+      
       this.socket.send(
         JSON.stringify({
           type: 'quickDrawReady',
+          sequenceNumber: this.sequenceNumber,
           arenaIndex: arenaIndex
         })
       );
@@ -2329,10 +2582,16 @@ export class NetworkManager {
    */
   sendQuickDrawShoot(opponentId, arenaIndex) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      // Anti-cheat: Add sequence number and nonce for replay protection
+      this.sequenceNumber++;
+      const nonce = this._generateNonce();
+      
       console.log(`Sending Quick Draw hit notification to server: player ${this.playerId} hit player ${opponentId} in arena ${arenaIndex + 1}`);
       this.socket.send(
         JSON.stringify({
           type: 'quickDrawShoot',
+          sequenceNumber: this.sequenceNumber,
+          nonce: nonce,
           opponentId: opponentId,
           arenaIndex: arenaIndex
         })
@@ -3028,6 +3287,11 @@ export class Player {
 
     // Quick Draw lobby information
     this.quickDrawLobbyIndex = -1; // -1 means not in a lobby
+    
+    // Anti-cheat: Server reconciliation
+    this.serverPosition = new THREE.Vector3();
+    this.isReconciling = false;
+    this.reconciliationLerpFactor = 0.3; // How quickly to move to server position
 
     // Initialize network & UI
     this.initNetworking();
@@ -3070,13 +3334,56 @@ export class Player {
       this.id = initData.id;
       console.log(`Local player initialized with ID: ${this.id}`);
     };
-
-    // We also do not handle remote players here. That is done in the MultiplayerManager.
+    
+    // Anti-cheat: Handle position corrections from server
+    networkManager.onPositionCorrection = (correctedPosition) => {
+      console.log("Received position correction from server:", correctedPosition);
+      this.serverPosition.set(
+        correctedPosition.x,
+        correctedPosition.y,
+        correctedPosition.z
+      );
+      this.isReconciling = true;
+    };
+    
+    // Anti-cheat: Handle respawn from server
+    networkManager.onRespawn = (position, health, bullets) => {
+      console.log("Server-initiated respawn");
+      
+      // Set position
+      this.group.position.copy(position);
+      this.previousPosition.copy(position);
+      
+      // Update health and bullets
+      this.health = health || 100;
+      this.bullets = bullets || this.maxBullets;
+      
+      // Reset states
+      this.isReloading = false;
+      this.isAiming = false;
+      this.velocity.y = 0;
+      this.canAim = true;
+      
+      // Update UI
+      updateHealthUI(this);
+      updateAmmoUI(this);
+    };
   }
 
   update(deltaTime) {
     // Store previous position before movement for collision detection
     this.previousPosition.copy(this.group.position);
+    
+    // Anti-cheat: Handle server reconciliation
+    if (this.isReconciling) {
+      // Smoothly move to server-corrected position
+      this.group.position.lerp(this.serverPosition, this.reconciliationLerpFactor);
+      
+      // Stop reconciling when close enough
+      if (this.group.position.distanceTo(this.serverPosition) < 0.1) {
+        this.isReconciling = false;
+      }
+    }
     
     // Smoothly interpolate the gun offset & FOV
     const targetOffset = this.isAiming && this.canAim ? this.aimOffset : this.holsterOffset;
@@ -3315,6 +3622,7 @@ export class Player {
       },
       isAiming: this.isAiming,
       isReloading: this.isReloading,
+      isSprinting: this.isSprinting,
       health: this.health,
       quickDrawLobbyIndex: this.quickDrawLobbyIndex
     });
@@ -3428,6 +3736,9 @@ export class Player {
         ejectShell(this, this.scene, this.soundManager);
       }, i * 200);
     }
+    
+    // Anti-cheat: Notify server about reload start
+    networkManager.sendReload();
 
     const startTime = performance.now();
     const updateReload = (currentTime) => {
@@ -3780,7 +4091,7 @@ export class ThirdPersonModel {
   }
 
   /**
-   * Smoothly updates the model’s position and rotation toward target values.
+   * Smoothly updates the model's position and rotation toward target values.
    * @param {number} deltaTime - Time elapsed since last frame.
    */
   animateMovement(deltaTime) {
@@ -3795,31 +4106,35 @@ export class ThirdPersonModel {
    * @param {Object} playerData
    */
   update(playerData) {
+    if (!playerData) return;
+    
     // Update target position from network data (shifting from eye-level to model base)
-    const newPos = new THREE.Vector3(
-      playerData.position.x,
-      playerData.position.y - 1.6,
-      playerData.position.z
-    );
-    this.targetPosition.copy(newPos);
+    if (playerData.position) {
+      const newPos = new THREE.Vector3(
+        playerData.position.x,
+        playerData.position.y - 1.6,
+        playerData.position.z
+      );
+      this.targetPosition.copy(newPos);
+
+      // Check if walking based on movement
+      this.isWalking = newPos.distanceTo(this.lastPosition) > 0.01;
+      this.lastPosition.copy(newPos);
+    }
 
     // Update target rotation with a 180° offset for proper facing
     if (playerData.rotation && playerData.rotation.y !== undefined) {
       this.targetRotation = playerData.rotation.y + Math.PI;
     }
 
-    // Check if walking based on movement.
-    this.isWalking = newPos.distanceTo(this.lastPosition) > 0.01;
-    this.lastPosition.copy(newPos);
-
-    // Set pose based on whether the player is aiming.
+    // Set pose based on whether the player is aiming
     if (playerData.isAiming) {
       this.setAimingPose();
     } else {
       this.setNormalPose();
     }
 
-    // If reloading, play the reload animation.
+    // If reloading, play the reload animation
     if (playerData.isReloading) {
       this.playReloadAnimation();
     }
@@ -4031,10 +4346,9 @@ export class ThirdPersonModel {
   takeDamage(amount) {
     this.health = Math.max(this.health - amount, 0);
     console.log(`Remote player ${this.playerId} took ${amount} damage. Health: ${this.health}`);
-    // Optionally, you could change the model’s appearance or remove it on death.
+    // Optionally, you could change the model's appearance or remove it on death.
   }
 }
-
 
 ================================================
 File: /public/js/quickDraw.js
@@ -6569,6 +6883,32 @@ const MAX_ARENAS = 5;
 const quickDrawQueues = Array(MAX_ARENAS).fill(null).map(() => []);  // Array of queues for each arena
 const quickDrawDuels = new Map(); // Map of duelId -> { player1Id, player2Id, state, arenaIndex, ... }
 
+// Anti-cheat: Game physics constants
+const GAME_CONSTANTS = {
+  // Weapon constraints
+  BULLET_SPEED: 80,           // Bullet speed units/second
+  MAX_BULLET_DISTANCE: 100,   // Maximum distance a bullet can travel
+  WEAPON_COOLDOWN: 250,       // Minimum time between shots in ms
+  RELOAD_TIME: 4000,          // Time required to reload in ms
+  DAMAGE_PER_HIT: 20,         // Health points reduced per hit
+  // Town boundaries
+  TOWN_WIDTH: 60,             // Width of the town
+  TOWN_LENGTH: 100,           // Length of the town
+  // Physics update rate
+  PHYSICS_UPDATE_INTERVAL: 16 // ms (approx 60fps)
+};
+
+// Anti-cheat: Active bullets map
+const activeBullets = new Map(); // bulletId -> {sourcePlayerId, position, direction, timeCreated, etc}
+let nextBulletId = 1;
+
+// Anti-cheat: Timeout tracking (for rate limiting and cooldowns)
+const playerTimeouts = new Map(); // playerId -> { lastShot, lastReload, lastTeleport, etc }
+
+// Anti-cheat: Nonce tracking (for anti-replay protection)
+const playerNonces = new Map(); // playerId -> Set of used nonces
+const playerSequences = new Map(); // playerId -> last sequence number
+
 // On new connection
 wss.on('connection', (ws, req) => {
   // Parse sessionId from query string
@@ -6607,8 +6947,26 @@ wss.on('connection', (ws, req) => {
     quickDrawLobbyIndex: -1, // -1 means not in any lobby
     inQuickDrawQueue: false,
     inQuickDrawDuel: false,
-    quickDrawDuelId: null
+    quickDrawDuelId: null,
+    // Additional player state
+    bullets: 6,
+    maxBullets: 6,
+    lastUpdateTime: Date.now()
   });
+
+  // Anti-cheat: Initialize timeout tracking
+  playerTimeouts.set(playerId, {
+    lastShot: 0,
+    lastMovement: 0,
+    lastReload: 0,
+    lastPositionUpdate: 0,
+    reloadStartTime: 0,
+    isReloading: false
+  });
+
+  // Anti-cheat: Initialize nonce/sequence tracking
+  playerNonces.set(playerId, new Set());
+  playerSequences.set(playerId, 0);
 
   // Send init data to this client (their ID + existing players)
   ws.send(JSON.stringify({
@@ -6645,73 +7003,63 @@ wss.on('connection', (ws, req) => {
 
       // Update lastActivity
       const player = players.get(playerId);
-      if (player) {
-        player.lastActivity = Date.now();
+      if (!player) return;
+      
+      player.lastActivity = Date.now();
+
+      // Anti-cheat: Sequence number validation
+      if (data.sequenceNumber !== undefined) {
+        const lastSequence = playerSequences.get(playerId) || 0;
+        
+        // Reject if sequence number is not greater than the last one
+        if (data.sequenceNumber <= lastSequence) {
+          console.log(`Rejecting message with old sequence number: ${data.sequenceNumber} (last: ${lastSequence})`);
+          return sendErrorToPlayer(playerId, "Invalid sequence number", false);
+        }
+        
+        // Update the last sequence number
+        playerSequences.set(playerId, data.sequenceNumber);
+      }
+
+      // Anti-cheat: Nonce validation for critical actions
+      if ((data.type === 'shoot' || data.type === 'playerHit') && data.nonce) {
+        const playerNonceSet = playerNonces.get(playerId);
+        
+        // Check if nonce has been used before
+        if (playerNonceSet && playerNonceSet.has(data.nonce)) {
+          console.log(`Rejecting repeated nonce: ${data.nonce} from player ${playerId}`);
+          return sendErrorToPlayer(playerId, "Duplicate nonce detected", false);
+        }
+        
+        // Store the nonce
+        if (playerNonceSet) {
+          playerNonceSet.add(data.nonce);
+          
+          // Limit nonce set size to prevent memory issues
+          if (playerNonceSet.size > 1000) {
+            // Keep only the most recent 500 nonces
+            const nonceArray = Array.from(playerNonceSet);
+            const newNonceSet = new Set(nonceArray.slice(nonceArray.length - 500));
+            playerNonces.set(playerId, newNonceSet);
+          }
+        }
       }
 
       switch (data.type) {
         case 'update':
-          // Update local state (do not allow client to change health directly)
-          if (player) {
-            player.position = data.position || player.position;
-            player.rotation = data.rotation || player.rotation;
-            player.isAiming = data.isAiming !== undefined ? data.isAiming : player.isAiming;
-            player.isShooting = data.isShooting !== undefined ? data.isShooting : player.isShooting;
-            player.isReloading = data.isReloading !== undefined ? data.isReloading : player.isReloading;
-            
-            // Update QuickDraw lobby index if provided
-            if (data.quickDrawLobbyIndex !== undefined) {
-              player.quickDrawLobbyIndex = data.quickDrawLobbyIndex;
-            }
-            
-            // Broadcast to others including current health and Quick Draw info
-            broadcastToOthers(playerId, {
-              type: 'playerUpdate',
-              id: playerId,
-              position: player.position,
-              rotation: player.rotation,
-              isAiming: player.isAiming,
-              isShooting: player.isShooting,
-              isReloading: player.isReloading,
-              health: player.health,
-              quickDrawLobbyIndex: player.quickDrawLobbyIndex
-            });
-          }
+          handlePlayerUpdate(playerId, data);
           break;
 
         case 'shoot':
-          // Notify others that this player fired
-          broadcastToOthers(playerId, {
-            type: 'playerShoot',
-            id: playerId,
-            bulletData: data.bulletData
-          });
+          handlePlayerShoot(playerId, data);
           break;
 
         case 'playerHit':
-          // data.targetId, data.hitData
-          const targetId = parseInt(data.targetId);
-          console.log(`Player ${targetId} was hit by player ${playerId}`);
-          const targetPlayer = players.get(targetId);
-          if (targetPlayer && targetPlayer.ws.readyState === WebSocket.OPEN) {
-            // Reduce health by a fixed amount (e.g., 20)
-            targetPlayer.health = Math.max(targetPlayer.health - 20, 0);
-            // Inform the target
-            targetPlayer.ws.send(JSON.stringify({
-              type: 'hit',
-              sourceId: playerId,
-              hitData: data.hitData,
-              health: targetPlayer.health
-            }));
-          }
-          // Broadcast a "playerHit" to everyone with updated health
-          broadcastToAll({
-            type: 'playerHit',
-            targetId: data.targetId,
-            sourceId: playerId,
-            hitPosition: data.hitData.position,
-            health: targetPlayer ? targetPlayer.health : 0
-          });
+          handlePlayerHit(playerId, data);
+          break;
+
+        case 'reload':
+          handlePlayerReload(playerId, data);
           break;
 
         case 'ping':
@@ -6758,6 +7106,438 @@ wss.on('connection', (ws, req) => {
   updatePlayerCount();
 });
 
+// Handle player updates - removed speed/position validation
+function handlePlayerUpdate(playerId, data) {
+  const player = players.get(playerId);
+  const timeouts = playerTimeouts.get(playerId);
+  
+  if (!player || !timeouts) return;
+  
+  const now = Date.now();
+  
+  // Anti-cheat: Basic rate limit for position updates only
+  if (now - timeouts.lastPositionUpdate < 16) { // Max 60 updates per second
+    return; // Silently ignore too frequent updates
+  }
+  timeouts.lastPositionUpdate = now;
+  
+  // Update player data
+  if (data.position) {
+    player.position = data.position;
+  }
+  
+  // Update other player properties
+  player.rotation = data.rotation || player.rotation;
+  player.isAiming = data.isAiming !== undefined ? data.isAiming : player.isAiming;
+  player.isReloading = data.isReloading !== undefined ? data.isReloading : player.isReloading;
+  
+  // Update QuickDraw lobby index if provided
+  if (data.quickDrawLobbyIndex !== undefined) {
+    player.quickDrawLobbyIndex = data.quickDrawLobbyIndex;
+  }
+  
+  if (data.isSprinting !== undefined) {
+    player.isSprinting = data.isSprinting;
+  }
+  
+  // Broadcast valid update to others
+  broadcastToOthers(playerId, {
+    type: 'playerUpdate',
+    id: playerId,
+    position: player.position,
+    rotation: player.rotation,
+    isAiming: player.isAiming,
+    isShooting: player.isShooting,
+    isReloading: player.isReloading,
+    health: player.health,
+    quickDrawLobbyIndex: player.quickDrawLobbyIndex
+  });
+}
+
+// Anti-cheat: Handle player shooting with validation and server-side trajectory
+function handlePlayerShoot(playerId, data) {
+  const player = players.get(playerId);
+  const timeouts = playerTimeouts.get(playerId);
+  
+  if (!player || !timeouts) return;
+  
+  const now = Date.now();
+  
+  // Anti-cheat: Check if player has bullets
+  if (player.bullets <= 0) {
+    return sendErrorToPlayer(playerId, "Cannot shoot: out of ammo", false);
+  }
+  
+  // Anti-cheat: Check if player is reloading
+  if (player.isReloading) {
+    return sendErrorToPlayer(playerId, "Cannot shoot while reloading", false);
+  }
+  
+  // Anti-cheat: Enforce weapon cooldown
+  if (now - timeouts.lastShot < GAME_CONSTANTS.WEAPON_COOLDOWN) {
+    console.log(`Rate limit exceeded: Player ${playerId} attempted to shoot too quickly`);
+    return sendErrorToPlayer(playerId, "Shooting too fast", false);
+  }
+  
+  // Quick Draw gun lock validation
+  if (player.inQuickDrawDuel && player.quickDrawDuelId) {
+    const duel = quickDrawDuels.get(player.quickDrawDuelId);
+    if (duel && duel.state !== 'draw') {
+      return sendErrorToPlayer(playerId, "Cannot shoot before draw signal", false);
+    }
+  }
+  
+  // Validate bullet data
+  if (!data.bulletData || !data.bulletData.position || !data.bulletData.direction) {
+    return sendErrorToPlayer(playerId, "Invalid bullet data", false);
+  }
+  
+  // Validate bullet direction (must be normalized)
+  const direction = data.bulletData.direction;
+  const dirMagnitude = Math.sqrt(direction.x*direction.x + direction.y*direction.y + direction.z*direction.z);
+  
+  if (Math.abs(dirMagnitude - 1) > 0.01) {
+    console.log(`Invalid bullet direction: not normalized for player ${playerId} (magnitude: ${dirMagnitude.toFixed(2)})`);
+    
+    // Normalize the direction
+    direction.x /= dirMagnitude;
+    direction.y /= dirMagnitude;
+    direction.z /= dirMagnitude;
+  }
+  
+  // All validations passed, decrement bullet count
+  player.bullets--;
+  
+  // Update lastShot timestamp
+  timeouts.lastShot = now;
+  
+  // Create a server-side bullet
+  const bulletId = nextBulletId++;
+  
+  const bullet = {
+    id: bulletId,
+    sourcePlayerId: playerId,
+    position: data.bulletData.position,
+    direction: direction,
+    distanceTraveled: 0,
+    maxDistance: GAME_CONSTANTS.MAX_BULLET_DISTANCE,
+    speed: GAME_CONSTANTS.BULLET_SPEED,
+    timeCreated: now,
+    active: true
+  };
+  
+  // Add to active bullets
+  activeBullets.set(bulletId, bullet);
+  
+  // Notify clients of the shot
+  broadcastToAll({
+    type: 'playerShoot',
+    id: playerId,
+    bulletId: bulletId,
+    bulletData: {
+      position: data.bulletData.position,
+      direction: direction
+    }
+  });
+  
+  // Update the player's shooting state
+  player.isShooting = true;
+  
+  // Reset shooting state after a short delay
+  setTimeout(() => {
+    if (players.has(playerId)) {
+      players.get(playerId).isShooting = false;
+    }
+  }, 100);
+}
+
+// Anti-cheat: Handle player reload with validation
+function handlePlayerReload(playerId, data) {
+  const player = players.get(playerId);
+  const timeouts = playerTimeouts.get(playerId);
+  
+  if (!player || !timeouts) return;
+  
+  const now = Date.now();
+  
+  // Check if player is already reloading
+  if (player.isReloading) {
+    return sendErrorToPlayer(playerId, "Already reloading", false);
+  }
+  
+  // Check if player has full ammo
+  if (player.bullets >= player.maxBullets) {
+    return sendErrorToPlayer(playerId, "Ammo already full", false);
+  }
+  
+  // Start reload process
+  player.isReloading = true;
+  timeouts.isReloading = true;
+  timeouts.reloadStartTime = now;
+  
+  // Notify all players about reload start
+  broadcastToAll({
+    type: 'playerUpdate',
+    id: playerId,
+    isReloading: true
+  });
+  
+  // Schedule reload completion
+  setTimeout(() => {
+    if (!players.has(playerId)) return;
+    
+    const timeouts = playerTimeouts.get(playerId);
+    if (!timeouts) return;
+    
+    // Check if player is still reloading (could have been cancelled)
+    if (timeouts.isReloading) {
+      const player = players.get(playerId);
+      
+      // Complete reload
+      player.bullets = player.maxBullets;
+      player.isReloading = false;
+      timeouts.isReloading = false;
+      
+      // Notify all players about reload completion
+      broadcastToAll({
+        type: 'playerUpdate',
+        id: playerId,
+        isReloading: false,
+        bullets: player.maxBullets
+      });
+    }
+  }, GAME_CONSTANTS.RELOAD_TIME);
+}
+
+// Anti-cheat: Handle player hit validation
+function handlePlayerHit(playerId, data) {
+  if (!data.targetId) return;
+  
+  const targetId = parseInt(data.targetId);
+  const sourcePlayer = players.get(playerId);
+  const targetPlayer = players.get(targetId);
+  
+  if (!sourcePlayer || !targetPlayer) return;
+  
+  // Anti-cheat: Validate the hit using server-side bullets
+  let validHit = false;
+  let bulletId = null;
+  
+  // If bulletId is provided, validate against that specific bullet
+  if (data.bulletId) {
+    const bullet = activeBullets.get(data.bulletId);
+    if (bullet && bullet.sourcePlayerId === playerId && bullet.active) {
+      // Check if the bullet is close enough to the target
+      validHit = isPlayerHitByBullet(targetPlayer, bullet);
+      if (validHit) {
+        bulletId = data.bulletId;
+      }
+    }
+  } else {
+    // Otherwise, check all active bullets from this player
+    for (const [bid, bullet] of activeBullets.entries()) {
+      if (bullet.sourcePlayerId === playerId && bullet.active) {
+        if (isPlayerHitByBullet(targetPlayer, bullet)) {
+          validHit = true;
+          bulletId = bid;
+          break;
+        }
+      }
+    }
+  }
+  
+  // If no valid hit was found, reject the hit claim
+  if (!validHit) {
+    console.log(`Rejecting invalid hit claim from player ${playerId} on ${targetId}`);
+    return sendErrorToPlayer(playerId, "Invalid hit claim", false);
+  }
+  
+  console.log(`Player ${targetId} was hit by player ${playerId}'s bullet ${bulletId}`);
+  
+  // Mark the bullet as inactive
+  if (bulletId !== null) {
+    const bullet = activeBullets.get(bulletId);
+    if (bullet) {
+      bullet.active = false;
+    }
+  }
+  
+  // Apply hit effects: reduce health
+  targetPlayer.health = Math.max(targetPlayer.health - GAME_CONSTANTS.DAMAGE_PER_HIT, 0);
+  
+  // Inform the target
+  if (targetPlayer.ws.readyState === WebSocket.OPEN) {
+    targetPlayer.ws.send(JSON.stringify({
+      type: 'hit',
+      sourceId: playerId,
+      hitData: data.hitData,
+      health: targetPlayer.health
+    }));
+  }
+  
+  // Broadcast the hit to everyone
+  broadcastToAll({
+    type: 'playerHit',
+    targetId: targetId,
+    sourceId: playerId,
+    hitPosition: data.hitData.position,
+    health: targetPlayer.health,
+    bulletId: bulletId
+  });
+  
+  // Check for player death
+  if (targetPlayer.health <= 0) {
+    handlePlayerDeath(targetId, playerId);
+  }
+}
+
+// Anti-cheat: Bullet-player collision detection
+function isPlayerHitByBullet(player, bullet) {
+  // Calculate player hitbox (simple cylinder)
+  const playerRadius = 0.5;  // horizontal radius
+  const playerHeight = 2.0;  // vertical height
+  
+  // Calculate distance from bullet to player (horizontal only)
+  const dx = bullet.position.x - player.position.x;
+  const dz = bullet.position.z - player.position.z;
+  const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+  
+  // Check if bullet is within player's horizontal radius
+  if (horizontalDist > playerRadius) {
+    return false;
+  }
+  
+  // Check if bullet is within player's vertical bounds
+  const bulletY = bullet.position.y;
+  const playerBottom = player.position.y - 1.6; // Adjust based on your coordinate system
+  const playerTop = playerBottom + playerHeight;
+  
+  if (bulletY < playerBottom || bulletY > playerTop) {
+    return false;
+  }
+  
+  // Bullet is inside player's hitbox
+  return true;
+}
+
+// Anti-cheat: Handle player death
+function handlePlayerDeath(playerId, killedById) {
+  const player = players.get(playerId);
+  if (!player) return;
+  
+  console.log(`Player ${playerId} was killed by player ${killedById}`);
+  
+  // If player is in Quick Draw duel, end the duel
+  if (player.inQuickDrawDuel && player.quickDrawDuelId) {
+    const duel = quickDrawDuels.get(player.quickDrawDuelId);
+    if (duel) {
+      endQuickDrawDuel(player.quickDrawDuelId, killedById);
+    }
+  }
+  
+  // Respawn the player
+  respawnPlayer(playerId);
+}
+
+// Anti-cheat: Respawn a player
+function respawnPlayer(playerId) {
+  const player = players.get(playerId);
+  if (!player) return;
+  
+  // Reset player state
+  player.health = 100;
+  player.bullets = player.maxBullets;
+  player.isReloading = false;
+  player.isAiming = false;
+  player.isShooting = false;
+  
+  // Generate random spawn position within town
+  const spawnX = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_WIDTH * 0.8;
+  const spawnY = 1.6;
+  const spawnZ = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_LENGTH * 0.8;
+  
+  // Set spawn position
+  player.position = { x: spawnX, y: spawnY, z: spawnZ };
+  
+  // Reset QuickDraw-related state if not in a duel
+  if (!player.inQuickDrawDuel) {
+    player.quickDrawLobbyIndex = -1;
+  }
+  
+  // Notify the player they're respawning
+  if (player.ws.readyState === WebSocket.OPEN) {
+    player.ws.send(JSON.stringify({
+      type: 'respawn',
+      position: player.position,
+      health: player.health,
+      bullets: player.bullets
+    }));
+  }
+  
+  // Broadcast the respawn to all players
+  broadcastToAll({
+    type: 'playerUpdate',
+    id: playerId,
+    position: player.position,
+    health: player.health,
+    isReloading: false,
+    isAiming: false
+  });
+}
+
+// Anti-cheat: Check if position is within town boundaries
+function isPositionInTown(position) {
+  return (
+    position.x >= -GAME_CONSTANTS.TOWN_WIDTH / 2 &&
+    position.x <= GAME_CONSTANTS.TOWN_WIDTH / 2 &&
+    position.z >= -GAME_CONSTANTS.TOWN_LENGTH / 2 &&
+    position.z <= GAME_CONSTANTS.TOWN_LENGTH / 2
+  );
+}
+
+// Anti-cheat: Check if position is in arena
+function isPositionInArena(position, arenaIndex) {
+  // Define arena positions and radius
+  const arenaRadius = 15;
+  
+  // Calculate arena center position based on index
+  const spacingX = 50;
+  const baseZ = GAME_CONSTANTS.TOWN_LENGTH + 50;
+  
+  const offsetX = (arenaIndex - 2) * spacingX; // Center on zero, spread outward
+  const arenaCenter = { x: offsetX, y: 0, z: baseZ };
+  
+  // Check if point is inside arena (horizontally)
+  const dx = position.x - arenaCenter.x;
+  const dz = position.z - arenaCenter.z;
+  const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+  
+  return horizontalDist < arenaRadius;
+}
+
+// Anti-cheat: Send position correction to player
+function sendPositionCorrection(playerId, correctPosition) {
+  const player = players.get(playerId);
+  if (!player || player.ws.readyState !== WebSocket.OPEN) return;
+  
+  player.ws.send(JSON.stringify({
+    type: 'positionCorrection',
+    position: correctPosition
+  }));
+}
+
+// Anti-cheat: Send error message to player
+function sendErrorToPlayer(playerId, message, fatal = false) {
+  const player = players.get(playerId);
+  if (!player || player.ws.readyState !== WebSocket.OPEN) return;
+  
+  player.ws.send(JSON.stringify({
+    type: 'error',
+    message: message,
+    fatal: fatal
+  }));
+}
+
 // Cleanup a disconnected or stale player
 function cleanupPlayer(playerId) {
   const player = players.get(playerId);
@@ -6791,6 +7571,11 @@ function cleanupPlayer(playerId) {
     }
     
     players.delete(playerId);
+    
+    // Anti-cheat: Clean up associated data
+    playerTimeouts.delete(playerId);
+    playerNonces.delete(playerId);
+    playerSequences.delete(playerId);
 
     // Notify all that the player left
     broadcastToAll({
@@ -7183,6 +7968,115 @@ function endQuickDrawDuel(duelId, winnerId) {
   quickDrawDuels.delete(duelId);
 }
 
+// Anti-cheat: Server-side bullet physics update
+function updateBullets() {
+  const now = Date.now();
+  
+  // Update each active bullet
+  for (const [bulletId, bullet] of activeBullets.entries()) {
+    if (!bullet.active) continue;
+    
+    // Calculate time since last update
+    const deltaTime = (now - bullet.timeCreated) / 1000;
+    
+    // Calculate new position
+    const distanceThisFrame = bullet.speed * deltaTime;
+    bullet.position.x += bullet.direction.x * distanceThisFrame;
+    bullet.position.y += bullet.direction.y * distanceThisFrame;
+    bullet.position.z += bullet.direction.z * distanceThisFrame;
+    
+    // Update total distance traveled
+    bullet.distanceTraveled += distanceThisFrame;
+    
+    // Check if bullet has traveled too far
+    if (bullet.distanceTraveled >= bullet.maxDistance) {
+      bullet.active = false;
+      continue;
+    }
+    
+    // Check for collisions with terrain (ground or town boundary)
+    if (bullet.position.y <= 0.1) {
+      // Hit ground
+      bullet.active = false;
+      broadcastBulletImpact(bulletId, 'ground', null, bullet.position);
+      continue;
+    }
+    
+    // Check town boundaries (if not in a Quick Draw arena)
+    if (!isPositionInTown(bullet.position)) {
+      // Only check arena boundaries if source player is in a duel
+      const sourcePlayer = players.get(bullet.sourcePlayerId);
+      if (!sourcePlayer || !sourcePlayer.inQuickDrawDuel) {
+        bullet.active = false;
+        broadcastBulletImpact(bulletId, 'boundary', null, bullet.position);
+        continue;
+      }
+    }
+    
+    // Check for collisions with players
+    for (const [playerId, player] of players.entries()) {
+      // Skip collision with bullet owner
+      if (playerId === bullet.sourcePlayerId) continue;
+      
+      // Skip collisions across arena boundary
+      const bulletSourcePlayer = players.get(bullet.sourcePlayerId);
+      const targetInDuel = player.inQuickDrawDuel;
+      const sourceInDuel = bulletSourcePlayer ? bulletSourcePlayer.inQuickDrawDuel : false;
+      
+      // Only allow hits if both in same state (both in arena or both outside)
+      if (targetInDuel !== sourceInDuel) {
+        continue;
+      }
+      
+      // Check for collision
+      if (isPlayerHitByBullet(player, bullet)) {
+        bullet.active = false;
+        
+        // Handle the hit
+        player.health = Math.max(player.health - GAME_CONSTANTS.DAMAGE_PER_HIT, 0);
+        
+        // Notify the hit player
+        if (player.ws.readyState === WebSocket.OPEN) {
+          player.ws.send(JSON.stringify({
+            type: 'hit',
+            sourceId: bullet.sourcePlayerId,
+            bulletId: bulletId,
+            health: player.health
+          }));
+        }
+        
+        // Broadcast hit to all players
+        broadcastBulletImpact(bulletId, 'player', playerId, bullet.position);
+        
+        // Check for player death
+        if (player.health <= 0) {
+          handlePlayerDeath(playerId, bullet.sourcePlayerId);
+        }
+        
+        break;
+      }
+    }
+  }
+  
+  // Clean up inactive bullets
+  for (const [bulletId, bullet] of activeBullets.entries()) {
+    if (!bullet.active) {
+      activeBullets.delete(bulletId);
+    }
+  }
+}
+
+// Anti-cheat: Broadcast bullet impact to all players
+function broadcastBulletImpact(bulletId, hitType, targetId, position) {
+  broadcastToAll({
+    type: 'bulletImpact',
+    bulletId: bulletId,
+    hitType: hitType,
+    targetId: targetId,
+    position: position
+  });
+}
+
 // Heartbeat to remove stale connections
 const HEARTBEAT_INTERVAL = 30000; // 30s
 const CONNECTION_TIMEOUT = 60000; // 60s
@@ -7202,6 +8096,9 @@ setInterval(() => {
     }
   }
 }, HEARTBEAT_INTERVAL);
+
+// Anti-cheat: Run physics update loop
+setInterval(updateBullets, GAME_CONSTANTS.PHYSICS_UPDATE_INTERVAL);
 
 // Start server
 server.listen(PORT, () => {

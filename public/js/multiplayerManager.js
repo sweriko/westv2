@@ -64,35 +64,65 @@ export class MultiplayerManager {
     // We no longer handle bullets here (onPlayerShoot) – that's handled in main.js
 
     // Anti-cheat: Player got hit (local player) - server validated
-    networkManager.onPlayerHit = (sourceId, hitData, newHealth) => {
-      console.log(`I was hit by player ${sourceId}!`);
+    networkManager.onPlayerHit = (sourceId, hitData, newHealth, hitZone) => {
+      console.log(`I was hit by player ${sourceId} in the ${hitZone || 'body'}!`);
       this.showHitFeedback();
+      
+      // Play headshot sound if appropriate
+      if (hitZone === 'head' && this.soundManager) {
+        this.soundManager.playSound("headshotmarker", 100);
+      }
       
       // Reduce local player's health (using value from server)
       if (window.localPlayer) {
         if (newHealth !== undefined) {
           window.localPlayer.health = newHealth;
         } else {
-          // Fallback to default damage amount if server didn't provide health
-          window.localPlayer.takeDamage(20);
+          // Calculate damage based on hit zone if provided
+          let damage = 20; // Default damage
+          if (hitZone === 'head') {
+            damage = 100;
+          } else if (hitZone === 'body') {
+            damage = 40;
+          } else if (hitZone === 'limbs') {
+            damage = 20;
+          }
+          
+          // Apply damage
+          window.localPlayer.takeDamage(damage);
         }
       }
     };
 
     // Anti-cheat: Broadcast that some player was hit (server validated)
-    networkManager.onPlayerHitBroadcast = (targetId, sourceId, hitPos, newHealth) => {
-      console.log(`Player ${targetId} was hit by ${sourceId}`);
+    networkManager.onPlayerHitBroadcast = (targetId, sourceId, hitPos, newHealth, hitZone) => {
+      console.log(`Player ${targetId} was hit by ${sourceId} in the ${hitZone || 'body'}`);
       const tPlayer = this.remotePlayers.get(parseInt(targetId));
       if (tPlayer) {
         tPlayer.showHitFeedback();
+        
+        // Play headshot sound if appropriate
+        if (hitZone === 'head' && this.soundManager) {
+          this.soundManager.playSound("headshotmarker", 100);
+        }
         
         // Update health directly from server value if provided
         if (newHealth !== undefined) {
           tPlayer.health = newHealth;
         } else {
-          // Fallback to default damage amount
+          // Calculate damage based on hit zone if provided
+          let damage = 20; // Default damage
+          if (hitZone === 'head') {
+            damage = 100;
+          } else if (hitZone === 'body') {
+            damage = 40;
+          } else if (hitZone === 'limbs') {
+            damage = 20;
+          }
+          
+          // Apply damage
           if (typeof tPlayer.takeDamage === 'function') {
-            tPlayer.takeDamage(20);
+            tPlayer.takeDamage(damage);
           }
         }
       }

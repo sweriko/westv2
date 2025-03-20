@@ -185,44 +185,35 @@ export class Bullet {
         if (Number(playerId) === Number(this.sourcePlayerId)) continue;
         if (!playerObj || !playerObj.group) continue;
 
-        // Get player's base position for collision box.
-        // For local players (first-person), group.position is at eye-level so subtract 1.6.
-        // Remote players (third-person) have group.position at the base.
-        const playerPos = playerObj.group.position.clone();
-        let baseY = playerPos.y;
-        if (playerObj.camera) { // local player
-          baseY = playerPos.y - 1.6;
+        // Prevent hits across arena boundary
+        // Only allow hits if both players are in the same area (both in arena or both outside)
+        const bulletPlayerInArena = window.quickDraw && window.quickDraw.inDuel;
+        const targetPlayerInArena = window.quickDraw && 
+                                   window.quickDraw.duelOpponentId === Number(playerId);
+        
+        if (bulletPlayerInArena !== targetPlayerInArena) {
+          continue; // Skip collision check if players are in different areas
         }
-        const boxMin = new THREE.Vector3(
-          playerPos.x - 0.5,
-          baseY,
-          playerPos.z - 0.5
-        );
-        const boxMax = new THREE.Vector3(
-          playerPos.x + 0.5,
-          baseY + 2.0,
-          playerPos.z + 0.5
-        );
-        const playerBox = new THREE.Box3(boxMin, boxMax);
-        if (playerBox.containsPoint(endPos)) {
+        
+        // Detect which hit zone was hit (head, body, limbs)
+        const hitResult = this.checkPlayerHitZones(playerObj, endPos);
+        
+        if (hitResult.hit) {
+          // Create the impact effect
           createImpactEffect(endPos, this.direction, scene, 'player');
           
-          // Prevent hits across arena boundary
-          // Only allow hits if both players are in the same area (both in arena or both outside)
-          const bulletPlayerInArena = window.quickDraw && window.quickDraw.inDuel;
-          const targetPlayerInArena = window.quickDraw && 
-                                     window.quickDraw.duelOpponentId === Number(playerId);
-          
-          if (bulletPlayerInArena !== targetPlayerInArena) {
-            console.log("Bullet hit blocked - players in different areas");
-            return { active: false, hit: { type: 'arena', position: endPos } };
+          // Play headshot sound if it was a headshot
+          if (hitResult.zone === 'head' && window.localPlayer && window.localPlayer.soundManager) {
+            window.localPlayer.soundManager.playSound("headshotmarker", 100);
           }
           
           // Anti-cheat: For local bullets, send hit to server and let server decide
           if (this.isLocalBullet && window.networkManager) {
             window.networkManager.sendPlayerHit(playerId, {
               position: { x: endPos.x, y: endPos.y, z: endPos.z },
-              sourcePlayerId: this.sourcePlayerId
+              sourcePlayerId: this.sourcePlayerId,
+              hitZone: hitResult.zone, // Send the hit zone to the server
+              damage: hitResult.damage // Send the damage amount to the server
             }, this.bulletId);
             
             // Quick Draw duels with better logging
@@ -231,13 +222,22 @@ export class Bullet {
                 Number(playerId) === Number(window.quickDraw.duelOpponentId) && 
                 Number(this.sourcePlayerId) === Number(window.localPlayer.id)) {
                 
-                console.log('Quick Draw hit detected! Notifying server player ' + this.sourcePlayerId + ' hit player ' + playerId);
+                console.log(`Quick Draw hit detected! Player ${this.sourcePlayerId} hit player ${playerId} in the ${hitResult.zone} for ${hitResult.damage} damage`);
                 // Send special Quick Draw hit notification
                 window.networkManager.sendQuickDrawShoot(playerId);
             }
           }
           
-          return { active: false, hit: { type: 'player', playerId, bulletId: this.bulletId } };
+          return { 
+            active: false, 
+            hit: { 
+              type: 'player', 
+              playerId, 
+              bulletId: this.bulletId,
+              zone: hitResult.zone,
+              damage: hitResult.damage
+            } 
+          };
         }
       }
     }
@@ -258,6 +258,292 @@ export class Bullet {
   }
   
   /**
+   * Checks which part of the player model was hit and returns damage amount.
+   * Implements hit zones for head, body, and limbs.
+   * @param {object} playerObj - The player object to check
+   * @param {THREE.Vector3} bulletPos - The bullet position
+   * @returns {object} - Contains hit (boolean), zone (string), and damage (number)
+   */
+  checkPlayerHitZones(playerObj, bulletPos) {
+    // Get player's base position for collision box
+    // For local players (first-person), group.position is at eye-level so subtract 1.6
+    // Remote players (third-person) have group.position at the base
+    const playerPos = playerObj.group.position.clone();
+    let baseY = playerPos.y;
+    if (playerObj.camera) { // local player
+      baseY = playerPos.y - 1.6;
+    }
+    
+    // Define hit zone dimensions
+    const headSize = 0.4; // Head is a smaller target
+    const bodyWidth = 0.5;
+    const bodyHeight = 0.9;
+    const limbWidth = 0.2;
+    const limbHeight = 0.6;
+    
+    // Calculate vertical positions of each zone
+    const headBottom = baseY + 2.0 - headSize;
+    const headTop = baseY + 2.0;
+    const bodyBottom = baseY + 1.1;
+    const bodyTop = baseY + 2.0 - headSize;
+    const legBottom = baseY;
+    const legTop = baseY + 0.9;
+    const armBottom = baseY + 1.1;
+    const armTop = baseY + 1.7;
+    
+    // Create debug visualization if physics debug mode is enabled
+    if (window.physics && window.physics.debugMode && !playerObj._hitZoneDebug) {
+      this.createHitZoneDebugBoxes(playerObj, {
+        playerPos, baseY, 
+        headSize, bodyWidth, bodyHeight, limbWidth, limbHeight,
+        headBottom, headTop, bodyBottom, bodyTop, 
+        legBottom, legTop, armBottom, armTop
+      });
+    }
+    
+    // First do a quick test with the overall player bounding box
+    const overallMin = new THREE.Vector3(
+      playerPos.x - bodyWidth,
+      baseY,
+      playerPos.z - bodyWidth
+    );
+    const overallMax = new THREE.Vector3(
+      playerPos.x + bodyWidth,
+      baseY + 2.0,
+      playerPos.z + bodyWidth
+    );
+    const overallBox = new THREE.Box3(overallMin, overallMax);
+    
+    if (!overallBox.containsPoint(bulletPos)) {
+      return { hit: false, zone: null, damage: 0 };
+    }
+    
+    // Check head zone (highest damage)
+    const headMin = new THREE.Vector3(
+      playerPos.x - headSize/2,
+      headBottom,
+      playerPos.z - headSize/2
+    );
+    const headMax = new THREE.Vector3(
+      playerPos.x + headSize/2,
+      headTop,
+      playerPos.z + headSize/2
+    );
+    const headBox = new THREE.Box3(headMin, headMax);
+    
+    if (headBox.containsPoint(bulletPos)) {
+      return { hit: true, zone: 'head', damage: 100 };
+    }
+    
+    // Check body zone (medium damage)
+    const bodyMin = new THREE.Vector3(
+      playerPos.x - bodyWidth/2,
+      bodyBottom,
+      playerPos.z - bodyWidth/2
+    );
+    const bodyMax = new THREE.Vector3(
+      playerPos.x + bodyWidth/2,
+      bodyTop,
+      playerPos.z + bodyWidth/2
+    );
+    const bodyBox = new THREE.Box3(bodyMin, bodyMax);
+    
+    if (bodyBox.containsPoint(bulletPos)) {
+      return { hit: true, zone: 'body', damage: 40 };
+    }
+    
+    // Check arms (low damage, simplified to two boxes on sides)
+    // Left arm
+    const leftArmMin = new THREE.Vector3(
+      playerPos.x - bodyWidth/2 - limbWidth,
+      armBottom,
+      playerPos.z - limbWidth/2
+    );
+    const leftArmMax = new THREE.Vector3(
+      playerPos.x - bodyWidth/2,
+      armTop,
+      playerPos.z + limbWidth/2
+    );
+    const leftArmBox = new THREE.Box3(leftArmMin, leftArmMax);
+    
+    // Right arm
+    const rightArmMin = new THREE.Vector3(
+      playerPos.x + bodyWidth/2,
+      armBottom,
+      playerPos.z - limbWidth/2
+    );
+    const rightArmMax = new THREE.Vector3(
+      playerPos.x + bodyWidth/2 + limbWidth,
+      armTop,
+      playerPos.z + limbWidth/2
+    );
+    const rightArmBox = new THREE.Box3(rightArmMin, rightArmMax);
+    
+    if (leftArmBox.containsPoint(bulletPos) || rightArmBox.containsPoint(bulletPos)) {
+      return { hit: true, zone: 'limbs', damage: 20 };
+    }
+    
+    // Check legs (low damage)
+    // Left leg
+    const leftLegMin = new THREE.Vector3(
+      playerPos.x - bodyWidth/4 - limbWidth/2,
+      legBottom,
+      playerPos.z - limbWidth/2
+    );
+    const leftLegMax = new THREE.Vector3(
+      playerPos.x - bodyWidth/4 + limbWidth/2,
+      legTop,
+      playerPos.z + limbWidth/2
+    );
+    const leftLegBox = new THREE.Box3(leftLegMin, leftLegMax);
+    
+    // Right leg
+    const rightLegMin = new THREE.Vector3(
+      playerPos.x + bodyWidth/4 - limbWidth/2,
+      legBottom,
+      playerPos.z - limbWidth/2
+    );
+    const rightLegMax = new THREE.Vector3(
+      playerPos.x + bodyWidth/4 + limbWidth/2,
+      legTop,
+      playerPos.z + limbWidth/2
+    );
+    const rightLegBox = new THREE.Box3(rightLegMin, rightLegMax);
+    
+    if (leftLegBox.containsPoint(bulletPos) || rightLegBox.containsPoint(bulletPos)) {
+      return { hit: true, zone: 'limbs', damage: 20 };
+    }
+    
+    // If we reach here but hit the overall box, it's a glancing hit to the body
+    return { hit: true, zone: 'body', damage: 40 };
+  }
+  
+  /**
+   * Creates visible debug boxes for hit zones when physics debug mode is enabled
+   * @param {object} playerObj - The player object
+   * @param {object} dims - Dimensions and positions for the hit zones
+   */
+  createHitZoneDebugBoxes(playerObj, dims) {
+    // Create a group to hold all hit zone visualizations
+    if (!window.scene) return;
+    
+    const hitZoneGroup = new THREE.Group();
+    hitZoneGroup.name = "hitZoneDebug_" + playerObj.id;
+    window.scene.add(hitZoneGroup);
+    
+    // Create helper function to make box helpers
+    const createBoxHelper = (min, max, color) => {
+      const box = new THREE.Box3(min, max);
+      const helper = new THREE.Box3Helper(box, color);
+      hitZoneGroup.add(helper);
+      return { box, helper };
+    };
+    
+    // Head zone - red
+    const headMin = new THREE.Vector3(
+      dims.playerPos.x - dims.headSize/2,
+      dims.headBottom,
+      dims.playerPos.z - dims.headSize/2
+    );
+    const headMax = new THREE.Vector3(
+      dims.playerPos.x + dims.headSize/2,
+      dims.headTop,
+      dims.playerPos.z + dims.headSize/2
+    );
+    const headHelper = createBoxHelper(headMin, headMax, 0xff0000);
+    
+    // Body zone - orange
+    const bodyMin = new THREE.Vector3(
+      dims.playerPos.x - dims.bodyWidth/2,
+      dims.bodyBottom,
+      dims.playerPos.z - dims.bodyWidth/2
+    );
+    const bodyMax = new THREE.Vector3(
+      dims.playerPos.x + dims.bodyWidth/2,
+      dims.bodyTop,
+      dims.playerPos.z + dims.bodyWidth/2
+    );
+    const bodyHelper = createBoxHelper(bodyMin, bodyMax, 0xff7700);
+    
+    // Left arm - yellow
+    const leftArmMin = new THREE.Vector3(
+      dims.playerPos.x - dims.bodyWidth/2 - dims.limbWidth,
+      dims.armBottom,
+      dims.playerPos.z - dims.limbWidth/2
+    );
+    const leftArmMax = new THREE.Vector3(
+      dims.playerPos.x - dims.bodyWidth/2,
+      dims.armTop,
+      dims.playerPos.z + dims.limbWidth/2
+    );
+    const leftArmHelper = createBoxHelper(leftArmMin, leftArmMax, 0xffff00);
+    
+    // Right arm - green
+    const rightArmMin = new THREE.Vector3(
+      dims.playerPos.x + dims.bodyWidth/2,
+      dims.armBottom,
+      dims.playerPos.z - dims.limbWidth/2
+    );
+    const rightArmMax = new THREE.Vector3(
+      dims.playerPos.x + dims.bodyWidth/2 + dims.limbWidth,
+      dims.armTop,
+      dims.playerPos.z + dims.limbWidth/2
+    );
+    const rightArmHelper = createBoxHelper(rightArmMin, rightArmMax, 0x00ff00);
+    
+    // Left leg - blue
+    const leftLegMin = new THREE.Vector3(
+      dims.playerPos.x - dims.bodyWidth/4 - dims.limbWidth/2,
+      dims.legBottom,
+      dims.playerPos.z - dims.limbWidth/2
+    );
+    const leftLegMax = new THREE.Vector3(
+      dims.playerPos.x - dims.bodyWidth/4 + dims.limbWidth/2,
+      dims.legTop,
+      dims.playerPos.z + dims.limbWidth/2
+    );
+    const leftLegHelper = createBoxHelper(leftLegMin, leftLegMax, 0x0000ff);
+    
+    // Right leg - purple
+    const rightLegMin = new THREE.Vector3(
+      dims.playerPos.x + dims.bodyWidth/4 - dims.limbWidth/2,
+      dims.legBottom,
+      dims.playerPos.z - dims.limbWidth/2
+    );
+    const rightLegMax = new THREE.Vector3(
+      dims.playerPos.x + dims.bodyWidth/4 + dims.limbWidth/2,
+      dims.legTop,
+      dims.playerPos.z + dims.limbWidth/2
+    );
+    const rightLegHelper = createBoxHelper(rightLegMin, rightLegMax, 0x800080);
+    
+    // Store reference to debug visualization group
+    playerObj._hitZoneDebug = hitZoneGroup;
+    
+    // Add an update function to the player object to move the boxes with the player
+    if (!playerObj._updateHitZoneDebug) {
+      playerObj._updateHitZoneDebug = function() {
+        if (this._hitZoneDebug) {
+          this._hitZoneDebug.position.copy(this.group.position);
+          // Apply rotation
+          this._hitZoneDebug.rotation.y = this.group.rotation.y;
+        }
+      };
+      
+      // Add to the update loop
+      const originalUpdate = playerObj.update;
+      playerObj.update = function(deltaTime) {
+        // Call original update
+        originalUpdate.call(this, deltaTime);
+        // Update hit zone debug
+        if (this._updateHitZoneDebug) {
+          this._updateHitZoneDebug();
+        }
+      };
+    }
+  }
+  
+  /**
    * Directly handles a server-reported impact for this bullet.
    * @param {string} hitType - Type of impact: 'player', 'npc', 'ground', 'boundary', 'arena'
    * @param {string|number|null} targetId - ID of hit target (for player hits)
@@ -269,6 +555,14 @@ export class Bullet {
     // Create visual effect based on hit type
     if (position) {
       createImpactEffect(position, this.direction, scene, hitType);
+      
+      // Play headshot sound if the server reports it was a headshot
+      if (hitType === 'player' && window.localPlayer && window.localPlayer.soundManager) {
+        // If hitZone data is available and it's a headshot
+        if (this.lastHitZone === 'head') {
+          window.localPlayer.soundManager.playSound("headshotmarker", 100);
+        }
+      }
     } else {
       // If no position provided, use current bullet position
       createImpactEffect(this.mesh.position, this.direction, scene, hitType);
@@ -276,5 +570,13 @@ export class Bullet {
     
     // Always deactivate the bullet
     return { active: false, hit: { type: hitType, targetId, position } };
+  }
+  
+  /**
+   * Sets the last hit zone information for this bullet (for server validation)
+   * @param {string} zone - The hit zone ('head', 'body', 'limbs')
+   */
+  setLastHitZone(zone) {
+    this.lastHitZone = zone;
   }
 }

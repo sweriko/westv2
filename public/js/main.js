@@ -52,6 +52,14 @@ function init() {
     soundManager.loadSound("woodimpact", "sounds/woodimpact.mp3");
     soundManager.loadSound("fleshimpact", "sounds/fleshimpact.mp3");
     
+    // Load footstep and jump sounds
+    soundManager.loadSound("leftstep", "sounds/leftstep.mp3");
+    soundManager.loadSound("rightstep", "sounds/rightstep.mp3");
+    soundManager.loadSound("jump", "sounds/jump.mp3");
+    
+    // Load headshot marker sound
+    soundManager.loadSound("headshotmarker", "sounds/headshotmarker.mp3");
+    
     // Initialize physics system
     physics = new PhysicsSystem();
     window.physics = physics; // Make physics globally accessible
@@ -107,6 +115,19 @@ function init() {
           const isDebugMode = !physics.debugMode;
           physics.setDebugMode(isDebugMode);
           console.log(`Physics debug mode: ${isDebugMode ? 'ENABLED' : 'DISABLED'}`);
+          
+          // If turning on debug mode, update hit zone debug for all existing players
+          if (isDebugMode) {
+            // Create debug boxes for all remote players
+            for (const [playerId, remotePlayer] of remotePlayers.entries()) {
+              // Force a collision check to create debug boxes
+              const dummyBullet = new Bullet(
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(0, 1, 0)
+              );
+              dummyBullet.checkPlayerHitZones(remotePlayer, new THREE.Vector3(0, 0, 0));
+            }
+          }
         }
       }
     });
@@ -146,8 +167,8 @@ function init() {
     };
 
     // Anti-cheat: Listen for bullet impact notifications from server
-    networkManager.onBulletImpact = (bulletId, hitType, targetId, position) => {
-      handleBulletImpact(bulletId, hitType, targetId, position);
+    networkManager.onBulletImpact = (bulletId, hitType, targetId, position, hitZone) => {
+      handleBulletImpact(bulletId, hitType, targetId, position, hitZone);
     };
 
     // Anti-cheat: Listen for position corrections from server
@@ -244,7 +265,12 @@ function animate(time) {
     if (!result.active) {
       // If bullet hit something or traveled too far
       if (result.hit && result.hit.type === 'player') {
-        console.log(`Bullet hit player ${result.hit.playerId}`);
+        console.log(`Bullet hit player ${result.hit.playerId} in the ${result.hit.zone || 'body'} for ${result.hit.damage || 'unknown'} damage`);
+        
+        // Set the last hit zone for server validation
+        if (bullet.bulletId !== null && result.hit.zone) {
+          bullet.setLastHitZone(result.hit.zone);
+        }
       }
       scene.remove(bullet.mesh);
       bullets.splice(i, 1);
@@ -312,8 +338,9 @@ function handleRemotePlayerShoot(playerId, bulletData, bulletId) {
  * @param {string} hitType - Type of impact (player, npc, ground, etc.)
  * @param {string|number|null} targetId - Target ID (for player hits)
  * @param {Object} position - Impact position {x, y, z}
+ * @param {string} hitZone - Hit zone (head, body, limbs)
  */
-function handleBulletImpact(bulletId, hitType, targetId, position) {
+function handleBulletImpact(bulletId, hitType, targetId, position, hitZone) {
   // Convert position to THREE.Vector3 if provided
   let impactPosition = null;
   if (position) {
@@ -324,6 +351,11 @@ function handleBulletImpact(bulletId, hitType, targetId, position) {
   const bullet = bulletMap.get(bulletId);
   
   if (bullet) {
+    // Store hit zone information for potential headshot sound
+    if (hitZone) {
+      bullet.setLastHitZone(hitZone);
+    }
+    
     // Create appropriate visual effect and deactivate bullet
     const result = bullet.handleServerImpact(hitType, targetId, impactPosition, scene);
     
@@ -344,6 +376,11 @@ function handleBulletImpact(bulletId, hitType, targetId, position) {
       // Create a default direction vector (upward)
       const defaultDir = new THREE.Vector3(0, 1, 0);
       createImpactEffect(impactPosition, defaultDir, scene, hitType);
+      
+      // Play headshot sound if it was a headshot
+      if (hitZone === 'head' && localPlayer && localPlayer.soundManager) {
+        localPlayer.soundManager.playSound("headshotmarker", 100);
+      }
     }
   }
 }
@@ -444,7 +481,8 @@ function showGameInstructions() {
     <p>P: Toggle physics debug visualization</p>
     <p><strong>Click anywhere to start</strong></p>
     <p><strong>New:</strong> Find the Quick Draw portal near spawn to duel other players!</p>
-    <p><strong>Town Boundary:</strong> You must stay within the town limits and can only access the duel arena through the portal.</p>`;
+    <p><strong>Town Boundary:</strong> You must stay within the town limits and can only access the duel arena through the portal.</p>
+    <p><strong>Hit Zones:</strong> Headshots deal 100 damage, body shots 40, and limb shots 20.</p>`;
   
   document.getElementById('game-container').appendChild(instructions);
   

@@ -98,6 +98,20 @@ export class Player {
     this.isReconciling = false;
     this.reconciliationLerpFactor = 0.3; // How quickly to move to server position
 
+    // Footstep sound system
+    this.lastFootstepTime = 0; // Time of last footstep sound
+    this.footstepInterval = 0.5; // Base interval in seconds between steps
+    this.isLeftFoot = true; // Track which foot is next
+    this.isMovingLastFrame = false; // Track if player was moving in the last frame
+    this.isJumping = false; // Track jumping state
+    
+    // Hit zones for damage calculations
+    this.hitZones = {
+      head: { damage: 100 },
+      body: { damage: 40 },
+      limbs: { damage: 20 }
+    };
+    
     // Initialize network & UI
     this.initNetworking();
     updateAmmoUI(this);
@@ -223,11 +237,30 @@ export class Player {
 
     // Gravity
     this.velocity.y -= 20 * deltaTime;
+    
+    // Check if player is jumping
+    const wasOnGround = this.canJump;
+    const isJumping = this.velocity.y > 0 && !this.canJump;
+    
+    // Store the previous jumping state to detect when we first start jumping
+    const wasJumping = this.isJumping || false;
+    this.isJumping = isJumping;
+    
     this.group.position.y += this.velocity.y * deltaTime;
     if (this.group.position.y < 1.6) {
+      // Player landed
+      if (this.velocity.y < -3 && !wasOnGround) {
+        // Play landing sound if falling fast enough
+        if (this.soundManager) {
+          // Use regular footstep sound for landing, but play it directly for reliability
+          this.soundManager.playSound("leftstep", 0, 1.2);
+        }
+      }
+      
       this.velocity.y = 0;
       this.group.position.y = 1.6;
       this.canJump = true;
+      this.isJumping = false;
     }
 
     // Movement - now with sprint capability
@@ -240,6 +273,9 @@ export class Player {
     const right = new THREE.Vector3();
     right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
 
+    // Store position before movement to check if we actually moved
+    const positionBeforeMovement = this.group.position.clone();
+    
     // Calculate new position based on movement input
     const newPosition = this.group.position.clone();
     
@@ -272,6 +308,14 @@ export class Player {
         }
       }
     }
+    
+    // Footstep sounds logic
+    this.updateFootstepSounds(deltaTime, positionBeforeMovement);
+    
+    // Handle jump sound - only play when we first start jumping (not previously jumping)
+    if (isJumping && !wasJumping && this.soundManager) {
+      this.soundManager.playSound("jump", 300); // Play jump sound with 300ms cooldown
+    }
 
     // Send periodic network updates
     const now = performance.now();
@@ -279,6 +323,72 @@ export class Player {
       this.lastNetworkUpdate = now;
       this.sendNetworkUpdate();
     }
+  }
+
+  /**
+   * Update footstep sounds based on movement
+   * @param {number} deltaTime - Time elapsed since last frame
+   * @param {THREE.Vector3} previousPosition - Position before movement this frame
+   */
+  updateFootstepSounds(deltaTime, previousPosition) {
+    // Only play footstep sounds if we're on the ground and actually moving
+    const isMovingNow = this.isMoving() && this.canJump;
+    
+    // Calculate how far we've moved this frame
+    const distanceMoved = this.group.position.distanceTo(previousPosition);
+    
+    // Skip if not moving or not on ground
+    if (!isMovingNow || distanceMoved < 0.001) {
+      this.isMovingLastFrame = false;
+      return;
+    }
+    
+    // Calculate the appropriate footstep interval based on speed
+    let currentInterval = this.footstepInterval;
+    if (this.isSprinting) {
+      currentInterval = 0.3; // Faster steps when sprinting
+    } else {
+      currentInterval = 0.5; // Normal walking pace
+    }
+    
+    // Accumulate time since last footstep
+    this.lastFootstepTime += deltaTime;
+    
+    // Check if it's time for a footstep sound
+    if (this.lastFootstepTime >= currentInterval) {
+      // Reset the timer, with a small random variation for naturalness
+      this.lastFootstepTime = -0.05 + Math.random() * 0.1;
+      
+      // Determine which foot and play the appropriate sound
+      if (this.soundManager) {
+        // Temporary debug log
+        console.log(`Playing ${this.isLeftFoot ? 'left' : 'right'} footstep`);
+        
+        // Use direct sound play instead of positional audio for now
+        this.soundManager.playSound(
+          this.isLeftFoot ? 'leftstep' : 'rightstep',
+          0, // No cooldown
+          this.isSprinting ? 1.2 : 0.8 // Adjust volume based on speed
+        );
+        
+        // Try positional audio as fallback
+        try {
+          this.soundManager.playSoundAt(
+            this.isLeftFoot ? 'leftstep' : 'rightstep',
+            this.group.position,
+            0, // No cooldown
+            this.isSprinting ? 1.2 : 0.8 // Adjust volume based on speed
+          );
+        } catch (err) {
+          console.log("Fallback to positional audio failed:", err);
+        }
+      }
+      
+      // Switch feet for next step
+      this.isLeftFoot = !this.isLeftFoot;
+    }
+    
+    this.isMovingLastFrame = true;
   }
 
   /**
