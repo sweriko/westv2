@@ -15,6 +15,38 @@ export class QuickDraw {
         this.networkManager = networkManager;
         this.soundManager = soundManager;
         
+        // Detect mobile devices if not already set
+        if (window.isMobileDevice === undefined) {
+            window.isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        }
+        
+        // Initialize mouse tracking for right-click detection
+        if (!window.mouseDown) {
+            window.mouseDown = { left: false, right: false };
+            
+            document.addEventListener('mousedown', (event) => {
+                if (event.button === 0) {
+                    window.mouseDown.left = true;
+                } else if (event.button === 2) {
+                    window.mouseDown.right = true;
+                }
+            });
+            
+            document.addEventListener('mouseup', (event) => {
+                if (event.button === 0) {
+                    window.mouseDown.left = false;
+                } else if (event.button === 2) {
+                    window.mouseDown.right = false;
+                }
+            });
+            
+            // Also track when pointer leaves window
+            document.addEventListener('pointerleave', () => {
+                window.mouseDown.left = false;
+                window.mouseDown.right = false;
+            });
+        }
+        
         // Game state
         this.inLobby = false;
         this.inDuel = false;
@@ -748,20 +780,6 @@ export class QuickDraw {
      * @param {THREE.Group} duelArea - The duel area group to add the marker to
      */
     createArenaMarker(center, arenaIndex, duelArea) {
-        // Create a standalone sign post
-        const postGeometry = new THREE.CylinderGeometry(0.1, 0.1, 2, 8);
-        const woodMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
-        const post = new THREE.Mesh(postGeometry, woodMaterial);
-        post.position.set(center.x, 1, center.z);
-        duelArea.add(post);
-        
-        // Create a sign with the arena number
-        const signGeometry = new THREE.BoxGeometry(1, 0.7, 0.1);
-        const signMaterial = new THREE.MeshStandardMaterial({ color: 0xA0522D });
-        const sign = new THREE.Mesh(signGeometry, signMaterial);
-        sign.position.set(center.x, 1.8, center.z);
-        duelArea.add(sign);
-        
         // Create a texture for the text
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
@@ -776,15 +794,18 @@ export class QuickDraw {
         const texture = new THREE.CanvasTexture(canvas);
         texture.needsUpdate = true;
         
-        // Apply texture to a plane in front of the sign
-        const textGeometry = new THREE.PlaneGeometry(0.8, 0.5);
+        // Create a floating arena number with transparent background
+        const textGeometry = new THREE.PlaneGeometry(1, 0.6);
         const textMaterial = new THREE.MeshBasicMaterial({
             map: texture,
             transparent: true,
             side: THREE.DoubleSide
         });
         const textMesh = new THREE.Mesh(textGeometry, textMaterial);
-        textMesh.position.set(center.x, 1.8, center.z + 0.06);
+        
+        // Position the text at ground level with a slight angle for visibility
+        textMesh.position.set(center.x, 0.3, center.z);
+        textMesh.rotation.x = -Math.PI / 2; // Flat on ground
         duelArea.add(textMesh);
     }
     
@@ -1135,17 +1156,34 @@ export class QuickDraw {
         }
         
         // If in countdown phase, check for early aiming
-        if (this.inDuel && this.duelState === 'countdown') {
-            if (this.localPlayer.isAiming && !this.gunLocked) {
+        if (this.inDuel && (this.duelState === 'countdown' || this.duelState === 'ready')) {
+            // Check if player is trying to aim or if right mouse is pressed
+            if ((this.localPlayer.isAiming || (window.mouseDown && window.mouseDown.right)) && !this.gunLocked) {
                 this.penalizeEarlyDraw();
+                // Force isAiming to false to prevent multiple penalties
+                this.localPlayer.isAiming = false;
+                // Ensure the gun is not visible
+                if (this.localPlayer.revolver && this.localPlayer.revolver.group) {
+                    this.localPlayer.revolver.group.visible = false;
+                }
             }
         }
         
-        // Enforce penalty lock regardless of duel state if penalty is active
-        if (performance.now() < this.penaltyEndTime) {
+        // Enforce penalty lock or re-enable aiming based on penalty status
+        const currentTime = performance.now();
+        if (currentTime < this.penaltyEndTime) {
+            // Penalty is active - keep gun locked
             this.localPlayer.canAim = false;
             this.localPlayer.isAiming = false;
-            this.localPlayer.revolver.group.visible = false;
+            if (this.localPlayer.revolver && this.localPlayer.revolver.group) {
+                this.localPlayer.revolver.group.visible = false;
+            }
+        } else if (this.penaltyEndTime > 0 && currentTime >= this.penaltyEndTime && this.duelState === 'draw') {
+            // Penalty just expired and we're in the draw phase - re-enable aiming
+            this.localPlayer.canAim = this.originalCanAim;
+            this.penaltyEndTime = 0; // Clear the penalty end time
+            this.gunLocked = false;
+            console.log("Penalty expired during update, gun unlocked");
         }
         
         // Update portal instruction visibility
@@ -1292,8 +1330,56 @@ export class QuickDraw {
     showReadyMessage() {
         this.duelState = 'ready';
         this.updateStatusIndicator();
+        
+        // For iOS/Safari and mobile devices - create a fixed fullscreen message
+        if (window.isMobileDevice || /iPad|iPhone|iPod/.test(navigator.userAgent)) {
+            // Create iOS-friendly fullscreen overlay for READY message
+            const readyOverlay = document.createElement('div');
+            readyOverlay.style.position = 'fixed';
+            readyOverlay.style.top = '0';
+            readyOverlay.style.left = '0';
+            readyOverlay.style.width = '100%';
+            readyOverlay.style.height = '100%';
+            readyOverlay.style.display = 'flex';
+            readyOverlay.style.alignItems = 'center';
+            readyOverlay.style.justifyContent = 'center';
+            readyOverlay.style.backgroundColor = 'rgba(255, 193, 7, 0.3)';
+            readyOverlay.style.zIndex = '9999';
+            
+            // Create text element inside the overlay
+            const readyText = document.createElement('div');
+            readyText.textContent = 'READY?';
+            readyText.style.fontSize = '120px';
+            readyText.style.fontWeight = 'bold';
+            readyText.style.fontFamily = 'Arial, sans-serif';
+            readyText.style.color = 'white';
+            readyText.style.textShadow = '0 0 20px #FFC107, 0 0 40px #FFC107';
+            
+            readyOverlay.appendChild(readyText);
+            document.body.appendChild(readyOverlay);
+            
+            // Use a simple animation for better visibility
+            setTimeout(() => {
+                readyText.style.transition = 'transform 0.2s ease-in-out';
+                readyText.style.transform = 'scale(1.2)';
+                setTimeout(() => {
+                    readyText.style.transform = 'scale(1)';
+                }, 200);
+            }, 100);
+            
+            // Remove overlay after 1 second
+            setTimeout(() => {
+                if (readyOverlay.parentNode) {
+                    readyOverlay.parentNode.removeChild(readyOverlay);
+                }
+            }, 1000);
+        }
+        
+        // Also show in standard message overlay as backup
         this.messageOverlay.textContent = 'READY?';
         this.messageOverlay.style.display = 'block';
+        
+        // Enhanced styling for desktop
         this.messageOverlay.style.fontSize = '64px';
         this.messageOverlay.style.color = '#FFFFFF';
         
@@ -1336,11 +1422,49 @@ export class QuickDraw {
         this.duelState = 'draw';
         this.updateStatusIndicator();
         
+        // Show the message
+        this.showMessage('DRAW!', 1000);
+        
+        // Add CSS classes for the animation
+        document.getElementById('game-container').insertAdjacentHTML('beforeend', `
+            <style>
+                .draw-circle-animation {
+                    animation: draw-circle 0.4s ease-out !important;
+                }
+                
+                .draw-circle-animation-mobile {
+                    animation: draw-circle-mobile 0.4s ease-out !important;
+                }
+                
+                @keyframes draw-circle {
+                    0% { transform: translate(-50%, -50%) scale(0.1); opacity: 0; }
+                    50% { opacity: 1; }
+                    100% { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+                }
+                
+                @keyframes draw-circle-mobile {
+                    0% { transform: translate(-50%, -50%) scale(0.1); opacity: 0; }
+                    50% { opacity: 1; }
+                    100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+                }
+            </style>
+        `);
+        
         // Show animated circle with CSS animation
         this.drawCircle.style.display = 'block';
+        this.drawCircle.style.opacity = '1';
         
-        // Apply optimized effects based on device
-        createOptimizedSmokeEffect(this.drawCircle);
+        // Apply different animations based on device type
+        if (window.isMobileDevice) {
+            // Mobile animation - make the circle bigger and more visible
+            this.drawCircle.style.width = '500px';
+            this.drawCircle.style.height = '500px';
+            this.drawCircle.style.border = '15px solid #FF0000';
+            this.drawCircle.style.boxShadow = '0 0 30px #FF0000';
+            this.drawCircle.classList.add('draw-circle-animation-mobile');
+        } else {
+            this.drawCircle.classList.add('draw-circle-animation');
+        }
         
         // Only enable aiming if the penalty period has expired.
         if (performance.now() >= this.penaltyEndTime) {
@@ -1351,7 +1475,7 @@ export class QuickDraw {
         
         console.log('DRAW signal triggered - players can now shoot (if not penalized)');
         
-        // Play bell start sound instead of a gunshot
+        // Play bell start sound
         if (this.soundManager) {
             this.soundManager.playSound("bellstart");
         }
@@ -1375,7 +1499,55 @@ export class QuickDraw {
         this.gunLocked = true;
         this.penaltyEndTime = performance.now() + 3000;
         
-        // Show the message with a warning style
+        // Create a fullscreen warning overlay for all devices
+        const penaltyFullscreen = document.createElement('div');
+        penaltyFullscreen.style.position = 'fixed';
+        penaltyFullscreen.style.top = '0';
+        penaltyFullscreen.style.left = '0';
+        penaltyFullscreen.style.width = '100%';
+        penaltyFullscreen.style.height = '100%';
+        penaltyFullscreen.style.backgroundColor = 'rgba(255, 0, 0, 0.4)';
+        penaltyFullscreen.style.display = 'flex';
+        penaltyFullscreen.style.alignItems = 'center';
+        penaltyFullscreen.style.justifyContent = 'center';
+        penaltyFullscreen.style.zIndex = '9999';
+        
+        // Create text element inside the overlay
+        const warningText = document.createElement('div');
+        warningText.textContent = 'TOO EARLY!';
+        warningText.style.fontWeight = 'bold';
+        warningText.style.fontFamily = 'Arial, sans-serif';
+        warningText.style.color = 'white';
+        
+        // Different styles for mobile vs desktop
+        if (window.isMobileDevice || /iPad|iPhone|iPod/.test(navigator.userAgent)) {
+            warningText.style.fontSize = '100px';
+            warningText.style.textShadow = '0 0 20px #FF0000, 0 0 40px #FF0000';
+        } else {
+            warningText.style.fontSize = '80px';
+            warningText.style.textShadow = '0 0 15px #FF0000, 0 0 30px #FF0000';
+        }
+        
+        penaltyFullscreen.appendChild(warningText);
+        document.body.appendChild(penaltyFullscreen);
+        
+        // Countdown timer for fullscreen overlay
+        let secondsLeft = 3;
+        const updateCountdown = () => {
+            secondsLeft--;
+            if (secondsLeft > 0) {
+                warningText.textContent = `TOO EARLY! (${secondsLeft}s)`;
+                setTimeout(updateCountdown, 1000);
+            } else {
+                // Remove overlay when time's up
+                if (penaltyFullscreen.parentNode) {
+                    penaltyFullscreen.parentNode.removeChild(penaltyFullscreen);
+                }
+            }
+        };
+        setTimeout(updateCountdown, 1000);
+        
+        // Show the message with a warning style (backup for all devices)
         this.showMessage('TOO EARLY!', 3000);
         this.messageOverlay.classList.add('gun-locked-warning');
         
@@ -1416,22 +1588,17 @@ export class QuickDraw {
             this.soundManager.playSound("aimclick");
         }
         
-        // Countdown timer text update
-        let secondsLeft = 3;
-        const updateCountdown = () => {
-            this.messageOverlay.textContent = `TOO EARLY! Gun locked (${secondsLeft}s)`;
-            secondsLeft--;
-            
-            if (secondsLeft >= 0) {
-                this.penaltyTimer = setTimeout(updateCountdown, 1000);
-            }
-        };
-        updateCountdown();
-        
         // After 3 seconds, clear the penalty
         setTimeout(() => {
             this.gunLocked = false;
             this.penaltyEndTime = 0;
+            
+            // Re-enable aiming if the duel is in the "draw" phase
+            if (this.duelState === 'draw') {
+                this.localPlayer.canAim = this.originalCanAim;
+                console.log("Penalty expired, gun unlocked.");
+            }
+            
             this.hideMessage();
             this.messageOverlay.classList.remove('gun-locked-warning');
         }, 3000);
@@ -1442,11 +1609,58 @@ export class QuickDraw {
      */
     endDuel(winnerId) {
         const isWinner = winnerId === this.localPlayer.id;
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
         
-        // Show winner/loser message with dramatic styling
+        // Create a fullscreen overlay specifically for iOS devices
+        if (isIOS || window.isMobileDevice) {
+            // Create iOS-friendly fullscreen overlay
+            const fullscreenMessage = document.createElement('div');
+            fullscreenMessage.style.position = 'fixed';
+            fullscreenMessage.style.top = '0';
+            fullscreenMessage.style.left = '0';
+            fullscreenMessage.style.width = '100%';
+            fullscreenMessage.style.height = '100%';
+            fullscreenMessage.style.display = 'flex';
+            fullscreenMessage.style.alignItems = 'center';
+            fullscreenMessage.style.justifyContent = 'center';
+            fullscreenMessage.style.backgroundColor = isWinner ? 'rgba(76, 175, 80, 0.5)' : 'rgba(244, 67, 54, 0.5)';
+            fullscreenMessage.style.zIndex = '9999';
+            
+            // Create text element inside the overlay
+            const messageText = document.createElement('div');
+            messageText.textContent = isWinner ? 'YOU WIN!' : 'YOU LOSE!';
+            messageText.style.fontSize = '100px';
+            messageText.style.fontWeight = 'bold';
+            messageText.style.fontFamily = 'Arial, sans-serif';
+            messageText.style.color = 'white';
+            messageText.style.textShadow = isWinner ? 
+                '0 0 20px #4CAF50, 0 0 40px #4CAF50' : 
+                '0 0 20px #F44336, 0 0 40px #F44336';
+            
+            fullscreenMessage.appendChild(messageText);
+            document.body.appendChild(fullscreenMessage);
+            
+            // Remove overlay after 3 seconds
+            setTimeout(() => {
+                if (fullscreenMessage.parentNode) {
+                    fullscreenMessage.parentNode.removeChild(fullscreenMessage);
+                }
+            }, 3000);
+        }
+        
+        // Show regular winner/loser message for all devices (as backup)
         if (isWinner) {
-            this.showMessage('YOU WIN!', 2000);
+            this.showMessage('YOU WIN!', 3000);
             this.messageOverlay.classList.add('quick-draw-winner');
+            
+            // Enhanced styling for mobile
+            if (window.isMobileDevice) {
+                this.messageOverlay.style.fontSize = '84px';
+                this.messageOverlay.style.textShadow = '0 0 20px #4CAF50, 0 0 30px #4CAF50';
+                this.messageOverlay.style.zIndex = '2000';
+            } else {
+                this.messageOverlay.style.fontSize = '64px';
+            }
             
             // Add a subtle victory flash
             const victoryFlash = document.createElement('div');
@@ -1455,11 +1669,11 @@ export class QuickDraw {
             victoryFlash.style.left = '0';
             victoryFlash.style.width = '100%';
             victoryFlash.style.height = '100%';
-            victoryFlash.style.backgroundColor = 'rgba(76, 175, 80, 0.2)';
+            victoryFlash.style.backgroundColor = 'rgba(76, 175, 80, 0.3)';
             victoryFlash.style.opacity = '0';
             victoryFlash.style.transition = 'opacity 0.5s ease-in-out';
             victoryFlash.style.pointerEvents = 'none';
-            victoryFlash.style.zIndex = '990';
+            victoryFlash.style.zIndex = '1999';
             document.getElementById('game-container').appendChild(victoryFlash);
             
             setTimeout(() => {
@@ -1471,11 +1685,20 @@ export class QuickDraw {
                             victoryFlash.parentNode.removeChild(victoryFlash);
                         }
                     }, 500);
-                }, 1000);
+                }, 1500);
             }, 10);
         } else {
-            this.showMessage('YOU LOSE!', 2000);
+            this.showMessage('YOU LOSE!', 3000);
             this.messageOverlay.classList.add('quick-draw-loser');
+            
+            // Enhanced styling for mobile
+            if (window.isMobileDevice) {
+                this.messageOverlay.style.fontSize = '84px';
+                this.messageOverlay.style.textShadow = '0 0 20px #F44336, 0 0 30px #F44336';
+                this.messageOverlay.style.zIndex = '2000';
+            } else {
+                this.messageOverlay.style.fontSize = '64px';
+            }
             
             // Add a defeat flash for the loser
             const defeatFlash = document.createElement('div');
@@ -1484,11 +1707,11 @@ export class QuickDraw {
             defeatFlash.style.left = '0';
             defeatFlash.style.width = '100%';
             defeatFlash.style.height = '100%';
-            defeatFlash.style.backgroundColor = 'rgba(244, 67, 54, 0.2)';
+            defeatFlash.style.backgroundColor = 'rgba(244, 67, 54, 0.3)';
             defeatFlash.style.opacity = '0';
             defeatFlash.style.transition = 'opacity 0.5s ease-in-out';
             defeatFlash.style.pointerEvents = 'none';
-            defeatFlash.style.zIndex = '990';
+            defeatFlash.style.zIndex = '1999';
             document.getElementById('game-container').appendChild(defeatFlash);
             
             setTimeout(() => {
@@ -1500,7 +1723,7 @@ export class QuickDraw {
                             defeatFlash.parentNode.removeChild(defeatFlash);
                         }
                     }, 500);
-                }, 1000);
+                }, 1500);
             }, 10);
         }
         
@@ -1547,11 +1770,13 @@ export class QuickDraw {
             
             // Reset message styling
             this.messageOverlay.classList.remove('quick-draw-winner', 'quick-draw-loser');
+            this.messageOverlay.style.fontSize = '48px'; // Reset font size
+            this.messageOverlay.style.textShadow = '2px 2px 4px rgba(0, 0, 0, 0.5)'; // Reset text shadow
             
             // Reset active arena and Quick Draw lobby
             this.activeArenaIndex = -1;
             this.localPlayer.setQuickDrawLobby(-1);
-        }, 2000);
+        }, 3000);
     }
     
     /**
