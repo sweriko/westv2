@@ -47,6 +47,111 @@ export class PhysicsSystem {
     }
     
     /**
+     * Creates an invisible boundary for the town to prevent players from leaving
+     * @param {number} width - Width of the town
+     * @param {number} length - Length of the town
+     * @param {number} height - Height of the barrier
+     * @returns {CANNON.Body} - The created physics body
+     */
+    createTownBoundary(width, length, height) {
+      // First remove any existing town boundaries
+      this.removeTownBoundary();
+      
+      // Create a physics body for the town boundary
+      const boundaryBody = new CANNON.Body({
+        mass: 0, // Static body
+        material: this.defaultMaterial
+      });
+      
+      // Add a box shape for each border
+      const halfWidth = width / 2;
+      const halfLength = length / 2;
+      const borderThickness = 0.5;
+      
+      // Left border (negative X)
+      const leftBorderShape = new CANNON.Box(new CANNON.Vec3(
+        borderThickness / 2, 
+        height / 2, 
+        length / 2
+      ));
+      boundaryBody.addShape(
+        leftBorderShape, 
+        new CANNON.Vec3(-halfWidth, height / 2, 0)
+      );
+      
+      // Right border (positive X)
+      const rightBorderShape = new CANNON.Box(new CANNON.Vec3(
+        borderThickness / 2, 
+        height / 2, 
+        length / 2
+      ));
+      boundaryBody.addShape(
+        rightBorderShape, 
+        new CANNON.Vec3(halfWidth, height / 2, 0)
+      );
+      
+      // Front border (negative Z)
+      const frontBorderShape = new CANNON.Box(new CANNON.Vec3(
+        width / 2, 
+        height / 2, 
+        borderThickness / 2
+      ));
+      boundaryBody.addShape(
+        frontBorderShape, 
+        new CANNON.Vec3(0, height / 2, -halfLength)
+      );
+      
+      // Back border (positive Z)
+      const backBorderShape = new CANNON.Box(new CANNON.Vec3(
+        width / 2, 
+        height / 2, 
+        borderThickness / 2
+      ));
+      boundaryBody.addShape(
+        backBorderShape, 
+        new CANNON.Vec3(0, height / 2, halfLength)
+      );
+      
+      boundaryBody.townBoundary = true; // Tag this body as a town boundary
+      boundaryBody.collisionFilterGroup = 2; // Group 2 for boundaries
+      
+      // Add the boundary body to the world
+      this.world.addBody(boundaryBody);
+      this.bodies.push(boundaryBody);
+      
+      // Create a reference to easily find this body later
+      this.townBoundaryBody = boundaryBody;
+      
+      // If debug mode is enabled, create a visual representation
+      if (this.debugMode) {
+        this.createDebugMesh(boundaryBody);
+      }
+      
+      console.log("Created town boundary with width", width, "and length", length);
+      
+      return boundaryBody;
+    }
+    
+    /**
+     * Removes the town boundary if it exists
+     */
+    removeTownBoundary() {
+      if (this.townBoundaryBody) {
+        this.world.removeBody(this.townBoundaryBody);
+        
+        // Remove from our bodies array
+        const index = this.bodies.indexOf(this.townBoundaryBody);
+        if (index !== -1) {
+          this.bodies.splice(index, 1);
+        }
+        
+        // Clear the reference
+        this.townBoundaryBody = null;
+        console.log("Removed town boundary");
+      }
+    }
+    
+    /**
      * Creates an invisible cylindrical boundary for the QuickDraw arena
      * @param {THREE.Vector3} center - Center position of the arena
      * @param {number} radius - Radius of the cylindrical arena
@@ -185,6 +290,53 @@ export class PhysicsSystem {
       }
       
       return playerBody;
+    }
+    
+    /**
+     * Checks if a point is inside the arena boundary
+     * @param {THREE.Vector3} point - The point to check
+     * @returns {boolean} - True if inside, false if outside
+     */
+    isPointInArenaBoundary(point) {
+      // If no arena boundary exists, return false
+      if (!this.arenaBoundaryBody) return false;
+      
+      // Get arena position and create a CANNON vector for the point
+      const arenaPos = this.arenaBoundaryBody.position;
+      const pointVec = new CANNON.Vec3(point.x, point.y, point.z);
+      
+      // Calculate horizontal distance (ignoring Y) from arena center
+      const dx = pointVec.x - arenaPos.x;
+      const dz = pointVec.z - arenaPos.z;
+      const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+      
+      // Get the radius from the first shape (assuming it's a cylinder or shape with radius property)
+      const radius = 15; // Default from QuickDraw.js
+      
+      // Check if point is inside the cylinder horizontally and vertically
+      return horizontalDist < radius;
+    }
+
+    /**
+     * Checks if a point is inside the town boundary
+     * @param {THREE.Vector3} point - The point to check
+     * @returns {boolean} - True if inside, false if outside
+     */
+    isPointInTown(point) {
+      // If no town boundary exists, return true (no restriction)
+      if (!window.townDimensions) return true;
+      
+      // Get town dimensions
+      const width = window.townDimensions.width;
+      const length = window.townDimensions.length;
+      
+      // Check if the point is within the town boundaries
+      return (
+        point.x > -width / 2 && 
+        point.x < width / 2 && 
+        point.z > -length / 2 && 
+        point.z < length / 2
+      );
     }
     
     /**
@@ -329,31 +481,6 @@ export class PhysicsSystem {
           item.body.quaternion.w
         );
       });
-    }
-    
-    /**
-     * Checks if a point is inside the arena boundary
-     * @param {THREE.Vector3} point - The point to check
-     * @returns {boolean} - True if inside, false if outside
-     */
-    isPointInArenaBoundary(point) {
-      // If no arena boundary exists, return false
-      if (!this.arenaBoundaryBody) return false;
-      
-      // Get arena position and create a CANNON vector for the point
-      const arenaPos = this.arenaBoundaryBody.position;
-      const pointVec = new CANNON.Vec3(point.x, point.y, point.z);
-      
-      // Calculate horizontal distance (ignoring Y) from arena center
-      const dx = pointVec.x - arenaPos.x;
-      const dz = pointVec.z - arenaPos.z;
-      const horizontalDist = Math.sqrt(dx * dx + dz * dz);
-      
-      // Get the radius from the first shape (assuming it's a cylinder or shape with radius property)
-      const radius = 15; // Default from QuickDraw.js
-      
-      // Check if point is inside the cylinder horizontally and vertically
-      return horizontalDist < radius;
     }
     
     /**

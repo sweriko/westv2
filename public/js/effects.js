@@ -1,3 +1,6 @@
+// Import the SmokeRingEffect class 
+import { SmokeRingEffect } from './smokeRingEffect.js';
+
 /**
  * Recursively disposes geometry and material for the given object.
  * @param {THREE.Object3D} object - The object to dispose.
@@ -617,3 +620,6 @@ export function ejectShell(player, scene, soundManager) {
   }
   requestAnimationFrame(animateShell);
 }
+
+// Export the SmokeRingEffect class
+export { SmokeRingEffect };
