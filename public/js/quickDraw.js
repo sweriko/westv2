@@ -2,7 +2,7 @@
  * Quick Draw game mode implementation
  * Players face off in a wild west duel where they must wait for the "draw" signal
  * before pulling their revolvers and shooting at each other.
- * Now with a single portal that automatically assigns players to available arenas.
+ * Now with direct player-to-player challenges directly on the town map.
  */
 
 import { PhysicsSystem } from './physics.js';
@@ -57,81 +57,24 @@ export class QuickDraw {
         // Record the time (in ms) until which the gun remains locked
         this.penaltyEndTime = 0;
         
-        // Current active arena index (0-4, -1 means none)
-        this.activeArenaIndex = -1;
-        
-        // Arena configurations
-        this.maxArenas = 5; // Support for 5 concurrent lobbies as requested
-        this.arenaConfigs = this.createArenaConfigs();
+        // Direct challenge system
+        this.playerProximityRadius = 5; // 5 units radius for challenge detection
+        this.nearbyPlayers = new Map(); // Map of nearby player IDs to their data
+        this.challengePromptActive = false; // Whether the challenge prompt is active
+        this.pendingChallenge = null; // Store info about pending challenge
+        this.challengeAccepted = false; // Whether a challenge has been accepted
+        this.challengeUIVisible = false; // Whether challenge UI is visible
         
         // Initialize physics system for collision detection
         this.physics = new PhysicsSystem();
         
-        // Track arena physics bodies
-        this.arenaBoundaries = new Array(this.maxArenas).fill(null);
-        
-        // Initialize the single portal, duel areas, and network handlers
-        this.initPortal();
-        this.createDuelAreas();
+        // Initialize the network handlers and challenge UI
         this.initNetworkHandlers();
         this.createUI();
+        this.createChallengeUI();
 
         // Make this instance globally accessible for network handlers
         window.quickDraw = this;
-    }
-    
-    /**
-     * Create arena configurations with different positions
-     */
-    createArenaConfigs() {
-        const configs = [];
-        // Positioning logic - arenas are placed in a row with proper spacing
-        
-        // Calculate base position - if town dimensions are available, place them outside town
-        let baseZ = 0;
-        if (window.townDimensions) {
-            baseZ = window.townDimensions.length + 50; // Position outside town boundary
-        } else {
-            baseZ = 100; // Default position if town dimensions aren't available
-        }
-        
-        // Arena spacing - make sure they don't overlap
-        const spacingX = 50; // Allow enough space between arenas
-        
-        // Create 5 arena configs
-        for (let i = 0; i < this.maxArenas; i++) {
-            // Calculate position - arrange in a row along X axis
-            let offsetX = (i - 2) * spacingX; // Center on zero, spread outward
-            
-            configs.push({
-                index: i,
-                center: new THREE.Vector3(offsetX, 0, baseZ),
-                radius: 15,  // Arena radius
-                height: 5,   // Arena height
-                portalColor: this.getPortalColor(i),
-                active: false, // Whether this arena is currently in use
-                portalCollider: null, // Will store collision box for the portal
-                duelArea: null, // Will store the THREE.Group for the arena
-                duelAreaActive: false // Track if this duel area is currently visible
-            });
-        }
-        
-        return configs;
-    }
-    
-    /**
-     * Get a unique color for each portal
-     */
-    getPortalColor(index) {
-        const colors = [
-            0xFF6B00, // Orange (original)
-            0x4CAF50, // Green
-            0x2196F3, // Blue
-            0x9C27B0, // Purple
-            0xFFEB3B  // Yellow
-        ];
-        
-        return colors[index % colors.length];
     }
     
     /**
@@ -188,700 +131,163 @@ export class QuickDraw {
         this.statusIndicator.style.display = 'none';
         document.getElementById('game-container').appendChild(this.statusIndicator);
         
-        // Add lobby indicator
-        this.lobbyIndicator = document.createElement('div');
-        this.lobbyIndicator.id = 'lobby-indicator';
-        this.lobbyIndicator.style.position = 'absolute';
-        this.lobbyIndicator.style.top = '150px';
-        this.lobbyIndicator.style.left = '20px';
-        this.lobbyIndicator.style.color = 'white';
-        this.lobbyIndicator.style.fontSize = '16px';
-        this.lobbyIndicator.style.backgroundColor = 'rgba(255, 107, 0, 0.7)';
-        this.lobbyIndicator.style.padding = '8px 12px';
-        this.lobbyIndicator.style.borderRadius = '5px';
-        this.lobbyIndicator.style.display = 'none';
-        document.getElementById('game-container').appendChild(this.lobbyIndicator);
+        // Health bar container
+        this.healthBarContainer = document.createElement('div');
+        this.healthBarContainer.id = 'health-bar-container';
+        this.healthBarContainer.style.position = 'absolute';
+        this.healthBarContainer.style.top = '20px';
+        this.healthBarContainer.style.left = '50%';
+        this.healthBarContainer.style.transform = 'translateX(-50%)';
+        this.healthBarContainer.style.width = '300px';
+        this.healthBarContainer.style.height = '30px';
+        this.healthBarContainer.style.backgroundColor = 'rgba(0,0,0,0.5)';
+        this.healthBarContainer.style.borderRadius = '5px';
+        this.healthBarContainer.style.padding = '5px';
+        this.healthBarContainer.style.display = 'none';
+        this.healthBarContainer.style.zIndex = '1000';
+        
+        // Health bar
+        this.healthBar = document.createElement('div');
+        this.healthBar.id = 'health-bar';
+        this.healthBar.style.width = '100%';
+        this.healthBar.style.height = '100%';
+        this.healthBar.style.backgroundColor = '#00FF00';
+        this.healthBar.style.borderRadius = '3px';
+        this.healthBar.style.transition = 'width 0.3s ease-in-out';
+        
+        // Health text
+        this.healthText = document.createElement('div');
+        this.healthText.id = 'health-text';
+        this.healthText.style.position = 'absolute';
+        this.healthText.style.top = '50%';
+        this.healthText.style.left = '50%';
+        this.healthText.style.transform = 'translate(-50%, -50%)';
+        this.healthText.style.color = 'white';
+        this.healthText.style.fontSize = '14px';
+        this.healthText.style.fontWeight = 'bold';
+        this.healthText.style.textShadow = '1px 1px 2px black';
+        this.healthText.textContent = '100 HP';
+        
+        // Assemble health bar
+        this.healthBarContainer.appendChild(this.healthBar);
+        this.healthBarContainer.appendChild(this.healthText);
+        document.getElementById('game-container').appendChild(this.healthBarContainer);
     }
     
     /**
-     * Initialize the single portal for all Quick Draw arenas
+     * Create UI elements specific to the direct challenge system
      */
-    initPortal() {
-        this.portalGroup = new THREE.Group();
+    createChallengeUI() {
+        // Challenge prompt - shown when near another player
+        this.challengePrompt = document.createElement('div');
+        this.challengePrompt.id = 'quick-draw-challenge-prompt';
+        this.challengePrompt.style.position = 'absolute';
+        this.challengePrompt.style.top = '75%';
+        this.challengePrompt.style.left = '50%';
+        this.challengePrompt.style.transform = 'translate(-50%, -50%)';
+        this.challengePrompt.style.color = 'white';
+        this.challengePrompt.style.fontSize = '24px';
+        this.challengePrompt.style.fontWeight = 'bold';
+        this.challengePrompt.style.textAlign = 'center';
+        this.challengePrompt.style.padding = '15px 20px';
+        this.challengePrompt.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+        this.challengePrompt.style.borderRadius = '10px';
+        this.challengePrompt.style.display = 'none';
+        this.challengePrompt.style.zIndex = '1000';
+        this.challengePrompt.textContent = 'Press E to challenge to a Quick Draw duel';
+        document.getElementById('game-container').appendChild(this.challengePrompt);
         
-        // Calculate portal position
-        let portalX = 0;
-        let portalY = 2.5; // Increased Y position for a taller portal
-        let portalZ = 0;
+        // Challenge invitation - shown when receiving a challenge
+        this.challengeInvitation = document.createElement('div');
+        this.challengeInvitation.id = 'quick-draw-invitation';
+        this.challengeInvitation.style.position = 'absolute';
+        this.challengeInvitation.style.top = '40%';
+        this.challengeInvitation.style.left = '50%';
+        this.challengeInvitation.style.transform = 'translate(-50%, -50%)';
+        this.challengeInvitation.style.color = 'white';
+        this.challengeInvitation.style.fontSize = '28px';
+        this.challengeInvitation.style.fontWeight = 'bold';
+        this.challengeInvitation.style.textAlign = 'center';
+        this.challengeInvitation.style.padding = '20px 25px';
+        this.challengeInvitation.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+        this.challengeInvitation.style.borderRadius = '10px';
+        this.challengeInvitation.style.border = '2px solid #FF6B00';
+        this.challengeInvitation.style.boxShadow = '0 0 15px rgba(255, 107, 0, 0.7)';
+        this.challengeInvitation.style.display = 'none';
+        this.challengeInvitation.style.zIndex = '1100';
+        this.challengeInvitation.innerHTML = `
+            <div style="margin-bottom: 15px">Player X challenges you to a Quick Draw duel!</div>
+            <div style="display: flex; justify-content: space-around; margin-top: 10px;">
+                <div style="background-color: #4CAF50; padding: 10px 20px; border-radius: 5px;">Press Enter to accept</div>
+                <div style="background-color: #F44336; padding: 10px 20px; border-radius: 5px;">Press T to decline</div>
+            </div>
+        `;
+        document.getElementById('game-container').appendChild(this.challengeInvitation);
         
-        // If town dimensions are available, use them for positioning
-        if (window.townDimensions) {
-            const streetWidth = window.townDimensions.streetWidth;
-            const townLength = window.townDimensions.length;
-            
-            // Position portal on the side of the street in the center of town
-            portalX = streetWidth * 0.4; // Move to the right side of the street
-            portalZ = 0; // Center of town (Z axis)
-        }
-        
-        // Create a wooden frame portal
-        this.createWoodenFramePortal(portalX, portalY, portalZ);
-        
-        // Create collision detector for the portal - make it larger to match the bigger portal
-        const portalCollider = new THREE.Box3(
-            new THREE.Vector3(portalX - 2.5, 0, portalZ - 1),
-            new THREE.Vector3(portalX + 2.5, portalY * 2, portalZ + 1)
-        );
-        
-        // Store the collider for all arena configs to reference the same portal
-        for (let i = 0; i < this.maxArenas; i++) {
-            this.arenaConfigs[i].portalCollider = portalCollider;
-        }
-        
-        this.scene.add(this.portalGroup);
-        
-        // Create portal instructions
-        this.createPortalInstructions(new THREE.Vector3(portalX, portalY, portalZ));
+        // Add keyboard event listener for challenge interactions
+        document.addEventListener('keydown', (event) => this.handleChallengeKeypress(event));
     }
     
     /**
-     * Creates a wooden frame portal with Minecraft-like portal filling and a wooden sign on top
-     * @param {number} x - X position
-     * @param {number} y - Y position
-     * @param {number} z - Z position
+     * Handle keypresses for the challenge system
+     * @param {KeyboardEvent} event - The keyboard event
      */
-    createWoodenFramePortal(x, y, z) {
-        const frameWidth = 5; // Wider frame
-        const frameHeight = 7; // Taller frame
-        const beamThickness = 0.25; // Thicker beams
+    handleChallengeKeypress(event) {
+        // Skip if not in game or if player is in lobby/duel
+        if (!this.localPlayer || this.inLobby || this.inDuel) return;
         
-        // Create wooden beam material with more texture
-        const woodMaterial = new THREE.MeshStandardMaterial({
-            color: 0x8B4513,  // Brown
-            roughness: 0.9,
-            metalness: 0.1
-        });
-        
-        // Create the wooden frame beams
-        // Top beam
-        const topBeam = new THREE.Mesh(
-            new THREE.BoxGeometry(frameWidth, beamThickness, beamThickness),
-            woodMaterial
-        );
-        topBeam.position.set(0, frameHeight/2, 0);
-        this.portalGroup.add(topBeam);
-        
-        // Bottom beam
-        const bottomBeam = new THREE.Mesh(
-            new THREE.BoxGeometry(frameWidth, beamThickness, beamThickness),
-            woodMaterial
-        );
-        bottomBeam.position.set(0, -frameHeight/2, 0);
-        this.portalGroup.add(bottomBeam);
-        
-        // Left beam
-        const leftBeam = new THREE.Mesh(
-            new THREE.BoxGeometry(beamThickness, frameHeight, beamThickness),
-            woodMaterial
-        );
-        leftBeam.position.set(-frameWidth/2, 0, 0);
-        this.portalGroup.add(leftBeam);
-        
-        // Right beam
-        const rightBeam = new THREE.Mesh(
-            new THREE.BoxGeometry(beamThickness, frameHeight, beamThickness),
-            woodMaterial
-        );
-        rightBeam.position.set(frameWidth/2, 0, 0);
-        this.portalGroup.add(rightBeam);
-        
-        // Create the Minecraft-like portal filling with a more static appearance
-        const fillingGeometry = new THREE.PlaneGeometry(frameWidth - beamThickness, frameHeight - beamThickness, 32, 32); // More segments for wave effect
-        
-        // Create a custom shader material for Minecraft nether portal effect - more static version
-        const fillingMaterial = new THREE.ShaderMaterial({
-            uniforms: {
-                time: { value: 0.0 }
-            },
-            vertexShader: `
-                varying vec2 vUv;
-                uniform float time;
-                
-                void main() {
-                    vUv = uv;
-                    // Add very subtle displacement to vertices
-                    vec3 pos = position;
-                    pos.x += sin(position.y * 2.0 + time * 0.5) * 0.01;
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+        switch (event.code) {
+            case 'KeyE':
+                // Send challenge when near a player
+                if (this.challengePromptActive) {
+                    this.sendChallenge();
                 }
-            `,
-            fragmentShader: `
-                uniform float time;
-                varying vec2 vUv;
+                break;
                 
-                // Simple noise function
-                float noise(vec2 p) {
-                    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+            case 'Enter':
+                // Accept invitation
+                if (this.pendingChallenge) {
+                    this.acceptChallenge();
                 }
+                break;
                 
-                void main() {
-                    // Static blue base with subtle animated swirls
-                    vec3 baseColor = vec3(0.0, 0.3, 0.8); // Blue base
-                    
-                    // Add subtle swirl pattern
-                    float swirl = sin(vUv.x * vUv.y * 10.0 + time * 0.2) * 0.1;
-                    
-                    // Add a bit of noise pattern
-                    float noiseVal = noise(vUv * 5.0 + vec2(time * 0.05, time * 0.03));
-                    
-                    // Mix colors for subtle effect
-                    vec3 color = mix(baseColor, vec3(0.2, 0.6, 1.0), swirl + noiseVal * 0.1);
-                    
-                    // Add edge glow
-                    float edgeX = smoothstep(0.0, 0.07, vUv.x) * smoothstep(1.0, 0.93, vUv.x);
-                    float edgeY = smoothstep(0.0, 0.07, vUv.y) * smoothstep(1.0, 0.93, vUv.y);
-                    float edge = edgeX * edgeY;
-                    
-                    // Subtle pulsing
-                    float pulse = 0.9 + sin(time * 0.5) * 0.1;
-                    color = mix(color, vec3(0.4, 0.7, 1.0), (1.0 - edge) * pulse * 0.2);
-                    
-                    gl_FragColor = vec4(color, 0.9); // Slightly transparent
+            case 'KeyT':
+                // Decline invitation
+                if (this.pendingChallenge) {
+                    this.declineChallenge();
                 }
-            `,
-            transparent: true,
-            side: THREE.DoubleSide
-        });
-        
-        const filling = new THREE.Mesh(fillingGeometry, fillingMaterial);
-        filling.position.set(0, 0, -0.05);
-        this.portalGroup.add(filling);
-        
-        // Update the time uniform in the shader
-        this.animatePortalFilling(fillingMaterial);
-        
-        // Create a wooden sign on top of the portal
-        this.createWoodenSign(frameWidth, frameHeight);
-        
-        // Add particle effect around the portal
-        this.addPortalParticles(frameWidth, frameHeight);
-        
-        // Position the portal
-        this.portalGroup.position.set(x, y, z);
-        this.portalGroup.rotation.y = Math.PI / 2; // Make it vertical and facing the street
-    }
-    
-    /**
-     * Creates a wooden sign on top of the portal with text visible from both sides
-     * @param {number} frameWidth - Width of the portal frame
-     * @param {number} frameHeight - Height of the portal frame
-     */
-    createWoodenSign(frameWidth, frameHeight) {
-        // Create wooden sign material
-        const woodMaterial = new THREE.MeshStandardMaterial({
-            color: 0x8B4513,  // Brown
-            roughness: 0.9,
-            metalness: 0.1
-        });
-        
-        // Create sign post
-        const signWidth = frameWidth * 0.8;
-        const signHeight = 0.8;
-        const signDepth = 0.1;
-        
-        // Create the wooden sign board
-        const signGeometry = new THREE.BoxGeometry(signWidth, signHeight, signDepth);
-        const sign = new THREE.Mesh(signGeometry, woodMaterial);
-        
-        // Position the sign above the portal
-        sign.position.set(0, frameHeight/2 + signHeight/2 + 0.1, 0);
-        
-        // Create two small posts to connect the sign to the portal frame
-        const postGeometry = new THREE.BoxGeometry(0.2, 0.4, 0.2);
-        
-        // Left post
-        const leftPost = new THREE.Mesh(postGeometry, woodMaterial);
-        leftPost.position.set(-signWidth/3, frameHeight/2 + 0.2, 0);
-        
-        // Right post
-        const rightPost = new THREE.Mesh(postGeometry, woodMaterial);
-        rightPost.position.set(signWidth/3, frameHeight/2 + 0.2, 0);
-        
-        // Create text for both sides of the sign
-        const createSignText = (isBack) => {
-            const textCanvas = document.createElement('canvas');
-            const context = textCanvas.getContext('2d');
-            textCanvas.width = 512;
-            textCanvas.height = 128;
-            
-            // Clear background
-            context.fillStyle = '#8B4513'; // Match the wood color
-            context.fillRect(0, 0, textCanvas.width, textCanvas.height);
-            
-            // Add wood grain texture
-            context.strokeStyle = '#6B3F13'; // Darker wood color for grain
-            context.lineWidth = 2;
-            for (let i = 0; i < 20; i++) {
-                const y = i * 7;
-                context.beginPath();
-                context.moveTo(0, y);
-                // Wavy line for wood grain
-                for (let x = 0; x < textCanvas.width; x += 20) {
-                    context.lineTo(x + 10, y + (Math.random() * 4 - 2));
-                }
-                context.stroke();
-            }
-            
-            // Add text
-            context.fillStyle = 'white';
-            context.font = 'bold 70px Western, Arial, sans-serif';
-            context.textAlign = 'center';
-            context.textBaseline = 'middle';
-            context.fillText('Join 1v1', 256, 64);
-            
-            // Add a slightly darker stroke to make text more readable
-            context.strokeStyle = 'rgba(0,0,0,0.5)';
-            context.lineWidth = 2;
-            context.strokeText('Join 1v1', 256, 64);
-            
-            const texture = new THREE.CanvasTexture(textCanvas);
-            texture.needsUpdate = true;
-            
-            const material = new THREE.MeshBasicMaterial({
-                map: texture,
-                side: THREE.FrontSide
-            });
-            
-            // Create text plane slightly larger than the sign to avoid z-fighting
-            const textGeometry = new THREE.PlaneGeometry(signWidth - 0.05, signHeight - 0.05);
-            const textMesh = new THREE.Mesh(textGeometry, material);
-            
-            // Position text just in front of the sign
-            const zOffset = isBack ? -signDepth/2 - 0.01 : signDepth/2 + 0.01;
-            textMesh.position.set(0, 0, zOffset);
-            
-            // If this is the back face, rotate it 180 degrees
-            if (isBack) {
-                textMesh.rotation.y = Math.PI;
-            }
-            
-            return textMesh;
-        };
-        
-        // Create front and back text
-        const frontText = createSignText(false);
-        const backText = createSignText(true);
-        
-        // Add text to sign
-        sign.add(frontText);
-        sign.add(backText);
-        
-        // Add everything to the portal group
-        this.portalGroup.add(sign);
-        this.portalGroup.add(leftPost);
-        this.portalGroup.add(rightPost);
-    }
-    
-    /**
-     * Adds particle effects around the portal to enhance the Minecraft feel
-     * @param {number} width - Width of the portal
-     * @param {number} height - Height of the portal
-     */
-    addPortalParticles(width, height) {
-        const particleCount = 50;
-        const particleGroup = new THREE.Group();
-        
-        // Create particle material (white to contrast with blue portal)
-        const particleMaterial = new THREE.PointsMaterial({
-            color: 0xFFFFFF,
-            size: 0.15,
-            transparent: true,
-            opacity: 0.7,
-            blending: THREE.AdditiveBlending
-        });
-        
-        // Create particle geometry
-        const particleGeometry = new THREE.BufferGeometry();
-        const positions = new Float32Array(particleCount * 3);
-        const velocities = []; // Store velocities for animation
-        
-        // Create particles around the frame
-        for (let i = 0; i < particleCount; i++) {
-            // Position particles around the portal frame
-            const side = Math.floor(Math.random() * 4); // 0: top, 1: right, 2: bottom, 3: left
-            let x, y;
-            
-            switch(side) {
-                case 0: // top
-                    x = (Math.random() - 0.5) * width;
-                    y = height/2 + Math.random() * 0.5;
-                    break;
-                case 1: // right
-                    x = width/2 + Math.random() * 0.5;
-                    y = (Math.random() - 0.5) * height;
-                    break;
-                case 2: // bottom
-                    x = (Math.random() - 0.5) * width;
-                    y = -height/2 - Math.random() * 0.5;
-                    break;
-                case 3: // left
-                    x = -width/2 - Math.random() * 0.5;
-                    y = (Math.random() - 0.5) * height;
-                    break;
-            }
-            
-            positions[i * 3] = x;
-            positions[i * 3 + 1] = y;
-            positions[i * 3 + 2] = (Math.random() - 0.5) * 0.2; // Small Z variation
-            
-            // Random velocities moving toward the portal
-            velocities.push({
-                x: -x * 0.01 * (0.5 + Math.random() * 0.5),
-                y: -y * 0.01 * (0.5 + Math.random() * 0.5),
-                z: (Math.random() - 0.5) * 0.01,
-                life: 0,
-                maxLife: 60 + Math.floor(Math.random() * 60) // Random lifetime
-            });
+                break;
         }
-        
-        particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        const particles = new THREE.Points(particleGeometry, particleMaterial);
-        particleGroup.add(particles);
-        this.portalGroup.add(particleGroup);
-        
-        // Animate particles
-        const animateParticles = () => {
-            const positions = particles.geometry.attributes.position.array;
-            
-            // Update each particle
-            for (let i = 0; i < particleCount; i++) {
-                // Update position based on velocity
-                positions[i * 3] += velocities[i].x;
-                positions[i * 3 + 1] += velocities[i].y;
-                positions[i * 3 + 2] += velocities[i].z;
-                
-                // Update life
-                velocities[i].life++;
-                
-                // If particle has reached end of life or center of portal, reset it
-                if (velocities[i].life >= velocities[i].maxLife || 
-                    (Math.abs(positions[i * 3]) < 0.3 && Math.abs(positions[i * 3 + 1]) < 0.3)) {
-                    
-                    // Reset to edge of portal
-                    const side = Math.floor(Math.random() * 4);
-                    let x, y;
-                    
-                    switch(side) {
-                        case 0: // top
-                            x = (Math.random() - 0.5) * width;
-                            y = height/2 + Math.random() * 0.5;
-                            break;
-                        case 1: // right
-                            x = width/2 + Math.random() * 0.5;
-                            y = (Math.random() - 0.5) * height;
-                            break;
-                        case 2: // bottom
-                            x = (Math.random() - 0.5) * width;
-                            y = -height/2 - Math.random() * 0.5;
-                            break;
-                        case 3: // left
-                            x = -width/2 - Math.random() * 0.5;
-                            y = (Math.random() - 0.5) * height;
-                            break;
-                    }
-                    
-                    positions[i * 3] = x;
-                    positions[i * 3 + 1] = y;
-                    positions[i * 3 + 2] = (Math.random() - 0.5) * 0.2;
-                    
-                    // New velocity
-                    velocities[i] = {
-                        x: -x * 0.01 * (0.5 + Math.random() * 0.5),
-                        y: -y * 0.01 * (0.5 + Math.random() * 0.5),
-                        z: (Math.random() - 0.5) * 0.01,
-                        life: 0,
-                        maxLife: 60 + Math.floor(Math.random() * 60)
-                    };
-                }
-            }
-            
-            // Update geometry
-            particles.geometry.attributes.position.needsUpdate = true;
-            
-            requestAnimationFrame(animateParticles);
-        };
-        
-        requestAnimationFrame(animateParticles);
-    }
-    
-    /**
-     * Animate the portal filling shader
-     * @param {THREE.ShaderMaterial} material - The shader material to animate
-     */
-    animatePortalFilling(material) {
-        const animate = () => {
-            material.uniforms.time.value += 0.01;
-            requestAnimationFrame(animate);
-        };
-        
-        requestAnimationFrame(animate);
-    }
-    
-    /**
-     * Creates a floating instruction panel for the portal
-     * @param {THREE.Vector3} portalPosition - The position of the portal
-     */
-    createPortalInstructions(portalPosition) {
-        // Create a container for the instructions
-        const instructionsId = 'portal-instructions';
-        
-        // Check if it already exists
-        let instructionsElement = document.getElementById(instructionsId);
-        if (!instructionsElement) {
-            instructionsElement = document.createElement('div');
-            instructionsElement.id = instructionsId;
-            instructionsElement.className = 'portal-instructions';
-            instructionsElement.style.position = 'absolute';
-            instructionsElement.style.top = '35%';
-            instructionsElement.style.left = '50%';
-            instructionsElement.style.transform = 'translate(-50%, -50%)';
-            instructionsElement.style.color = 'white';
-            instructionsElement.style.backgroundColor = 'rgba(0,0,0,0.7)';
-            instructionsElement.style.padding = '20px';
-            instructionsElement.style.borderRadius = '10px';
-            instructionsElement.style.textAlign = 'center';
-            instructionsElement.style.width = '400px';
-            instructionsElement.style.display = 'none';
-            instructionsElement.style.zIndex = '500';
-            instructionsElement.style.fontFamily = 'Arial, sans-serif';
-            
-            instructionsElement.innerHTML = `
-                <h2 style="color:#FF6B00; margin-bottom:10px;">Quick Draw Duel</h2>
-                <p>Step into the portal to challenge another player to a classic western showdown!</p>
-                <ul style="text-align:left; margin-top:10px; padding-left:20px;">
-                    <li>Wait for opponent and follow the "READY?" signal</li>
-                    <li>Keep your gun holstered until you see "DRAW!"</li>
-                    <li>Drawing too early will lock your gun for 3 seconds</li>
-                    <li>First player to hit their opponent wins!</li>
-                </ul>
-            `;
-            
-            document.getElementById('game-container').appendChild(instructionsElement);
-        }
-        
-        // Show instructions when player gets close to portal
-        // Adjust the proximity box based on portal position
-        const proximityBox = new THREE.Box3(
-            new THREE.Vector3(portalPosition.x - 4, portalPosition.y - 4, portalPosition.z - 4),
-            new THREE.Vector3(portalPosition.x + 4, portalPosition.y + 4, portalPosition.z + 4)
-        );
-        
-        // Store the box reference and element for the portal
-        this.portalProximityBox = proximityBox;
-        this.instructionsElement = instructionsElement;
-    }
-    
-    /**
-     * Check if player is near the portal and show appropriate instructions
-     */
-    updatePortalInstructions() {
-        if (!this.localPlayer || !this.localPlayer.group) {
-            return;
-        }
-        
-        const playerPos = this.localPlayer.group.position.clone();
-        
-        // Check if near portal
-        if (this.portalProximityBox && this.portalProximityBox.containsPoint(playerPos) && 
-            !this.inLobby && !this.inDuel) {
-            // Show portal instructions
-            if (this.instructionsElement) {
-                this.instructionsElement.style.display = 'block';
-            }
-        } else {
-            // Hide instructions
-            if (this.instructionsElement) {
-                this.instructionsElement.style.display = 'none';
-            }
-        }
-    }
-    
-    /**
-     * Create all duel areas
-     */
-    createDuelAreas() {
-        for (let i = 0; i < this.maxArenas; i++) {
-            this.createDuelArea(i);
-        }
-    }
-    
-    /**
-     * Create a duel area for a specific arena index
-     * @param {number} arenaIndex - The arena index (0-4)
-     */
-    createDuelArea(arenaIndex) {
-        const config = this.arenaConfigs[arenaIndex];
-        const duelArea = new THREE.Group();
-        
-        // Ground platform
-        const groundGeometry = new THREE.CircleGeometry(config.radius, 32);
-        const groundMaterial = new THREE.MeshStandardMaterial({
-            color: 0xCD853F, // Sandy color
-            roughness: 0.9,
-            metalness: 0.1
-        });
-        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-        ground.rotation.x = -Math.PI / 2;
-        ground.position.copy(config.center);
-        ground.position.y = 0.01; // Slightly above main ground
-        ground.receiveShadow = true;
-        duelArea.add(ground);
-        
-        // Add western-themed props
-        this.addDuelProps(duelArea, arenaIndex);
-        
-        // Initially hide the duel area
-        duelArea.visible = false;
-        this.scene.add(duelArea);
-        
-        // Store in arena config
-        config.duelArea = duelArea;
-    }
-    
-    /**
-     * Add western-themed props to a specific duel area
-     * @param {THREE.Group} duelArea - The duel area group to add props to
-     * @param {number} arenaIndex - The arena index for variations
-     */
-    addDuelProps(duelArea, arenaIndex) {
-        const config = this.arenaConfigs[arenaIndex];
-        
-        // Add cacti around the edge with variations based on arenaIndex
-        const cactusCount = 6 + arenaIndex % 3; // Vary cactus count by arena
-        
-        for (let i = 0; i < cactusCount; i++) {
-            const angle = (i / cactusCount) * Math.PI * 2;
-            const distance = 12 + Math.random() * 2;
-            
-            const x = config.center.x + Math.cos(angle) * distance;
-            const z = config.center.z + Math.sin(angle) * distance;
-            
-            this.createCactus(x, z, duelArea, arenaIndex);
-        }
-        
-        // Add arena number marker in the center
-        this.createArenaMarker(config.center, arenaIndex, duelArea);
-    }
-    
-    /**
-     * Create a central marker showing the arena number
-     * @param {THREE.Vector3} center - The center position of the arena
-     * @param {number} arenaIndex - The arena index (0-4)
-     * @param {THREE.Group} duelArea - The duel area group to add the marker to
-     */
-    createArenaMarker(center, arenaIndex, duelArea) {
-        // Create a texture for the text
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.width = 128;
-        canvas.height = 64;
-        context.fillStyle = 'white';
-        context.font = 'bold 40px Arial';
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        context.fillText(`#${arenaIndex + 1}`, 64, 32);
-        
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.needsUpdate = true;
-        
-        // Create a floating arena number with transparent background
-        const textGeometry = new THREE.PlaneGeometry(1, 0.6);
-        const textMaterial = new THREE.MeshBasicMaterial({
-            map: texture,
-            transparent: true,
-            side: THREE.DoubleSide
-        });
-        const textMesh = new THREE.Mesh(textGeometry, textMaterial);
-        
-        // Position the text at ground level with a slight angle for visibility
-        textMesh.position.set(center.x, 0.3, center.z);
-        textMesh.rotation.x = -Math.PI / 2; // Flat on ground
-        duelArea.add(textMesh);
-    }
-    
-    /**
-     * Create a simple cactus model at the given position with variations based on arena index
-     * @param {number} x - X position
-     * @param {number} z - Z position
-     * @param {THREE.Group} duelArea - The duel area group to add the cactus to
-     * @param {number} arenaIndex - Arena index for variations
-     */
-    createCactus(x, z, duelArea, arenaIndex) {
-        const cactusGroup = new THREE.Group();
-        
-        // Different cactus colors based on arena index
-        const cactusColors = [
-            0x2E8B57, // Sea green (default)
-            0x006400, // Dark green
-            0x228B22, // Forest green
-            0x3CB371, // Medium sea green
-            0x32CD32  // Lime green
-        ];
-        
-        const cactusColor = cactusColors[arenaIndex % cactusColors.length];
-        
-        // Main body
-        const bodyGeometry = new THREE.CylinderGeometry(0.3, 0.4, 2, 8);
-        const cactusMaterial = new THREE.MeshStandardMaterial({ color: cactusColor });
-        const body = new THREE.Mesh(bodyGeometry, cactusMaterial);
-        body.position.y = 1;
-        cactusGroup.add(body);
-        
-        // Add arms
-        const armCount = (arenaIndex % 3) + 1; // 1, 2, or 3 arms based on arena index
-        
-        for (let i = 0; i < armCount; i++) {
-            const armGeometry = new THREE.CylinderGeometry(0.2, 0.2, 1, 8);
-            const arm = new THREE.Mesh(armGeometry, cactusMaterial);
-            
-            const angle = Math.random() * Math.PI * 2;
-            const height = 0.5 + Math.random() * 1;
-            
-            arm.position.set(
-                Math.cos(angle) * 0.3,
-                height,
-                Math.sin(angle) * 0.3
-            );
-            
-            arm.rotation.z = Math.PI / 4 * (Math.random() > 0.5 ? 1 : -1);
-            arm.rotation.y = angle;
-            
-            cactusGroup.add(arm);
-        }
-        
-        cactusGroup.position.set(x, 0, z);
-        cactusGroup.castShadow = true;
-        duelArea.add(cactusGroup);
     }
     
     /**
      * Initialize network handlers for Quick Draw game mode.
      */
     initNetworkHandlers() {
-        // Extend existing network manager with Quick Draw methods
-        this.networkManager.sendQuickDrawJoin = (arenaIndex) => {
+        // Methods for direct challenges
+        this.networkManager.sendQuickDrawChallenge = (targetPlayerId) => {
             if (this.networkManager.socket && this.networkManager.socket.readyState === WebSocket.OPEN) {
                 this.networkManager.socket.send(JSON.stringify({
-                    type: 'quickDrawJoin',
-                    arenaIndex: arenaIndex
+                    type: 'quickDrawChallenge',
+                    targetPlayerId: targetPlayerId
                 }));
             }
         };
         
-        this.networkManager.sendQuickDrawLeave = () => {
+        this.networkManager.sendQuickDrawAccept = (challengerId) => {
             if (this.networkManager.socket && this.networkManager.socket.readyState === WebSocket.OPEN) {
                 this.networkManager.socket.send(JSON.stringify({
-                    type: 'quickDrawLeave'
+                    type: 'quickDrawAccept',
+                    challengerId: challengerId
+                }));
+            }
+        };
+        
+        this.networkManager.sendQuickDrawDecline = (challengerId) => {
+            if (this.networkManager.socket && this.networkManager.socket.readyState === WebSocket.OPEN) {
+                this.networkManager.socket.send(JSON.stringify({
+                    type: 'quickDrawDecline',
+                    challengerId: challengerId
                 }));
             }
         };
@@ -891,8 +297,7 @@ export class QuickDraw {
                 console.log(`Sending Quick Draw hit notification to server: player ${this.localPlayer.id} hit player ${opponentId}`);
                 this.networkManager.socket.send(JSON.stringify({
                     type: 'quickDrawShoot',
-                    opponentId: opponentId,
-                    arenaIndex: this.activeArenaIndex
+                    opponentId: opponentId
                 }));
             }
         };
@@ -900,8 +305,7 @@ export class QuickDraw {
         this.networkManager.sendQuickDrawReady = () => {
             if (this.networkManager.socket && this.networkManager.socket.readyState === WebSocket.OPEN) {
                 this.networkManager.socket.send(JSON.stringify({
-                    type: 'quickDrawReady',
-                    arenaIndex: this.activeArenaIndex
+                    type: 'quickDrawReady'
                 }));
             }
         };
@@ -919,9 +323,6 @@ export class QuickDraw {
                 
                 // Handle Quick Draw specific messages
                 switch (message.type) {
-                    case 'quickDrawJoin':
-                        this.handleQueueJoin(message);
-                        break;
                     case 'quickDrawMatch':
                         this.handleMatchFound(message);
                         break;
@@ -937,393 +338,234 @@ export class QuickDraw {
                     case 'quickDrawEnd':
                         this.endDuel(message.winnerId);
                         break;
+                    case 'playerHealthUpdate':
+                        if (this.inDuel) {
+                            // Update own health if it's us
+                            if (message.playerId === this.localPlayer.id) {
+                                this.updateHealthBar(message.health);
+                                
+                                // Show hit feedback if damaged
+                                if (message.damage > 0) {
+                                    this.showHitFeedback(message.damage);
+                                }
+                            }
+                            // Update opponent's health if needed (could be extended for UI)
+                            else if (message.playerId === this.duelOpponentId) {
+                                // Could update opponent health bar if we had one
+                            }
+                        }
+                        break;
+                    // Challenge system message handlers
+                    case 'quickDrawChallengeReceived':
+                        this.handleChallengeReceived(message);
+                        break;
+                    case 'quickDrawChallengeAccepted':
+                        this.handleChallengeAccepted(message);
+                        break;
+                    case 'quickDrawChallengeDeclined':
+                        this.handleChallengeDeclined(message);
+                        break;
+                    // Debug visualization handler
+                    case 'debugBoxVisualization':
+                        this.createDebugBoxVisualization(message.box, message.color, message.duration);
+                        break;
                 }
             } catch (err) {
                 console.error('Error parsing Quick Draw message:', err);
             }
         };
     }
-    
+
     /**
-     * Creates an invisible cylindrical boundary for a specific QuickDraw arena
-     * @param {number} arenaIndex - The arena index (0-4)
+     * Updates the list of nearby players for challenge feature
      */
-    createQuickDrawArenaBoundary(arenaIndex) {
-        if (!this.physics) return null;
+    updateNearbyPlayers() {
+        // Skip if in duel or lobby already
+        if (this.inDuel || this.inLobby || this.pendingChallenge) return;
         
-        const config = this.arenaConfigs[arenaIndex];
+        const playerPos = this.localPlayer.group.position.clone();
+        this.nearbyPlayers.clear();
+        this.challengePromptActive = false;
         
-        // Create the physics boundary for this arena
-        const arenaBody = this.physics.createQuickDrawArenaBoundary(
-            config.center,
-            config.radius,
-            config.height
-        );
-        
-        // Store the arena body for this arena
-        this.arenaBoundaries[arenaIndex] = arenaBody;
-        
-        return arenaBody;
-    }
-    
-    /**
-     * Removes a specific QuickDraw arena boundary
-     * @param {number} arenaIndex - The arena index (0-4)
-     */
-    removeQuickDrawArenaBoundary(arenaIndex) {
-        if (!this.physics) return;
-        
-        // If there's a boundary for this arena, remove it
-        if (this.arenaBoundaries[arenaIndex]) {
-            this.physics.removeQuickDrawArenaBoundaryByIndex(arenaIndex);
-            this.arenaBoundaries[arenaIndex] = null;
-        }
-    }
-    
-    /**
-     * Check if a point is inside any active arena
-     * @param {THREE.Vector3} point - The point to check
-     * @returns {boolean} - True if inside an active arena
-     */
-    isPointInArena(point) {
-        // First check if any arena is active
-        if (this.activeArenaIndex < 0 || !this.arenaConfigs[this.activeArenaIndex].duelAreaActive) {
-            return false;
-        }
-        
-        const config = this.arenaConfigs[this.activeArenaIndex];
-        
-        // Use the physics system to check if the point is inside the active arena boundary
-        if (this.physics && this.physics.isPointInArenaBoundary) {
-            return this.physics.isPointInArenaBoundary(point);
-        }
-        
-        // Fallback to simple cylindrical check if physics is not available
-        const dx = point.x - config.center.x;
-        const dz = point.z - config.center.z;
-        const distanceFromCenter = Math.sqrt(dx * dx + dz * dz);
-        
-        // Check if within radius and height
-        return distanceFromCenter <= config.radius && point.y >= 0 && point.y <= config.height;
-    }
-    
-    /**
-     * Check if a point is inside a specific arena
-     * @param {THREE.Vector3} point - The point to check
-     * @param {number} arenaIndex - The arena index to check
-     * @returns {boolean} - True if inside the specified arena
-     */
-    isPointInSpecificArena(point, arenaIndex) {
-        if (arenaIndex < 0 || arenaIndex >= this.maxArenas) {
-            return false;
-        }
-        
-        const config = this.arenaConfigs[arenaIndex];
-        
-        // Simple cylindrical check
-        const dx = point.x - config.center.x;
-        const dz = point.z - config.center.z;
-        const distanceFromCenter = Math.sqrt(dx * dx + dz * dz);
-        
-        // Check if within radius and height
-        return distanceFromCenter <= config.radius && point.y >= 0 && point.y <= config.height;
-    }
-    
-    /**
-     * Find the optimal arena index to join by checking where other players are waiting
-     * @returns {number} - The arena index to join
-     */
-    getOptimalArenaIndex() {
-        // Get information about other players from the network manager
-        const arenaPlayerCounts = Array(this.maxArenas).fill(0);
-        let foundWaitingPlayer = false;
-        
-        // If we can access the other players through networkManager
+        // Check if any other players are within the challenge radius
         if (this.networkManager && this.networkManager.otherPlayers) {
-            // Count players in each lobby/queue
-            for (const [_, playerData] of this.networkManager.otherPlayers) {
-                // Check if player is in a Quick Draw lobby but not in a duel
-                if (playerData.quickDrawLobbyIndex >= 0 && 
-                    playerData.quickDrawLobbyIndex < this.maxArenas) {
-                    arenaPlayerCounts[playerData.quickDrawLobbyIndex]++;
-                    
-                    // If this player appears to be waiting alone in a queue
-                    if (arenaPlayerCounts[playerData.quickDrawLobbyIndex] === 1) {
-                        foundWaitingPlayer = true;
-                    }
-                }
-            }
-            
-            // If we found at least one player waiting in a queue
-            if (foundWaitingPlayer) {
-                // Find all arenas with exactly one player waiting
-                const queuesWithOnePlayer = [];
-                for (let i = 0; i < this.maxArenas; i++) {
-                    if (arenaPlayerCounts[i] === 1) {
-                        queuesWithOnePlayer.push(i);
-                    }
-                }
+            for (const [playerId, playerData] of this.networkManager.otherPlayers) {
+                // Skip players who are in a quick draw already or don't have position
+                if (!playerData.position || playerData.quickDrawLobbyIndex >= 0 || 
+                    playerData.inQuickDrawDuel) continue;
                 
-                // If we found arenas with one player waiting, join one of them
-                if (queuesWithOnePlayer.length > 0) {
-                    // If multiple arenas have one player, pick one randomly
-                    const randomIndex = Math.floor(Math.random() * queuesWithOnePlayer.length);
-                    return queuesWithOnePlayer[randomIndex];
+                // Calculate distance to player
+                const otherPos = new THREE.Vector3(
+                    playerData.position.x,
+                    playerData.position.y,
+                    playerData.position.z
+                );
+                
+                const distance = playerPos.distanceTo(otherPos);
+                
+                // If within challenge radius, add to nearby players
+                if (distance <= this.playerProximityRadius) {
+                    this.nearbyPlayers.set(playerId, {
+                        id: playerId,
+                        distance: distance,
+                        position: otherPos
+                    });
+                    
+                    this.challengePromptActive = true;
                 }
             }
         }
         
-        // If we couldn't find a player waiting or couldn't access player data,
-        // look for completely empty arenas
-        const emptyArenas = [];
-        for (let i = 0; i < this.maxArenas; i++) {
-            if (arenaPlayerCounts[i] === 0) {
-                emptyArenas.push(i);
-            }
-        }
-        
-        // If we found empty arenas, pick one randomly
-        if (emptyArenas.length > 0) {
-            const randomIndex = Math.floor(Math.random() * emptyArenas.length);
-            return emptyArenas[randomIndex];
-        }
-        
-        // If all arenas have players, pick the one with the fewest players
-        let minPlayers = Infinity;
-        let minArenas = [];
-        
-        for (let i = 0; i < this.maxArenas; i++) {
-            if (arenaPlayerCounts[i] < minPlayers) {
-                minPlayers = arenaPlayerCounts[i];
-                minArenas = [i];
-            } else if (arenaPlayerCounts[i] === minPlayers) {
-                minArenas.push(i);
-            }
-        }
-        
-        // If we found arenas with the minimum number of players, pick one randomly
-        if (minArenas.length > 0) {
-            const randomIndex = Math.floor(Math.random() * minArenas.length);
-            return minArenas[randomIndex];
-        }
-        
-        // Fallback to a random arena if something went wrong
-        return Math.floor(Math.random() * this.maxArenas);
+        // Update UI based on nearby players
+        this.updateChallengeUI();
     }
-    
+
     /**
-     * Update method called from main animation loop.
+     * Updates the challenge UI based on nearby players
      */
-    update(deltaTime) {
-        // Skip if player not loaded
-        if (!this.localPlayer || !this.localPlayer.group) {
+    updateChallengeUI() {
+        if (!this.challengePrompt) return;
+        
+        // Show/hide challenge prompt based on whether there are nearby players
+        if (this.challengePromptActive && !this.challengeUIVisible) {
+            this.challengePrompt.style.display = 'block';
+            this.challengeUIVisible = true;
+        } else if (!this.challengePromptActive && this.challengeUIVisible) {
+            this.challengePrompt.style.display = 'none';
+            this.challengeUIVisible = false;
+        }
+    }
+
+    /**
+     * Send a challenge to the nearest player
+     */
+    sendChallenge() {
+        if (this.nearbyPlayers.size === 0) return;
+        
+        // Find the nearest player
+        let nearestPlayerId = null;
+        let nearestDistance = Infinity;
+        
+        for (const [playerId, data] of this.nearbyPlayers) {
+            if (data.distance < nearestDistance) {
+                nearestDistance = data.distance;
+                nearestPlayerId = playerId;
+            }
+        }
+        
+        if (nearestPlayerId) {
+            // Hide the challenge prompt
+            this.challengePrompt.style.display = 'none';
+            this.challengeUIVisible = false;
+            
+            // Show "Challenge sent" message
+            this.showMessage('Challenge sent!', 2000);
+            
+            // Send challenge to server
+            this.networkManager.sendQuickDrawChallenge(nearestPlayerId);
+            
+            console.log(`Quick Draw challenge sent to player ${nearestPlayerId}`);
+        }
+    }
+
+    /**
+     * Handle receiving a challenge from another player
+     * @param {Object} message - The challenge message
+     */
+    handleChallengeReceived(message) {
+        if (this.inDuel || this.inLobby) {
+            // Automatically decline if already in a duel or lobby
+            this.networkManager.sendQuickDrawDecline(message.challengerId);
             return;
         }
         
-        // Update physics system
-        if (this.physics) {
-            this.physics.update(deltaTime);
-            
-            // If the player is in the arena, enforce arena boundary collision
-            if (this.inDuel && this.activeArenaIndex >= 0 && this.arenaBoundaries[this.activeArenaIndex]) {
-                const playerPos = this.localPlayer.group.position.clone();
-                const config = this.arenaConfigs[this.activeArenaIndex];
-                const isInArena = this.isPointInSpecificArena(playerPos, this.activeArenaIndex);
-                
-                if (!isInArena) {
-                    // If player is outside the arena but should be inside, push them back in
-                    const dirToCenter = new THREE.Vector3(
-                        config.center.x - playerPos.x,
-                        0,
-                        config.center.z - playerPos.z
-                    ).normalize();
-                    
-                    // Move player back inside
-                    this.localPlayer.group.position.x += dirToCenter.x * 0.1;
-                    this.localPlayer.group.position.z += dirToCenter.z * 0.1;
-                }
-            }
+        // Store the pending challenge
+        this.pendingChallenge = {
+            challengerId: message.challengerId,
+            challengerPosition: message.challengerPosition
+        };
+        
+        // Show the challenge invitation
+        this.challengeInvitation.innerHTML = `
+            <div style="margin-bottom: 15px">Player ${message.challengerId} challenges you to a Quick Draw duel!</div>
+            <div style="display: flex; justify-content: space-around; margin-top: 10px;">
+                <div style="background-color: #4CAF50; padding: 10px 20px; border-radius: 5px;">Press Enter to accept</div>
+                <div style="background-color: #F44336; padding: 10px 20px; border-radius: 5px;">Press T to decline</div>
+            </div>
+        `;
+        this.challengeInvitation.style.display = 'block';
+        
+        // Play notification sound
+        if (this.soundManager) {
+            this.soundManager.playSound("bellstart");
         }
         
-        // Check for portal collision when not in lobby or duel
-        if (!this.inLobby && !this.inDuel) {
-            const playerPos = this.localPlayer.group.position.clone();
-            
-            // Check if player is colliding with the single portal
-            if (this.arenaConfigs[0].portalCollider && this.arenaConfigs[0].portalCollider.containsPoint(playerPos)) {
-                this.joinQueue(this.getOptimalArenaIndex());
-            }
-        }
-        
-        // If in countdown phase, check for early aiming
-        if (this.inDuel && (this.duelState === 'countdown' || this.duelState === 'ready')) {
-            // Check if player is trying to aim or if right mouse is pressed
-            if ((this.localPlayer.isAiming || (window.mouseDown && window.mouseDown.right)) && !this.gunLocked) {
-                this.penalizeEarlyDraw();
-                // Force isAiming to false to prevent multiple penalties
-                this.localPlayer.isAiming = false;
-                // Ensure the gun is not visible
-                if (this.localPlayer.revolver && this.localPlayer.revolver.group) {
-                    this.localPlayer.revolver.group.visible = false;
-                }
-            }
-        }
-        
-        // Enforce penalty lock or re-enable aiming based on penalty status
-        const currentTime = performance.now();
-        if (currentTime < this.penaltyEndTime) {
-            // Penalty is active - keep gun locked
-            this.localPlayer.canAim = false;
-            this.localPlayer.isAiming = false;
-            if (this.localPlayer.revolver && this.localPlayer.revolver.group) {
-                this.localPlayer.revolver.group.visible = false;
-            }
-        } else if (this.penaltyEndTime > 0 && currentTime >= this.penaltyEndTime && this.duelState === 'draw') {
-            // Penalty just expired and we're in the draw phase - re-enable aiming
-            this.localPlayer.canAim = this.originalCanAim;
-            this.penaltyEndTime = 0; // Clear the penalty end time
-            this.gunLocked = false;
-            console.log("Penalty expired during update, gun unlocked");
-        }
-        
-        // Update portal instruction visibility
-        this.updatePortalInstructions();
+        console.log(`Received Quick Draw challenge from player ${message.challengerId}`);
     }
-    
+
     /**
-     * Updates the Quick Draw status indicator.
+     * Accept a pending challenge
      */
-    updateStatusIndicator() {
-        if (!this.statusIndicator) return;
+    acceptChallenge() {
+        if (!this.pendingChallenge) return;
         
-        if (this.inLobby) {
-            const arenaNum = this.activeArenaIndex + 1;
-            this.statusIndicator.textContent = `Quick Draw Arena ${arenaNum}: Waiting for opponent...`;
-            this.statusIndicator.style.display = 'block';
-            this.statusIndicator.style.backgroundColor = 'rgba(33, 150, 243, 0.7)';
-        } else if (this.inDuel) {
-            const arenaNum = this.activeArenaIndex + 1;
-            let statusText = `Quick Draw Arena ${arenaNum}: Duel in progress`;
-            let bgColor = 'rgba(255, 87, 34, 0.7)';
-            
-            if (this.duelState === 'ready') {
-                statusText = `Quick Draw Arena ${arenaNum}: Get ready!`;
-            } else if (this.duelState === 'countdown') {
-                statusText = `Quick Draw Arena ${arenaNum}: Wait for the signal...`;
-            } else if (this.duelState === 'draw') {
-                statusText = `Quick Draw Arena ${arenaNum}: DRAW!`;
-                bgColor = 'rgba(244, 67, 54, 0.7)';
-            }
-            
-            this.statusIndicator.textContent = statusText;
-            this.statusIndicator.style.display = 'block';
-            this.statusIndicator.style.backgroundColor = bgColor;
-        } else {
-            this.statusIndicator.style.display = 'none';
-        }
+        // Hide the invitation
+        this.challengeInvitation.style.display = 'none';
+        
+        // Send acceptance to server
+        this.networkManager.sendQuickDrawAccept(this.pendingChallenge.challengerId);
+        
+        // Show message
+        this.showMessage('Challenge accepted!', 1000);
+        
+        console.log(`Accepted Quick Draw challenge from player ${this.pendingChallenge.challengerId}`);
+        
+        // Wait for server to respond with match details
+        // Challenge will be cleared when match is found
     }
-    
+
     /**
-     * Join the Quick Draw queue for a specific arena.
-     * @param {number} arenaIndex - The arena index to join (0-4)
+     * Decline a pending challenge
      */
-    joinQueue(arenaIndex) {
-        if (this.inLobby || this.inDuel) {
-            return; // Already in queue or duel
-        }
+    declineChallenge() {
+        if (!this.pendingChallenge) return;
         
-        if (arenaIndex < 0 || arenaIndex >= this.maxArenas) {
-            console.error(`Invalid arena index: ${arenaIndex}`);
-            return;
-        }
+        // Hide the invitation
+        this.challengeInvitation.style.display = 'none';
         
-        this.inLobby = true;
-        this.activeArenaIndex = arenaIndex;
+        // Send decline to server
+        this.networkManager.sendQuickDrawDecline(this.pendingChallenge.challengerId);
         
-        // Update the player's lobby index
-        this.localPlayer.setQuickDrawLobby(arenaIndex);
+        // Clear the pending challenge
+        this.pendingChallenge = null;
         
-        this.showMessage(`Joining Quick Draw Arena ${arenaIndex + 1} queue...`);
-        this.updateStatusIndicator();
-        
-        // Send join request to server with arena index
-        this.networkManager.sendQuickDrawJoin(arenaIndex);
-        
-        console.log(`Joined Quick Draw queue for arena ${arenaIndex + 1}`);
+        console.log('Declined Quick Draw challenge');
     }
-    
+
     /**
-     * Handle queue join confirmation from server.
+     * Handle challenge accepted by other player
+     * @param {Object} message - The acceptance message
      */
-    handleQueueJoin(message) {
-        // Make sure the arena index matches what we expect
-        if (message.arenaIndex !== undefined && message.arenaIndex !== this.activeArenaIndex) {
-            this.activeArenaIndex = message.arenaIndex;
-            this.localPlayer.setQuickDrawLobby(message.arenaIndex);
-        }
+    handleChallengeAccepted(message) {
+        // Show message
+        this.showMessage('Challenge accepted!', 1000);
         
-        this.showMessage(`Waiting for opponent in Arena ${this.activeArenaIndex + 1}...`);
-        this.updateStatusIndicator();
-        console.log(`Quick Draw queue joined for arena ${this.activeArenaIndex + 1}, waiting for opponent`);
+        console.log(`Player ${message.targetId} accepted your Quick Draw challenge`);
+        
+        // Wait for server to respond with match details
     }
-    
+
     /**
-     * Handle match found notification from server.
+     * Handle challenge declined by other player
+     * @param {Object} message - The decline message
      */
-    handleMatchFound(message) {
-        this.inLobby = false;
-        this.inDuel = true;
-        this.duelOpponentId = message.opponentId;
+    handleChallengeDeclined(message) {
+        // Show message
+        this.showMessage('Challenge declined', 2000);
         
-        // Make sure we're using the correct arena
-        if (message.arenaIndex !== undefined) {
-            this.activeArenaIndex = message.arenaIndex;
-            this.localPlayer.setQuickDrawLobby(message.arenaIndex);
-        }
-        
-        this.updateStatusIndicator();
-        
-        this.showMessage(`Opponent found! Preparing duel in Arena ${this.activeArenaIndex + 1}...`);
-        
-        const config = this.arenaConfigs[this.activeArenaIndex];
-        
-        // Teleport to the correct duel area
-        // For "left" side, spawn on the left; for "right", spawn on the right
-        const playerPosition = message.position === 'left' ?
-            new THREE.Vector3(config.center.x - 5, 1.6, config.center.z) : 
-            new THREE.Vector3(config.center.x + 5, 1.6, config.center.z);
-        
-        this.localPlayer.group.position.copy(playerPosition);
-        
-        // Invert player orientation by 180°:
-        // For left side, set rotation.y to (Math.PI/2 + Math.PI) = 3π/2; for right, (-Math.PI/2 + Math.PI) = π/2
-        if (message.position === 'left') {
-            this.localPlayer.group.rotation.y = 3 * Math.PI / 2;
-        } else {
-            this.localPlayer.group.rotation.y = Math.PI / 2;
-        }
-        
-        // Make the correct duel area visible
-        if (config.duelArea) {
-            config.duelArea.visible = true;
-            config.duelAreaActive = true;
-        }
-        
-        // Create the arena physics boundary
-        this.createQuickDrawArenaBoundary(this.activeArenaIndex);
-        
-        // Disable weapon drawing immediately and forcefully
-        this.originalCanAim = this.localPlayer.canAim !== false;
-        this.localPlayer.canAim = false;
-        this.localPlayer.isAiming = false;
-        this.localPlayer.revolver.group.visible = false;
-        
-        // Tell server we're ready after a moment
-        setTimeout(() => {
-            this.networkManager.sendQuickDrawReady();
-        }, 1000);
+        console.log(`Player ${message.targetId} declined your Quick Draw challenge`);
     }
-    
+
     /**
      * Show the "READY?" message with enhanced typography.
      */
@@ -1400,7 +642,7 @@ export class QuickDraw {
             this.hideMessage();
         }, 1000);
     }
-    
+
     /**
      * Start the countdown phase of the duel.
      */
@@ -1414,7 +656,7 @@ export class QuickDraw {
         
         console.log('Duel countdown started - waiting for draw signal');
     }
-    
+
     /**
      * Trigger the "DRAW!" signal with just the expanding circle.
      */
@@ -1422,363 +664,570 @@ export class QuickDraw {
         this.duelState = 'draw';
         this.updateStatusIndicator();
         
-        // Show the message
-        this.showMessage('DRAW!', 1000);
-        
-        // Add CSS classes for the animation
-        document.getElementById('game-container').insertAdjacentHTML('beforeend', `
-            <style>
-                .draw-circle-animation {
-                    animation: draw-circle 0.4s ease-out !important;
-                }
-                
-                .draw-circle-animation-mobile {
-                    animation: draw-circle-mobile 0.4s ease-out !important;
-                }
-                
-                @keyframes draw-circle {
-                    0% { transform: translate(-50%, -50%) scale(0.1); opacity: 0; }
-                    50% { opacity: 1; }
-                    100% { transform: translate(-50%, -50%) scale(1); opacity: 0; }
-                }
-                
-                @keyframes draw-circle-mobile {
-                    0% { transform: translate(-50%, -50%) scale(0.1); opacity: 0; }
-                    50% { opacity: 1; }
-                    100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
-                }
-            </style>
-        `);
-        
-        // Show animated circle with CSS animation
-        this.drawCircle.style.display = 'block';
-        this.drawCircle.style.opacity = '1';
-        
-        // Apply different animations based on device type
-        if (window.isMobileDevice) {
-            // Mobile animation - make the circle bigger and more visible
-            this.drawCircle.style.width = '500px';
-            this.drawCircle.style.height = '500px';
-            this.drawCircle.style.border = '15px solid #FF0000';
-            this.drawCircle.style.boxShadow = '0 0 30px #FF0000';
-            this.drawCircle.classList.add('draw-circle-animation-mobile');
-        } else {
-            this.drawCircle.classList.add('draw-circle-animation');
+        // Enable aiming if not penalized
+        if (this.penaltyEndTime <= Date.now()) {
+            this.localPlayer.canAim = true;
         }
         
-        // Only enable aiming if the penalty period has expired.
-        if (performance.now() >= this.penaltyEndTime) {
-            this.localPlayer.canAim = this.originalCanAim;
-        } else {
-            console.log("Penalty still active; gun remains locked.");
-        }
-        
-        console.log('DRAW signal triggered - players can now shoot (if not penalized)');
-        
-        // Play bell start sound
+        // Play gun draw sound
         if (this.soundManager) {
-            this.soundManager.playSound("bellstart");
+            this.soundManager.playSound("draw", 1.0);
         }
         
-        // Remove animation class after it completes
+        // Show the DRAW! message
+        if (window.isMobileDevice || /iPad|iPhone|iPod/.test(navigator.userAgent)) {
+            // Create iOS-friendly fullscreen overlay for DRAW message
+            const drawOverlay = document.createElement('div');
+            drawOverlay.style.position = 'fixed';
+            drawOverlay.style.top = '0';
+            drawOverlay.style.left = '0';
+            drawOverlay.style.width = '100%';
+            drawOverlay.style.height = '100%';
+            drawOverlay.style.display = 'flex';
+            drawOverlay.style.alignItems = 'center';
+            drawOverlay.style.justifyContent = 'center';
+            drawOverlay.style.backgroundColor = 'rgba(255, 0, 0, 0.2)';
+            drawOverlay.style.zIndex = '9999';
+            
+            // Create text element inside the overlay
+            const drawText = document.createElement('div');
+            drawText.textContent = 'DRAW!';
+            drawText.style.fontSize = '150px';
+            drawText.style.fontWeight = 'bold';
+            drawText.style.fontFamily = 'Western, Arial, sans-serif';
+            drawText.style.color = 'white';
+            drawText.style.textShadow = '0 0 30px #FF0000, 0 0 60px #FF0000';
+            
+            drawOverlay.appendChild(drawText);
+            document.body.appendChild(drawOverlay);
+            
+            // Use a simple animation for better visibility
+            setTimeout(() => {
+                drawText.style.transition = 'transform 0.1s ease-in-out';
+                drawText.style.transform = 'scale(1.3)';
+                setTimeout(() => {
+                    drawText.style.transform = 'scale(1)';
+                }, 100);
+            }, 50);
+            
+            // Remove overlay after 1 second
+            setTimeout(() => {
+                if (drawOverlay.parentNode) {
+                    drawOverlay.parentNode.removeChild(drawOverlay);
+                }
+            }, 1000);
+        }
+        
+        // Show in standard message overlay as backup
+        this.messageOverlay.textContent = 'DRAW!';
+        this.messageOverlay.style.display = 'block';
+        this.messageOverlay.style.fontSize = '72px';
+        this.messageOverlay.style.color = '#FF0000';
+        this.messageOverlay.style.textShadow = '0 0 20px #FF0000';
+        
+        // Animate message
+        this.messageOverlay.style.transition = 'transform 0.1s ease-in-out';
+        this.messageOverlay.style.transform = 'translate(-50%, -50%) scale(1)';
+        
         setTimeout(() => {
-            this.drawCircle.classList.remove('draw-circle-animation');
-            this.drawCircle.classList.remove('draw-circle-animation-mobile');
-            this.drawCircle.style.display = 'none';
-        }, 400);
+            this.messageOverlay.style.transform = 'translate(-50%, -50%) scale(1.2)';
+            setTimeout(() => {
+                this.messageOverlay.style.transform = 'translate(-50%, -50%) scale(1)';
+            }, 100);
+        }, 10);
+        
+        // Hide message after 1 second
+        setTimeout(() => {
+            this.hideMessage();
+        }, 1000);
+        
+        // Animate the draw circle
+        this.drawCircle.style.display = 'block';
+        this.drawCircle.style.opacity = '0';
+        this.drawCircle.style.transform = 'translate(-50%, -50%) scale(0)';
+        
+        // Start animation after a short delay
+        setTimeout(() => {
+            this.drawCircle.style.opacity = '1';
+            this.drawCircle.style.transform = 'translate(-50%, -50%) scale(1)';
+            
+            // Fade out and hide after animation
+            setTimeout(() => {
+                this.drawCircle.style.opacity = '0';
+                
+                // Hide after fade out
+                setTimeout(() => {
+                    this.drawCircle.style.display = 'none';
+                }, 300);
+            }, 800);
+        }, 10);
+    }
+
+    /**
+     * Update method called from main animation loop.
+     */
+    update(deltaTime) {
+        // Skip if player not initialized
+        if (!this.localPlayer || !this.localPlayer.group) return;
+        
+        // Update nearby players for challenges
+        this.updateNearbyPlayers();
+        
+        // Update status indicator
+        this.updateStatusIndicator();
+        
+        // If penalized, keep gun locked until penalty expires
+        if (this.penaltyEndTime > 0) {
+            if (Date.now() < this.penaltyEndTime) {
+                // Keep gun locked
+                this.localPlayer.canAim = false;
+            } else {
+                // Penalty expired, unlock gun if in draw phase
+                if (this.duelState === 'draw') {
+                    this.localPlayer.canAim = true;
+                }
+                
+                // Clear penalty
+                this.penaltyEndTime = 0;
+            }
+        }
+        
+        // Check for early draw (using mouse down) during countdown
+        if (this.duelState === 'countdown' && !this.penaltyEndTime) {
+            if ((window.mouseDown && (window.mouseDown.left || window.mouseDown.right)) || this.localPlayer.isAiming) {
+                this.penalizeEarlyDraw();
+            }
+        }
+    }
+
+    /**
+     * Updates the Quick Draw status indicator.
+     */
+    updateStatusIndicator() {
+        if (!this.statusIndicator) return;
+        
+        // Show/hide based on duel state
+        if (this.inDuel || this.inLobby) {
+            this.statusIndicator.style.display = 'block';
+            let statusText = '';
+            
+            if (this.inLobby) {
+                statusText = 'Quick Draw: Waiting for players...';
+            } else if (this.inDuel) {
+                switch (this.duelState) {
+                    case 'ready':
+                        statusText = 'Quick Draw: Get ready!';
+                        break;
+                    case 'countdown':
+                        statusText = 'Quick Draw: Wait for the signal!';
+                        break;
+                    case 'draw':
+                        statusText = 'Quick Draw: DRAW!';
+                        break;
+                    default:
+                        statusText = 'Quick Draw: Duel in progress';
+                }
+            }
+            
+            this.statusIndicator.textContent = statusText;
+        } else {
+            this.statusIndicator.style.display = 'none';
+        }
+    }
+
+    /**
+     * Handle match found notification from server.
+     */
+    handleMatchFound(message) {
+        this.inDuel = true;
+        this.inLobby = false;
+        this.duelOpponentId = message.opponentId;
+        this.duelState = 'none';
+        this.pendingChallenge = null;
+        
+        // Store original player movement and aiming states
+        this.originalCanAim = this.localPlayer.canAim;
+        this.originalCanMove = this.localPlayer.canMove;
+        
+        // Store original position to return after the duel
+        this.originalPosition = {
+            x: this.localPlayer.group.position.x,
+            y: this.localPlayer.group.position.y,
+            z: this.localPlayer.group.position.z
+        };
+        this.originalRotation = this.localPlayer.group.rotation.y;
+        
+        // Disable player movement and aiming during the duel
+        this.localPlayer.canAim = false;
+        this.localPlayer.canMove = false;
+        
+        // Force-lock player movement to prevent any accidental movement
+        if (message.movementLocked === true) {
+            // Completely block any movement input
+            this.localPlayer.forceLockMovement = true;
+            
+            // Backup original move method and replace with empty function
+            if (!this.localPlayer._origMove) {
+                this.localPlayer._origMove = this.localPlayer.move;
+                this.localPlayer.move = () => {}; // No-op function
+            }
+        }
+        
+        console.log(`Quick Draw match found! Your opponent is player ${message.opponentId}`);
+        
+        // Teleport player to the start position
+        if (message.startPosition) {
+            // First move to new position
+            this.localPlayer.group.position.set(
+                message.startPosition.x,
+                message.startPosition.y,
+                message.startPosition.z
+            );
+            
+            // Set rotation to face the opponent
+            if (message.startRotation !== undefined) {
+                // Apply the exact rotation from the server
+                console.log(`Setting player rotation to: ${message.startRotation.toFixed(4)} radians (${(message.startRotation * 180 / Math.PI).toFixed(1)}°)`);
+                
+                // In THREE.js, rotation.y represents rotation around the Y-axis (in radians)
+                // The server calculates this angle to make players face each other
+                this.localPlayer.group.rotation.y = message.startRotation;
+                
+                // Debug visualization - draw a direction arrow for 5 seconds
+                this.showFacingDirection(message.startPosition, message.startRotation);
+            }
+        }
+        
+        // Show health bar with full health
+        this.updateHealthBar(100);
+        this.healthBarContainer.style.display = 'block';
+        
+        // Update status indicator and show match found message
+        this.updateStatusIndicator();
+        this.showMessage(`Duel vs. Player ${message.opponentId}`, 2000);
+        
+        // Mark as ready after showing message
+        setTimeout(() => {
+            this.networkManager.sendQuickDrawReady();
+        }, 2000);
     }
     
+    /**
+     * Show a temporary arrow indicating which way the player is facing
+     * @param {Object} position - The player position
+     * @param {number} rotation - The player rotation in radians
+     */
+    showFacingDirection(position, rotation) {
+        // Create a group to hold all debug objects
+        const debugGroup = new THREE.Group();
+        
+        // Create direction arrow with more visibility
+        const arrowLength = 8; // Longer arrow
+        const arrowGeometry = new THREE.ConeGeometry(0.5, arrowLength, 8);
+        const arrowMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0x00FF00,
+            transparent: true,
+            opacity: 0.8
+        });
+        const arrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
+        
+        // Position the arrow at player position, slightly above ground
+        arrow.position.set(0, 2, 0); // Local position within group
+        
+        // Rotate arrow to match player rotation
+        // By default, the cone points up along Y axis, so we need to rotate it to point along Z axis first
+        arrow.rotation.x = Math.PI / 2;
+        
+        // Add line showing forward direction
+        const lineMaterial = new THREE.LineBasicMaterial({
+            color: 0xFFFF00,
+            linewidth: 3
+        });
+        const linePoints = [];
+        linePoints.push(new THREE.Vector3(0, 0.5, 0));
+        linePoints.push(new THREE.Vector3(0, 0.5, arrowLength * 1.2)); // Slightly longer than arrow
+        const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
+        const line = new THREE.Line(lineGeometry, lineMaterial);
+        
+        // Create text label showing rotation angle
+        const textCanvas = document.createElement('canvas');
+        textCanvas.width = 256;
+        textCanvas.height = 128;
+        const context = textCanvas.getContext('2d');
+        context.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        context.fillRect(0, 0, textCanvas.width, textCanvas.height);
+        context.font = 'bold 24px Arial';
+        context.fillStyle = 'white';
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        
+        // Calculate angle in degrees for display
+        const angleDegrees = (rotation * 180 / Math.PI).toFixed(1);
+        context.fillText(`Rotation: ${angleDegrees}°`, textCanvas.width / 2, textCanvas.height / 2);
+        
+        const texture = new THREE.CanvasTexture(textCanvas);
+        const spriteMaterial = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true
+        });
+        const sprite = new THREE.Sprite(spriteMaterial);
+        sprite.scale.set(5, 2.5, 1);
+        sprite.position.set(0, 4, 0); // Position above arrow
+        
+        // Add all elements to the debug group
+        debugGroup.add(arrow);
+        debugGroup.add(line);
+        debugGroup.add(sprite);
+        
+        // Position and rotate the entire group
+        debugGroup.position.copy(position);
+        debugGroup.rotation.y = rotation;
+        
+        // Add to scene
+        this.scene.add(debugGroup);
+        
+        // Add temporary sphere at player position as reference
+        const sphereGeometry = new THREE.SphereGeometry(0.5, 16, 16);
+        const sphereMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0xFF0000,
+            transparent: true,
+            opacity: 0.6
+        });
+        const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+        sphere.position.set(position.x, position.y + 0.5, position.z);
+        this.scene.add(sphere);
+        
+        // Create a label for "Player Position"
+        const posCanvas = document.createElement('canvas');
+        posCanvas.width = 256;
+        posCanvas.height = 64;
+        const posContext = posCanvas.getContext('2d');
+        posContext.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        posContext.fillRect(0, 0, posCanvas.width, posCanvas.height);
+        posContext.font = 'bold 20px Arial';
+        posContext.fillStyle = 'white';
+        posContext.textAlign = 'center';
+        posContext.textBaseline = 'middle';
+        posContext.fillText('Player Position', posCanvas.width / 2, posCanvas.height / 2);
+        
+        const posTexture = new THREE.CanvasTexture(posCanvas);
+        const posMaterial = new THREE.SpriteMaterial({
+            map: posTexture,
+            transparent: true
+        });
+        const posSprite = new THREE.Sprite(posMaterial);
+        posSprite.scale.set(4, 1, 1);
+        posSprite.position.set(position.x, position.y + 1.5, position.z);
+        this.scene.add(posSprite);
+        
+        console.log(`Debug direction arrow created at (${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)}) with rotation ${rotation.toFixed(4)} rad (${angleDegrees}°)`);
+        
+        // Remove after 5 seconds
+        setTimeout(() => {
+            this.scene.remove(debugGroup);
+            this.scene.remove(sphere);
+            this.scene.remove(posSprite);
+        }, 5000);
+    }
+    
+    /**
+     * Updates the health bar with the current health value
+     * @param {number} health - Health value (0-100)
+     */
+    updateHealthBar(health) {
+        // Ensure health is within valid range
+        health = Math.max(0, Math.min(100, health));
+        
+        // Update health bar width
+        this.healthBar.style.width = `${health}%`;
+        
+        // Update color based on health amount
+        if (health > 60) {
+            this.healthBar.style.backgroundColor = '#00FF00'; // Green
+        } else if (health > 30) {
+            this.healthBar.style.backgroundColor = '#FFA500'; // Orange
+        } else {
+            this.healthBar.style.backgroundColor = '#FF0000'; // Red
+        }
+        
+        // Update text
+        this.healthText.textContent = `${health} HP`;
+    }
+
     /**
      * Apply a penalty with dramatic red flashing warning.
      * Once triggered, records a penalty end time so that gun drawing remains locked
      * for a full 3 seconds even if the "DRAW!" signal comes.
      */
     penalizeEarlyDraw() {
-        if (this.gunLocked) return;
-        
-        this.gunLocked = true;
-        this.penaltyEndTime = performance.now() + 3000;
-        
-        // Create a fullscreen warning overlay for all devices
-        const penaltyFullscreen = document.createElement('div');
-        penaltyFullscreen.style.position = 'fixed';
-        penaltyFullscreen.style.top = '0';
-        penaltyFullscreen.style.left = '0';
-        penaltyFullscreen.style.width = '100%';
-        penaltyFullscreen.style.height = '100%';
-        penaltyFullscreen.style.backgroundColor = 'rgba(255, 0, 0, 0.4)';
-        penaltyFullscreen.style.display = 'flex';
-        penaltyFullscreen.style.alignItems = 'center';
-        penaltyFullscreen.style.justifyContent = 'center';
-        penaltyFullscreen.style.zIndex = '9999';
-        
-        // Create text element inside the overlay
-        const warningText = document.createElement('div');
-        warningText.textContent = 'TOO EARLY!';
-        warningText.style.fontWeight = 'bold';
-        warningText.style.fontFamily = 'Arial, sans-serif';
-        warningText.style.color = 'white';
-        
-        // Different styles for mobile vs desktop
-        if (window.isMobileDevice || /iPad|iPhone|iPod/.test(navigator.userAgent)) {
-            warningText.style.fontSize = '100px';
-            warningText.style.textShadow = '0 0 20px #FF0000, 0 0 40px #FF0000';
-        } else {
-            warningText.style.fontSize = '80px';
-            warningText.style.textShadow = '0 0 15px #FF0000, 0 0 30px #FF0000';
-        }
-        
-        penaltyFullscreen.appendChild(warningText);
-        document.body.appendChild(penaltyFullscreen);
-        
-        // Countdown timer for fullscreen overlay
-        let secondsLeft = 3;
-        const updateCountdown = () => {
-            secondsLeft--;
-            if (secondsLeft > 0) {
-                warningText.textContent = `TOO EARLY! (${secondsLeft}s)`;
-                setTimeout(updateCountdown, 1000);
-            } else {
-                // Remove overlay when time's up
-                if (penaltyFullscreen.parentNode) {
-                    penaltyFullscreen.parentNode.removeChild(penaltyFullscreen);
-                }
-            }
-        };
-        setTimeout(updateCountdown, 1000);
-        
-        // Show the message with a warning style (backup for all devices)
-        this.showMessage('TOO EARLY!', 3000);
-        this.messageOverlay.classList.add('gun-locked-warning');
-        
-        // Disable aiming for penalty duration
+        // Lock gun for 3 seconds
+        this.penaltyEndTime = Date.now() + 3000;
         this.localPlayer.canAim = false;
-        this.localPlayer.isAiming = false;
-        this.localPlayer.revolver.group.visible = false;
         
-        // Add a subtle screen flash
-        const penaltyFlash = document.createElement('div');
-        penaltyFlash.style.position = 'absolute';
-        penaltyFlash.style.top = '0';
-        penaltyFlash.style.left = '0';
-        penaltyFlash.style.width = '100%';
-        penaltyFlash.style.height = '100%';
-        penaltyFlash.style.backgroundColor = 'rgba(255, 0, 0, 0.3)';
-        penaltyFlash.style.opacity = '0';
-        penaltyFlash.style.transition = 'opacity 0.3s ease-in-out';
-        penaltyFlash.style.pointerEvents = 'none';
-        penaltyFlash.style.zIndex = '990';
-        document.getElementById('game-container').appendChild(penaltyFlash);
+        // Show the penalty message
+        this.showMessage('TOO EARLY! Penalty!', 2000);
         
-        // Flash the screen
-        setTimeout(() => {
-            penaltyFlash.style.opacity = '1';
-            setTimeout(() => {
-                penaltyFlash.style.opacity = '0';
-                setTimeout(() => {
-                    if (penaltyFlash.parentNode) {
-                        penaltyFlash.parentNode.removeChild(penaltyFlash);
-                    }
-                }, 300);
-            }, 200);
-        }, 10);
+        // Create a flashing red overlay for penalty
+        const penaltyOverlay = document.createElement('div');
+        penaltyOverlay.style.position = 'absolute';
+        penaltyOverlay.style.top = '0';
+        penaltyOverlay.style.left = '0';
+        penaltyOverlay.style.width = '100%';
+        penaltyOverlay.style.height = '100%';
+        penaltyOverlay.style.backgroundColor = 'rgba(255, 0, 0, 0.3)';
+        penaltyOverlay.style.zIndex = '999';
+        penaltyOverlay.style.animation = 'penalty-flash 0.5s 3';
         
-        // Play error sound
+        // Add animation style
+        const style = document.createElement('style');
+        style.innerHTML = `
+            @keyframes penalty-flash {
+                0% { opacity: 0; }
+                50% { opacity: 1; }
+                100% { opacity: 0; }
+            }
+        `;
+        document.head.appendChild(style);
+        
+        // Add to game container and remove after penalty
+        document.getElementById('game-container').appendChild(penaltyOverlay);
+        
+        // Play penalty sound
         if (this.soundManager) {
-            this.soundManager.playSound("aimclick");
+            this.soundManager.playSound("wrong", 0.7);
         }
         
-        // After 3 seconds, clear the penalty
+        // Remove overlay after penalty animation
         setTimeout(() => {
-            this.gunLocked = false;
-            this.penaltyEndTime = 0;
-            
-            // Re-enable aiming if the duel is in the "draw" phase
-            if (this.duelState === 'draw') {
-                this.localPlayer.canAim = this.originalCanAim;
-                console.log("Penalty expired, gun unlocked.");
+            if (penaltyOverlay.parentNode) {
+                penaltyOverlay.parentNode.removeChild(penaltyOverlay);
             }
-            
-            this.hideMessage();
-            this.messageOverlay.classList.remove('gun-locked-warning');
-        }, 3000);
+        }, 1500);
     }
-    
+
     /**
      * End the duel with enhanced win/lose UI effects.
      */
     endDuel(winnerId) {
-        const isWinner = winnerId === this.localPlayer.id;
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        // Update state
+        this.duelState = 'none';
         
-        // Create a fullscreen overlay specifically for iOS devices
-        if (isIOS || window.isMobileDevice) {
+        // Determine if player won or lost
+        const playerWon = winnerId === this.localPlayer.id;
+        
+        // For iOS/Safari and mobile devices - create a fixed fullscreen overlay
+        if (window.isMobileDevice || /iPad|iPhone|iPod/.test(navigator.userAgent)) {
             // Create iOS-friendly fullscreen overlay
-            const fullscreenMessage = document.createElement('div');
-            fullscreenMessage.style.position = 'fixed';
-            fullscreenMessage.style.top = '0';
-            fullscreenMessage.style.left = '0';
-            fullscreenMessage.style.width = '100%';
-            fullscreenMessage.style.height = '100%';
-            fullscreenMessage.style.display = 'flex';
-            fullscreenMessage.style.alignItems = 'center';
-            fullscreenMessage.style.justifyContent = 'center';
-            fullscreenMessage.style.backgroundColor = isWinner ? 'rgba(76, 175, 80, 0.5)' : 'rgba(244, 67, 54, 0.5)';
-            fullscreenMessage.style.zIndex = '9999';
+            const resultOverlay = document.createElement('div');
+            resultOverlay.style.position = 'fixed';
+            resultOverlay.style.top = '0';
+            resultOverlay.style.left = '0';
+            resultOverlay.style.width = '100%';
+            resultOverlay.style.height = '100%';
+            resultOverlay.style.display = 'flex';
+            resultOverlay.style.alignItems = 'center';
+            resultOverlay.style.justifyContent = 'center';
+            resultOverlay.style.backgroundColor = playerWon ? 'rgba(0, 128, 0, 0.4)' : 'rgba(128, 0, 0, 0.4)';
+            resultOverlay.style.zIndex = '9999';
             
             // Create text element inside the overlay
-            const messageText = document.createElement('div');
-            messageText.textContent = isWinner ? 'YOU WIN!' : 'YOU LOSE!';
-            messageText.style.fontSize = '100px';
-            messageText.style.fontWeight = 'bold';
-            messageText.style.fontFamily = 'Arial, sans-serif';
-            messageText.style.color = 'white';
-            messageText.style.textShadow = isWinner ? 
-                '0 0 20px #4CAF50, 0 0 40px #4CAF50' : 
-                '0 0 20px #F44336, 0 0 40px #F44336';
+            const resultText = document.createElement('div');
+            resultText.textContent = playerWon ? 'VICTORY!' : 'DEFEAT';
+            resultText.style.fontSize = '130px';
+            resultText.style.fontWeight = 'bold';
+            resultText.style.fontFamily = 'Western, Arial, sans-serif';
+            resultText.style.color = 'white';
+            resultText.style.textShadow = playerWon 
+                ? '0 0 30px #00FF00, 0 0 60px #00FF00' 
+                : '0 0 30px #FF0000, 0 0 60px #FF0000';
             
-            fullscreenMessage.appendChild(messageText);
-            document.body.appendChild(fullscreenMessage);
+            resultOverlay.appendChild(resultText);
+            document.body.appendChild(resultOverlay);
+            
+            // Use a simple animation for better visibility
+            setTimeout(() => {
+                resultText.style.transition = 'transform 0.3s ease-in-out';
+                resultText.style.transform = 'scale(1.2)';
+                setTimeout(() => {
+                    resultText.style.transform = 'scale(1)';
+                }, 300);
+            }, 100);
             
             // Remove overlay after 3 seconds
             setTimeout(() => {
-                if (fullscreenMessage.parentNode) {
-                    fullscreenMessage.parentNode.removeChild(fullscreenMessage);
+                if (resultOverlay.parentNode) {
+                    resultOverlay.parentNode.removeChild(resultOverlay);
                 }
             }, 3000);
         }
         
-        // Show regular winner/loser message for all devices (as backup)
-        if (isWinner) {
-            this.showMessage('YOU WIN!', 3000);
-            this.messageOverlay.classList.add('quick-draw-winner');
-            
-            // Enhanced styling for mobile
-            if (window.isMobileDevice) {
-                this.messageOverlay.style.fontSize = '84px';
-                this.messageOverlay.style.textShadow = '0 0 20px #4CAF50, 0 0 30px #4CAF50';
-                this.messageOverlay.style.zIndex = '2000';
-            } else {
-                this.messageOverlay.style.fontSize = '64px';
-            }
-            
-            // Add a subtle victory flash
-            const victoryFlash = document.createElement('div');
-            victoryFlash.style.position = 'absolute';
-            victoryFlash.style.top = '0';
-            victoryFlash.style.left = '0';
-            victoryFlash.style.width = '100%';
-            victoryFlash.style.height = '100%';
-            victoryFlash.style.backgroundColor = 'rgba(76, 175, 80, 0.3)';
-            victoryFlash.style.opacity = '0';
-            victoryFlash.style.transition = 'opacity 0.5s ease-in-out';
-            victoryFlash.style.pointerEvents = 'none';
-            victoryFlash.style.zIndex = '1999';
-            document.getElementById('game-container').appendChild(victoryFlash);
-            
+        // Show in standard message overlay as backup
+        this.messageOverlay.textContent = playerWon ? 'VICTORY!' : 'DEFEAT';
+        this.messageOverlay.style.display = 'block';
+        this.messageOverlay.style.fontSize = '72px';
+        this.messageOverlay.style.color = playerWon ? '#00FF00' : '#FF0000';
+        this.messageOverlay.style.textShadow = playerWon 
+            ? '0 0 20px #00FF00' 
+            : '0 0 20px #FF0000';
+        
+        // Animate message
+        this.messageOverlay.style.transition = 'transform 0.2s ease-in-out';
+        this.messageOverlay.style.transform = 'translate(-50%, -50%) scale(1)';
+        
+        setTimeout(() => {
+            this.messageOverlay.style.transform = 'translate(-50%, -50%) scale(1.3)';
             setTimeout(() => {
-                victoryFlash.style.opacity = '1';
-                setTimeout(() => {
-                    victoryFlash.style.opacity = '0';
-                    setTimeout(() => {
-                        if (victoryFlash.parentNode) {
-                            victoryFlash.parentNode.removeChild(victoryFlash);
-                        }
-                    }, 500);
-                }, 1500);
-            }, 10);
-        } else {
-            this.showMessage('YOU LOSE!', 3000);
-            this.messageOverlay.classList.add('quick-draw-loser');
-            
-            // Enhanced styling for mobile
-            if (window.isMobileDevice) {
-                this.messageOverlay.style.fontSize = '84px';
-                this.messageOverlay.style.textShadow = '0 0 20px #F44336, 0 0 30px #F44336';
-                this.messageOverlay.style.zIndex = '2000';
+                this.messageOverlay.style.transform = 'translate(-50%, -50%) scale(1)';
+            }, 200);
+        }, 10);
+        
+        // Play victory/defeat sound
+        if (this.soundManager) {
+            if (playerWon) {
+                this.soundManager.playSound("victory", 0.7);
             } else {
-                this.messageOverlay.style.fontSize = '64px';
+                this.soundManager.playSound("defeat", 0.7);
             }
-            
-            // Add a defeat flash for the loser
-            const defeatFlash = document.createElement('div');
-            defeatFlash.style.position = 'absolute';
-            defeatFlash.style.top = '0';
-            defeatFlash.style.left = '0';
-            defeatFlash.style.width = '100%';
-            defeatFlash.style.height = '100%';
-            defeatFlash.style.backgroundColor = 'rgba(244, 67, 54, 0.3)';
-            defeatFlash.style.opacity = '0';
-            defeatFlash.style.transition = 'opacity 0.5s ease-in-out';
-            defeatFlash.style.pointerEvents = 'none';
-            defeatFlash.style.zIndex = '1999';
-            document.getElementById('game-container').appendChild(defeatFlash);
-            
-            setTimeout(() => {
-                defeatFlash.style.opacity = '1';
-                setTimeout(() => {
-                    defeatFlash.style.opacity = '0';
-                    setTimeout(() => {
-                        if (defeatFlash.parentNode) {
-                            defeatFlash.parentNode.removeChild(defeatFlash);
-                        }
-                    }, 500);
-                }, 1500);
-            }, 10);
         }
         
-        // Store the current arena index before resetting
-        const endedArenaIndex = this.activeArenaIndex;
-        
-        // Reset duel state
-        this.duelState = 'none';
-        this.inDuel = false;
-        this.duelOpponentId = null;
-        this.updateStatusIndicator();
-        
-        // Clean up the physics boundary
-        this.removeQuickDrawArenaBoundary(endedArenaIndex);
-        
-        // Clear any timers
-        if (this.countdownTimer) clearTimeout(this.countdownTimer);
-        if (this.drawTimer) clearTimeout(this.drawTimer);
-        if (this.penaltyTimer) clearTimeout(this.penaltyTimer);
-        
-        // Hide the active duel area and teleport back to spawn after delay
+        // Hide message after 3 seconds
         setTimeout(() => {
-            // Make sure we're hiding the correct duel area
-            if (endedArenaIndex >= 0 && endedArenaIndex < this.maxArenas) {
-                const config = this.arenaConfigs[endedArenaIndex];
-                if (config.duelArea) {
-                    config.duelArea.visible = false;
-                    config.duelAreaActive = false;
-                }
+            this.hideMessage();
+            
+            // Reset player state
+            this.inDuel = false;
+            this.duelOpponentId = null;
+            
+            // Hide health bar
+            this.healthBarContainer.style.display = 'none';
+            
+            // Restore original movement methods if they were force-locked
+            if (this.localPlayer._origMove) {
+                this.localPlayer.move = this.localPlayer._origMove;
+                this.localPlayer._origMove = null;
+                this.localPlayer.forceLockMovement = false;
             }
             
-            // Teleport back to normal spawn
-            this.localPlayer.spawnPlayerRandomly();
-            
-            // Re-enable normal controls
+            // Restore original movement and aiming states
             this.localPlayer.canAim = this.originalCanAim;
-            this.gunLocked = false;
+            this.localPlayer.canMove = this.originalCanMove;
             
-            // Reset health
-            this.localPlayer.health = 100;
-            if (typeof window.updateHealthUI === 'function') {
-                window.updateHealthUI(this.localPlayer);
+            // Return to original position
+            if (this.originalPosition) {
+                this.localPlayer.group.position.set(
+                    this.originalPosition.x,
+                    this.originalPosition.y,
+                    this.originalPosition.z
+                );
+                this.localPlayer.group.rotation.y = this.originalRotation;
             }
             
-            // Reset message styling
-            this.messageOverlay.classList.remove('quick-draw-winner', 'quick-draw-loser');
-            this.messageOverlay.style.fontSize = '48px'; // Reset font size
-            this.messageOverlay.style.textShadow = '2px 2px 4px rgba(0, 0, 0, 0.5)'; // Reset text shadow
+            // Update UI
+            this.updateStatusIndicator();
             
-            // Reset active arena and Quick Draw lobby
-            this.activeArenaIndex = -1;
-            this.localPlayer.setQuickDrawLobby(-1);
         }, 3000);
     }
-    
+
     /**
      * Helper to show a message in the center of the screen.
      */
@@ -1792,61 +1241,18 @@ export class QuickDraw {
             }, duration);
         }
     }
-    
+
     /**
      * Hide the message overlay.
      */
     hideMessage() {
         this.messageOverlay.style.display = 'none';
     }
-    
+
     /**
      * Cleanup resources.
      */
     cleanup() {
-        // Remove the portal group
-        if (this.portalGroup) {
-            this.scene.remove(this.portalGroup);
-            this.portalGroup.traverse(child => {
-                if (child.geometry) child.geometry.dispose();
-                if (child.material) {
-                    if (Array.isArray(child.material)) {
-                        child.material.forEach(mat => mat.dispose());
-                    } else {
-                        child.material.dispose();
-                    }
-                }
-            });
-        }
-        
-        // Remove duel areas
-        for (let i = 0; i < this.maxArenas; i++) {
-            const config = this.arenaConfigs[i];
-            
-            // Remove duel area
-            if (config.duelArea) {
-                this.scene.remove(config.duelArea);
-                config.duelArea.traverse(child => {
-                    if (child.geometry) child.geometry.dispose();
-                    if (child.material) {
-                        if (Array.isArray(child.material)) {
-                            child.material.forEach(mat => mat.dispose());
-                        } else {
-                            child.material.dispose();
-                        }
-                    }
-                });
-            }
-            
-            // Remove physics boundary
-            this.removeQuickDrawArenaBoundary(i);
-        }
-        
-        // Remove instruction elements
-        if (this.instructionsElement && this.instructionsElement.parentNode) {
-            this.instructionsElement.parentNode.removeChild(this.instructionsElement);
-        }
-        
         // Clean up physics
         if (this.physics) {
             this.physics.cleanup();
@@ -1865,13 +1271,251 @@ export class QuickDraw {
             this.statusIndicator.parentNode.removeChild(this.statusIndicator);
         }
         
-        if (this.lobbyIndicator && this.lobbyIndicator.parentNode) {
-            this.lobbyIndicator.parentNode.removeChild(this.lobbyIndicator);
+        if (this.healthBarContainer && this.healthBarContainer.parentNode) {
+            this.healthBarContainer.parentNode.removeChild(this.healthBarContainer);
         }
         
         // Clear timers
         if (this.countdownTimer) clearTimeout(this.countdownTimer);
         if (this.drawTimer) clearTimeout(this.drawTimer);
         if (this.penaltyTimer) clearTimeout(this.penaltyTimer);
+        
+        // Remove challenge UI elements
+        if (this.challengePrompt && this.challengePrompt.parentNode) {
+            this.challengePrompt.parentNode.removeChild(this.challengePrompt);
+        }
+        
+        if (this.challengeInvitation && this.challengeInvitation.parentNode) {
+            this.challengeInvitation.parentNode.removeChild(this.challengeInvitation);
+        }
+    }
+    
+    /**
+     * Checks if a point is within the active arena.
+     * This is a compatibility method for player.js boundary checks.
+     * Now that we're using direct challenges on the map, this always returns true.
+     * @param {THREE.Vector3} position - The position to check
+     * @param {number} arenaIndex - The arena index
+     * @returns {boolean} - True, since there are no arena boundaries to enforce
+     */
+    isPointInArena(position, arenaIndex) {
+        // Since we're not using arenas anymore, always return true
+        // to prevent boundary collision detection from restricting movement
+        return true;
+    }
+
+    /**
+     * Show feedback when player is hit during a duel
+     * @param {number} damage - The amount of damage taken
+     */
+    showHitFeedback(damage) {
+        // Create flash effect for hit feedback
+        const hitOverlay = document.createElement('div');
+        hitOverlay.style.position = 'absolute';
+        hitOverlay.style.top = '0';
+        hitOverlay.style.left = '0';
+        hitOverlay.style.width = '100%';
+        hitOverlay.style.height = '100%';
+        hitOverlay.style.backgroundColor = 'rgba(255, 0, 0, 0.3)';
+        hitOverlay.style.pointerEvents = 'none';
+        hitOverlay.style.zIndex = '999';
+        hitOverlay.style.animation = 'hit-flash 0.2s ease-out';
+        
+        // Add animation style
+        const style = document.createElement('style');
+        style.innerHTML = `
+            @keyframes hit-flash {
+                0% { opacity: 0.7; }
+                100% { opacity: 0; }
+            }
+        `;
+        document.head.appendChild(style);
+        
+        // Add to game container
+        document.getElementById('game-container').appendChild(hitOverlay);
+        
+        // Remove overlay after animation
+        setTimeout(() => {
+            if (hitOverlay.parentNode) {
+                hitOverlay.parentNode.removeChild(hitOverlay);
+            }
+            if (style.parentNode) {
+                style.parentNode.removeChild(style);
+            }
+        }, 200);
+        
+        // Show damage number
+        if (damage > 0) {
+            const damageText = document.createElement('div');
+            damageText.textContent = `-${damage}`;
+            damageText.style.position = 'absolute';
+            damageText.style.top = '30%';
+            damageText.style.left = '50%';
+            damageText.style.transform = 'translate(-50%, -50%)';
+            damageText.style.color = '#FF4444';
+            damageText.style.fontSize = '32px';
+            damageText.style.fontWeight = 'bold';
+            damageText.style.textShadow = '2px 2px 4px rgba(0, 0, 0, 0.7)';
+            damageText.style.pointerEvents = 'none';
+            damageText.style.zIndex = '1100';
+            damageText.style.opacity = '1';
+            damageText.style.transition = 'opacity 1s, transform 1s';
+            
+            document.getElementById('game-container').appendChild(damageText);
+            
+            // Animate and remove after animation
+            setTimeout(() => {
+                damageText.style.opacity = '0';
+                damageText.style.transform = 'translate(-50%, -100%)';
+                
+                setTimeout(() => {
+                    if (damageText.parentNode) {
+                        damageText.parentNode.removeChild(damageText);
+                    }
+                }, 1000);
+            }, 50);
+        }
+        
+        // Play hit sound
+        if (this.soundManager) {
+            this.soundManager.playSound("hurt", 0.7);
+        }
+    }
+
+    /**
+     * Create a debug box visualization based on the received message
+     * @param {Object} box - The box dimensions and position
+     * @param {number} color - The color of the box as a hex integer
+     * @param {number} duration - The duration of the visualization in milliseconds
+     */
+    createDebugBoxVisualization(box, color, duration) {
+        console.log('Received debug box visualization data:', box);
+        
+        // Remove any existing debug box
+        if (this.debugBox) {
+            this.scene.remove(this.debugBox);
+            this.debugBox = null;
+        }
+        
+        if (this.debugBoxLabel) {
+            this.scene.remove(this.debugBoxLabel);
+            this.debugBoxLabel = null;
+        }
+        
+        // Create a new box geometry
+        const geometry = new THREE.BoxGeometry(box.width, box.height, box.length);
+        
+        // Create a semi-transparent material with wireframe effect
+        const material = new THREE.MeshBasicMaterial({
+            color: color || 0xFF0000,
+            transparent: true,
+            opacity: 0.25,
+            wireframe: false,
+            side: THREE.DoubleSide
+        });
+        
+        // Create wireframe material for clearer boundaries
+        const wireframeMaterial = new THREE.MeshBasicMaterial({
+            color: 0xFFFFFF,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.5
+        });
+        
+        // Create the mesh and add to scene
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.set(box.x, box.y, box.z);
+        
+        // Create the wireframe mesh
+        const wireframe = new THREE.Mesh(geometry, wireframeMaterial);
+        wireframe.position.set(box.x, box.y, box.z);
+        
+        // Create a group to hold both meshes
+        this.debugBox = new THREE.Group();
+        this.debugBox.add(mesh);
+        this.debugBox.add(wireframe);
+        
+        // Add to scene
+        this.scene.add(this.debugBox);
+        
+        // Add text label "Duel Area"
+        this.addDebugBoxLabel(box);
+        
+        // Keep reference to the box data for toggling visibility
+        this.duelAreaBox = box;
+        
+        // Update visibility based on current debug mode
+        this.updateDebugBoxVisibility();
+        
+        // Add a method to the physics system to toggle our debug box
+        if (window.physics) {
+            const originalSetDebugMode = window.physics.setDebugMode;
+            window.physics.setDebugMode = (enabled) => {
+                // Call the original method
+                originalSetDebugMode.call(window.physics, enabled);
+                
+                // Update our debug box visibility
+                if (this.updateDebugBoxVisibility) {
+                    this.updateDebugBoxVisibility();
+                }
+            };
+        }
+    }
+
+    /**
+     * Updates the visibility of the debug box based on physics.debugMode
+     */
+    updateDebugBoxVisibility() {
+        const isDebugMode = window.physics && window.physics.debugMode;
+        
+        // Update debug box visibility
+        if (this.debugBox) {
+            this.debugBox.visible = isDebugMode;
+        }
+        
+        // Update debug label visibility
+        if (this.debugBoxLabel) {
+            this.debugBoxLabel.visible = isDebugMode;
+        }
+    }
+
+    /**
+     * Add a text label above the debug box
+     * @param {Object} box - The box dimensions and position
+     */
+    addDebugBoxLabel(box) {
+        // Create a canvas for the text
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        const context = canvas.getContext('2d');
+        
+        // Set background transparent
+        context.fillStyle = 'rgba(0, 0, 0, 0)';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Draw text
+        context.font = 'bold 48px Arial';
+        context.fillStyle = 'white';
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText('Duel Area', canvas.width / 2, canvas.height / 2);
+        
+        // Create texture from canvas
+        const texture = new THREE.CanvasTexture(canvas);
+        
+        // Create sprite material
+        const material = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true
+        });
+        
+        // Create sprite
+        const sprite = new THREE.Sprite(material);
+        sprite.scale.set(10, 5, 1); // Adjust size as needed
+        sprite.position.set(box.x, box.y + 5, box.z); // Position above the box
+        
+        this.debugBoxLabel = sprite;
+        this.scene.add(sprite);
     }
 }

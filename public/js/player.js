@@ -39,6 +39,10 @@ export class Player {
     this.moveLeft = false;
     this.moveRight = false;
     
+    // Movement control flags
+    this.canMove = true; // Whether player can move at all
+    this.forceLockMovement = false; // Complete movement override (quickdraw mode)
+    
     // Sprinting flag - new addition
     this.isSprinting = false;
     this.normalSpeed = 5; // Default movement speed
@@ -283,6 +287,44 @@ export class Player {
       this.isJumping = false;
     }
 
+    // Process movement
+    this.move(deltaTime);
+    
+    // Footstep sounds logic based on movement
+    const positionBeforeMovement = this.previousPosition.clone();
+    this.updateFootstepSounds(deltaTime, positionBeforeMovement);
+    
+    // Handle jump sound - only play when we first start jumping (not previously jumping)
+    if (isJumping && !wasJumping && this.soundManager) {
+      this.soundManager.playSound("jump", 300); // Play jump sound with 300ms cooldown
+    }
+
+    // Send periodic network updates
+    const now = performance.now();
+    if (now - this.lastNetworkUpdate > this.networkUpdateInterval) {
+      this.lastNetworkUpdate = now;
+      this.sendNetworkUpdate();
+    }
+
+    // Update camera bob (only if on ground)
+    if (this.canJump) {
+      this.updateHeadBob(deltaTime);
+    }
+    
+    // Update aiming effects including crosshair
+    this.updateAiming(deltaTime);
+  }
+
+  /**
+   * Process player movement based on input - can be overridden to disable movement
+   * @param {number} deltaTime - Time elapsed since last frame
+   */
+  move(deltaTime) {
+    // Skip movement if force locked (used by quickdraw)
+    if (this.forceLockMovement || !this.canMove) {
+      return;
+    }
+    
     // Movement - now with sprint capability
     const moveSpeed = this.getMoveSpeed();
     const forward = new THREE.Vector3();
@@ -292,9 +334,6 @@ export class Player {
 
     const right = new THREE.Vector3();
     right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
-
-    // Store position before movement to check if we actually moved
-    const positionBeforeMovement = this.group.position.clone();
     
     // Calculate new position based on movement input
     const newPosition = this.group.position.clone();
@@ -328,29 +367,6 @@ export class Player {
         }
       }
     }
-    
-    // Footstep sounds logic
-    this.updateFootstepSounds(deltaTime, positionBeforeMovement);
-    
-    // Handle jump sound - only play when we first start jumping (not previously jumping)
-    if (isJumping && !wasJumping && this.soundManager) {
-      this.soundManager.playSound("jump", 300); // Play jump sound with 300ms cooldown
-    }
-
-    // Send periodic network updates
-    const now = performance.now();
-    if (now - this.lastNetworkUpdate > this.networkUpdateInterval) {
-      this.lastNetworkUpdate = now;
-      this.sendNetworkUpdate();
-    }
-
-    // Update camera bob (only if on ground)
-    if (this.canJump) {
-      this.updateHeadBob(deltaTime);
-    }
-    
-    // Update aiming effects including crosshair
-    this.updateAiming(deltaTime);
   }
 
   /**
