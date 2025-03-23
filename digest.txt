@@ -1,13 +1,8 @@
 <goal>
- 
+ I have created a rigged character model fbx in mixamo.
+I now want to use this as the player character in my threejs webbased fps game, both as the thirdperson character model, but the players fps camera should also see some parts of his body (like hand/arm and lower body when looking downwards), I want to use basic walk animations and such from mixamo too.
+How do I do this?
 </goal>
-
-<output_requirements>
-- Don't be lazy, provide thorough, high-quality code.
-- Provide complete file contents for any modified or new files.
-- Write clean, well-documented code with appropriate error handling.
-- Never use ellipsis (...) or placeholder comments, as an excuse to omit code for brewity.
-</output_requirements>
 
 <context>
     <codebase>
@@ -184,33 +179,215 @@ canvas {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.8);
-  border-radius: 50%;
+  width: 80px;
+  height: 80px;
   display: none; /* Will be controlled by JavaScript */
   pointer-events: none;
   z-index: 100;
-  box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+  will-change: transform, opacity;
 }
-#crosshair::before,
-#crosshair::after {
-  content: '';
-  position: absolute;
-  background-color: rgba(255, 255, 255, 0.8);
+
+#crosshair svg {
+  width: 100%;
+  height: 100%;
 }
-#crosshair::before {
-  width: 2px;
-  height: 8px;
-  top: 4px;
-  left: 7px;
+
+/* Corner group style and transforms */
+.corner-group {
+  transform-origin: 50px 50px;
+  opacity: 0;
+  will-change: transform, opacity;
 }
-#crosshair::after {
-  width: 8px;
-  height: 2px;
-  top: 7px;
-  left: 4px;
+
+/* Center dot animation */
+#crosshair circle {
+  opacity: 0;
+  will-change: opacity;
+  transition: opacity 250ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+
+#crosshair.expand circle {
+  opacity: 1;
+  transition-delay: 0ms; /* Fade in first */
+}
+
+#crosshair.expanded circle {
+  opacity: 1;
+}
+
+#crosshair.contract circle {
+  opacity: 0;
+  transition-delay: 0ms; /* Immediate fade out instead of delayed */
+}
+
+/* Top corner animations */
+@keyframes expand-top {
+  0% {
+    transform: translate(0, 35px) scale(0);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes contract-top {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(0, 35px) scale(0);
+    opacity: 0;
+  }
+}
+
+/* Bottom left corner animations */
+@keyframes expand-bottom-left {
+  0% {
+    transform: translate(30px, -25px) scale(0);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes contract-bottom-left {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(30px, -25px) scale(0);
+    opacity: 0;
+  }
+}
+
+/* Bottom right corner animations */
+@keyframes expand-bottom-right {
+  0% {
+    transform: translate(-30px, -25px) scale(0);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes contract-bottom-right {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-30px, -25px) scale(0);
+    opacity: 0;
+  }
+}
+
+/* Apply specific animations to each corner */
+#crosshair.expand #top-corner {
+  animation: expand-top 250ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+#crosshair.expand #bottom-left-corner {
+  animation: expand-bottom-left 250ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+#crosshair.expand #bottom-right-corner {
+  animation: expand-bottom-right 250ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+#crosshair.contract #top-corner {
+  animation: contract-top 250ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+#crosshair.contract #bottom-left-corner {
+  animation: contract-bottom-left 250ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+#crosshair.contract #bottom-right-corner {
+  animation: contract-bottom-right 250ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+/* Set expanded state */
+#crosshair.expanded #top-corner,
+#crosshair.expanded #bottom-left-corner,
+#crosshair.expanded #bottom-right-corner {
+  opacity: 1;
+  transform: translate(0, 0) scale(1);
+}
+
+/* Make all elements animate with the same timing function */
+#crosshair path,
+#crosshair g,
+#crosshair circle {
+  transition-property: opacity, transform;
+  transition-duration: 250ms;
+  transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Ensure elements fade out when contract class is present */
+#crosshair.contract circle {
+  opacity: 0;
+  transition-delay: 0ms; /* Immediate fade out instead of delayed */
+}
+
+/* Make corner groups start contracting before center dot fades */
+#crosshair.contract #top-corner {
+  animation-delay: 50ms !important; /* Delay to start after dot begins fading */
+}
+
+#crosshair.contract #bottom-left-corner {
+  animation-delay: 70ms !important; /* Slightly more delay */
+}
+
+#crosshair.contract #bottom-right-corner {
+  animation-delay: 70ms !important; /* Slightly more delay */
+}
+
+/* Individual delays for staggered animation */
+#top-corner {
+  animation-delay: 50ms !important; /* Delayed after center dot appears */
+}
+
+#bottom-left-corner {
+  animation-delay: 80ms !important; /* Delayed after center dot appears */
+}
+
+#bottom-right-corner {
+  animation-delay: 80ms !important; /* Delayed after center dot appears */
+}
+
+/* SVG Line styles */
+#crosshair line {
+  stroke-linecap: round;
+  transform-box: fill-box;
+  transform-origin: center;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* Remove the above styles and add these instead */
+#crosshair path {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Force hardware acceleration for smoother animations */
+#crosshair, #crosshair svg, #crosshair g, #crosshair path, #crosshair circle {
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  -webkit-perspective: 1000;
+  perspective: 1000;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+}
+
 #fps-counter {
   position: absolute;
   top: 20px;
@@ -885,7 +1062,27 @@ File: /public/index.html
     <div id="reload-progress-container">
       <div id="reload-progress-bar"></div>
     </div>
-    <div id="crosshair"></div>
+    <div id="crosshair">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+        <!-- Top corner group -->
+        <g id="top-corner" class="corner-group">
+          <path d="M45,20 L50,15 L55,20" fill="none" stroke="rgba(255, 255, 255, 0.8)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </g>
+        
+        <!-- Bottom left corner group -->
+        <g id="bottom-left-corner" class="corner-group">
+          <path d="M20,75 L25,75 M20,75 L20,70" fill="none" stroke="rgba(255, 255, 255, 0.8)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </g>
+        
+        <!-- Bottom right corner group -->
+        <g id="bottom-right-corner" class="corner-group">
+          <path d="M75,75 L80,75 M80,75 L80,70" fill="none" stroke="rgba(255, 255, 255, 0.8)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </g>
+        
+        <!-- Center dot -->
+        <circle cx="50" cy="50" r="3" fill="rgba(255, 255, 255, 0.8)" />
+      </svg>
+    </div>
     <div id="fps-counter">FPS: 0</div>
     <div id="player-count">Players: 1</div>
     <div id="connection-status"></div>
@@ -1637,71 +1834,41 @@ export function createMuzzleFlash(position, scene) {
   flashGroup.position.copy(position);
   scene.add(flashGroup);
 
-  const coreGeometry = new THREE.SphereGeometry(0.05, 8, 8);
+  // Create just a single bright orange core for the muzzle flash
+  const coreGeometry = new THREE.SphereGeometry(0.06, 8, 8);
   const coreMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFFFFFF,
+    color: 0xFF6B00, // Bright orange
     transparent: true,
     opacity: 1
   });
   const core = new THREE.Mesh(coreGeometry, coreMaterial);
+  // Make it slightly elongated in the x-direction (along the barrel)
+  core.scale.x = 1.8;
   flashGroup.add(core);
 
-  const middleGeometry = new THREE.SphereGeometry(0.08, 8, 8);
-  const middleMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFFFF00,
-    transparent: true,
-    opacity: 0.8
-  });
-  const middle = new THREE.Mesh(middleGeometry, middleMaterial);
-  middle.scale.x = 1.5;
-  flashGroup.add(middle);
-
-  const outerGeometry = new THREE.SphereGeometry(0.12, 8, 8);
-  const outerMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFF6B00,
-    transparent: true,
-    opacity: 0.5
-  });
-  const outer = new THREE.Mesh(outerGeometry, outerMaterial);
-  outer.scale.x = 2;
-  flashGroup.add(outer);
-
-  const particleCount = 8;
-  for (let i = 0; i < particleCount; i++) {
-    const particleGeometry = new THREE.SphereGeometry(0.02, 4, 4);
-    const particleMaterial = new THREE.MeshBasicMaterial({
-      color: 0xFFFF00,
-      transparent: true,
-      opacity: 0.7
-    });
-    const particle = new THREE.Mesh(particleGeometry, particleMaterial);
-    const angle = Math.random() * Math.PI * 2;
-    const radius = 0.05 + Math.random() * 0.1;
-    particle.position.set(
-      Math.cos(angle) * radius,
-      Math.sin(angle) * radius,
-      (Math.random() - 0.5) * 0.1
-    );
-    flashGroup.add(particle);
-  }
-
-  const flashLight = new THREE.PointLight(0xFF9900, 1, 2);
+  // Add a simple point light for illumination
+  const flashLight = new THREE.PointLight(0xFF6B00, 1.5, 2);
   flashLight.position.set(0, 0, 0);
   flashGroup.add(flashLight);
 
-  const duration = 100;
+  // Make the flash effect much shorter
+  const duration = 60; // milliseconds (reduced from 100)
   const startTime = performance.now();
 
   function animateFlash(timestamp) {
     const elapsed = timestamp - startTime;
     const progress = elapsed / duration;
     if (progress < 1) {
-      core.scale.multiplyScalar(0.95);
-      const fadeOpacity = 1 - progress;
-      coreMaterial.opacity = fadeOpacity;
-      middleMaterial.opacity = fadeOpacity * 0.8;
-      outerMaterial.opacity = fadeOpacity * 0.5;
-      flashLight.intensity = 1 - progress;
+      // Simple scale pulsation for more dramatic effect
+      core.scale.x = 1.8 * (1 - progress * 0.5);
+      
+      // Quicker fade out
+      const fadeOpacity = 1 - progress * 1.2; // Faster falloff
+      coreMaterial.opacity = Math.max(0, fadeOpacity);
+      
+      // Light intensity follows the same curve
+      flashLight.intensity = 1.5 * (1 - progress);
+      
       requestAnimationFrame(animateFlash);
     } else {
       scene.remove(flashGroup);
@@ -1815,166 +1982,6 @@ export function createSmokeEffect(position, direction, scene) {
   }
   
   requestAnimationFrame(animateSmoke);
-}
-
-/**
- * Preloads the shockwave ring effect by creating a disposable instance
- * This forces Three.js to compile the shaders and cache resources
- * @param {THREE.Scene} scene - The scene where the preloaded effect will be created
- */
-export function preloadShockwaveRing(scene) {
-  // Skip on mobile devices
-  if (window.isMobile) {
-    return;
-  }
-  
-  // Create a dummy position and direction
-  const dummyPosition = new THREE.Vector3(0, -1000, 0); // Far below the scene
-  const dummyDirection = new THREE.Vector3(0, 1, 0);
-  
-  // Create all the geometries and materials that would be used
-  const ringGroup = new THREE.Group();
-  ringGroup.position.copy(dummyPosition);
-  scene.add(ringGroup);
-  
-  // Create all the same geometries and materials as the real effect
-  const ringGeometry = new THREE.TorusGeometry(0.1, 0.01, 8, 16);
-  const ringMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFF8C00,
-    transparent: true,
-    opacity: 0,  // Make it invisible
-    side: THREE.DoubleSide
-  });
-  const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-  ringGroup.add(ring);
-  
-  const outerRingGeometry = new THREE.TorusGeometry(0.15, 0.005, 8, 16);
-  const outerRingMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFF4500,
-    transparent: true,
-    opacity: 0,  // Make it invisible
-    side: THREE.DoubleSide
-  });
-  const outerRing = new THREE.Mesh(outerRingGeometry, outerRingMaterial);
-  ringGroup.add(outerRing);
-  
-  const innerRingGeometry = new THREE.TorusGeometry(0.05, 0.01, 8, 16);
-  const innerRingMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFFFFFF,
-    transparent: true,
-    opacity: 0,  // Make it invisible
-    side: THREE.DoubleSide
-  });
-  const innerRing = new THREE.Mesh(innerRingGeometry, innerRingMaterial);
-  ringGroup.add(innerRing);
-  
-  // Remove and dispose after a short delay
-  setTimeout(() => {
-    scene.remove(ringGroup);
-    
-    // Dispose geometries and materials
-    ringGeometry.dispose();
-    ringMaterial.dispose();
-    outerRingGeometry.dispose();
-    outerRingMaterial.dispose();
-    innerRingGeometry.dispose();
-    innerRingMaterial.dispose();
-  }, 100);
-}
-
-/**
- * Creates a shockwave ring effect in the shooting direction.
- * @param {THREE.Vector3} position - Effect start position.
- * @param {THREE.Vector3} direction - Firing direction.
- * @param {THREE.Scene} scene - The scene to add the effect.
- */
-export function createShockwaveRing(position, direction, scene) {
-  // Skip shockwave effect on mobile devices
-  if (window.isMobile) {
-    return;
-  }
-
-  const ringGroup = new THREE.Group();
-  ringGroup.position.copy(position);
-  scene.add(ringGroup);
-
-  // Face ring perpendicular to firing direction
-  ringGroup.lookAt(position.clone().add(direction));
-
-  // Create a simple ring with a flat material
-  const ringGeometry = new THREE.TorusGeometry(0.1, 0.01, 8, 16);
-  const ringMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFF8C00,
-    transparent: true,
-    opacity: 0.7,
-    side: THREE.DoubleSide
-  });
-  const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-  ringGroup.add(ring);
-
-  // Create a second, larger ring with different opacity
-  const outerRingGeometry = new THREE.TorusGeometry(0.15, 0.005, 8, 16);
-  const outerRingMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFF4500,
-    transparent: true,
-    opacity: 0.4,
-    side: THREE.DoubleSide
-  });
-  const outerRing = new THREE.Mesh(outerRingGeometry, outerRingMaterial);
-  ringGroup.add(outerRing);
-
-  // Create inner bright flash ring
-  const innerRingGeometry = new THREE.TorusGeometry(0.05, 0.01, 8, 16);
-  const innerRingMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFFFFFF,
-    transparent: true,
-    opacity: 0.9,
-    side: THREE.DoubleSide
-  });
-  const innerRing = new THREE.Mesh(innerRingGeometry, innerRingMaterial);
-  ringGroup.add(innerRing);
-
-  // Animation variables
-  let startTime = null;
-  const duration = 300; // milliseconds
-
-  function animateShockwave(timestamp) {
-    if (!startTime) startTime = timestamp;
-    const elapsed = timestamp - startTime;
-    const progress = Math.min(elapsed / duration, 1.0);
-
-    if (progress < 1.0) {
-      // Expand rings
-      const scale = 1 + progress * 2;
-      ring.scale.set(scale, scale, scale);
-      
-      const outerScale = 1 + progress * 3;
-      outerRing.scale.set(outerScale, outerScale, outerScale);
-      
-      const innerScale = 1 + progress * 4;
-      innerRing.scale.set(innerScale, innerScale, innerScale);
-      
-      // Fade out
-      ring.material.opacity = 0.7 * (1 - progress);
-      outerRing.material.opacity = 0.4 * (1 - progress);
-      innerRing.material.opacity = 0.9 * (1 - Math.pow(progress, 0.5));
-      
-      requestAnimationFrame(animateShockwave);
-    } else {
-      // Clean up
-      scene.remove(ringGroup);
-      
-      // Dispose geometries and materials
-      ringGeometry.dispose();
-      ringMaterial.dispose();
-      outerRingGeometry.dispose();
-      outerRingMaterial.dispose();
-      innerRingGeometry.dispose();
-      innerRingMaterial.dispose();
-    }
-  }
-
-  requestAnimationFrame(animateShockwave);
 }
 
 /**
@@ -2375,6 +2382,7 @@ File: /public/js/input.js
  * @param {Player} player - The local Player instance (first-person).
  * @param {SoundManager} soundManager - The SoundManager for audio feedback.
  */
+
 export function initInput(renderer, player, soundManager) {
   // Track if device is mobile
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -2486,8 +2494,15 @@ export function initInput(renderer, player, soundManager) {
       if (player.arms) {
         player.arms.setVisible(true);
       }
-      // Show crosshair when aiming
-      document.getElementById('crosshair').style.display = 'block';
+      
+      // Show and prepare crosshair for animation
+      const crosshair = document.getElementById('crosshair');
+      if (crosshair) {
+        // Reset any existing animation classes
+        crosshair.classList.remove('contract', 'expand', 'expanded');
+        crosshair.style.display = 'block';
+        // Animation will be handled in updateAiming
+      }
 
       if (soundManager) {
         soundManager.playSound("aimclick");
@@ -2510,8 +2525,22 @@ export function initInput(renderer, player, soundManager) {
       if (player.arms) {
         player.arms.setVisible(false);
       }
-      // Hide crosshair when not aiming
-      document.getElementById('crosshair').style.display = 'none';
+      
+      // Play contraction animation before hiding crosshair
+      const crosshair = document.getElementById('crosshair');
+      if (crosshair) {
+        // Reset any existing classes
+        crosshair.classList.remove('expand', 'expanded');
+        
+        // Add contraction animation
+        crosshair.classList.add('contract');
+        
+        // Hide crosshair after animation completes
+        setTimeout(() => {
+          crosshair.style.display = 'none';
+          crosshair.classList.remove('contract');
+        }, 250); // Match animation duration
+      }
     }
   });
 
@@ -2751,7 +2780,15 @@ function createMobileControls(player, soundManager) {
           if (player.arms) {
             player.arms.setVisible(true);
           }
-          document.getElementById('crosshair').style.display = 'block';
+          
+          // Show and prepare crosshair for animation
+          const crosshair = document.getElementById('crosshair');
+          if (crosshair) {
+            // Reset any existing animation classes
+            crosshair.classList.remove('contract', 'expand', 'expanded');
+            crosshair.style.display = 'block';
+            // Animation will be handled in updateAiming
+          }
           
           if (soundManager) {
             soundManager.playSound("aimclick");
@@ -2841,7 +2878,22 @@ function createMobileControls(player, soundManager) {
         if (player.arms) {
           player.arms.setVisible(false);
         }
-        document.getElementById('crosshair').style.display = 'none';
+        
+        // Play contraction animation before hiding crosshair
+        const crosshair = document.getElementById('crosshair');
+        if (crosshair) {
+          // Reset any existing classes
+          crosshair.classList.remove('expand', 'expanded');
+          
+          // Add contraction animation
+          crosshair.classList.add('contract');
+          
+          // Hide crosshair after animation completes
+          setTimeout(() => {
+            crosshair.style.display = 'none';
+            crosshair.classList.remove('contract');
+          }, 250); // Match animation duration
+        }
         
         // Reset visual feedback
         rightControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
@@ -2879,7 +2931,22 @@ function createMobileControls(player, soundManager) {
         if (player.arms) {
           player.arms.setVisible(false);
         }
-        document.getElementById('crosshair').style.display = 'none';
+        
+        // Play contraction animation before hiding crosshair
+        const crosshair = document.getElementById('crosshair');
+        if (crosshair) {
+          // Reset any existing classes
+          crosshair.classList.remove('expand', 'expanded');
+          
+          // Add contraction animation
+          crosshair.classList.add('contract');
+          
+          // Hide crosshair after animation completes
+          setTimeout(() => {
+            crosshair.style.display = 'none';
+            crosshair.classList.remove('contract');
+          }, 250); // Match animation duration
+        }
         
         // Reset visual feedback
         rightControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
@@ -3087,7 +3154,7 @@ import { Player } from './player.js';
 import { networkManager } from './network.js';
 import { MultiplayerManager } from './multiplayerManager.js';
 import { Bullet } from './bullet.js';
-import { createMuzzleFlash, createSmokeEffect, createShockwaveRing, createImpactEffect, preloadMuzzleFlash, preloadSmokeEffect, preloadShockwaveRing, SmokeRingEffect } from './effects.js';
+import { createMuzzleFlash, createSmokeEffect, createImpactEffect, preloadMuzzleFlash, preloadSmokeEffect, SmokeRingEffect } from './effects.js';
 import { QuickDraw } from './quickDraw.js';
 import { updateAmmoUI, updateHealthUI } from './ui.js';
 import { PhysicsSystem } from './physics.js';
@@ -3174,8 +3241,6 @@ function init() {
       preloadMuzzleFlash(scene);
       // Preload smoke effect
       preloadSmokeEffect(scene);
-      // Preload shockwave ring effect
-      preloadShockwaveRing(scene);
       
       // Initialize a smoke ring effect pool for reuse
       for (let i = 0; i < 3; i++) {
@@ -3549,7 +3614,6 @@ function spawnBullet(sourcePlayerId, position, direction, bulletId = null) {
   // Visual effects
   createMuzzleFlash(position, scene);
   createSmokeEffect(position, direction, scene);
-  createShockwaveRing(position, direction, scene);
   
   // Only add smoke ring effects if not on mobile
   if (!window.isMobile) {
@@ -5957,22 +6021,43 @@ export class Player {
     // Crosshair animation if aiming
     const crosshair = document.getElementById('crosshair');
     if (crosshair && this.isAiming) {
-      // Add subtle pulse animation based on player movement
+      // Add subtle size adjustment based on player movement
       const isMoving = this.isMoving();
-      const movementFactor = isMoving ? 1.0 + (this.velocity.length() * 0.008) : 1.0;
+      const movementFactor = isMoving ? 1.0 + (this.velocity.length() * 0.005) : 1.0;
       
-      // Calculate scaled size based on movement
-      const size = 16 * movementFactor;
+      // Calculate scaled size based on movement (further reduced from 60 to 40)
+      const size = 40 * movementFactor;
       crosshair.style.width = `${size}px`;
       crosshair.style.height = `${size}px`;
       
-      // Add slight opacity change based on movement
+      // Set opacity based on movement
       const opacity = isMoving ? 0.7 : 0.8;
-      crosshair.style.borderColor = `rgba(255, 255, 255, ${opacity})`;
       
-      // A slight color tint for low health
-      if (this.health < 30) {
-        crosshair.style.borderColor = `rgba(255, ${Math.floor(255 * (this.health/30))}, ${Math.floor(255 * (this.health/60))}, ${opacity})`;
+      // Update all SVG elements with the appropriate color
+      const strokeColor = this.health < 30 
+        ? `rgba(255, ${Math.floor(255 * (this.health/30))}, ${Math.floor(255 * (this.health/60))}, ${opacity})`
+        : `rgba(255, 255, 255, ${opacity})`;
+      
+      // Apply color to all SVG paths and circle
+      const pathElements = crosshair.querySelectorAll('path');
+      pathElements.forEach(el => {
+        el.setAttribute('stroke', strokeColor);
+      });
+      
+      const circleElement = crosshair.querySelector('circle');
+      if (circleElement) {
+        circleElement.setAttribute('fill', strokeColor);
+      }
+      
+      // Apply expansion animation class if not already applied
+      if (!crosshair.classList.contains('expand') && !crosshair.classList.contains('expanded')) {
+        crosshair.classList.add('expand');
+        
+        // After animation completes, mark as expanded
+        setTimeout(() => {
+          crosshair.classList.remove('expand');
+          crosshair.classList.add('expanded');
+        }, 250); // Match animation duration
       }
     }
   }
@@ -8538,9 +8623,9 @@ export class SmokeRingEffect {
         this.particlePool = [];
         this.materialsPool = [];
         
-        // Create shared geometries that will be reused
-        this.puffGeometry = new THREE.IcosahedronGeometry(0.05, 0);
-        this.muzzleGeometry = new THREE.IcosahedronGeometry(0.06, 0);
+        // Create shared geometries that will be reused - MUCH LARGER BASE GEOMETRY
+        this.puffGeometry = new THREE.IcosahedronGeometry(0.2, 0); // Increased from 0.05
+        this.muzzleGeometry = new THREE.IcosahedronGeometry(0.25, 0); // Increased from 0.06
     }
     
     /**
@@ -8637,15 +8722,33 @@ export class SmokeRingEffect {
      * @private
      */
     _createSmokeRing() {
-        // Keep original particle count for visual fidelity
-        const numRingParticles = 20;
-        const initialRingRadius = 0.15;
+        // Keep just a handful of puffs with better size distribution
+        const numRingParticles = 5; // 5 total puffs for outer ring
+        const initialRingRadius = 0.35; // Reduced from 0.5 for less spread
         
+        // Number of small inner puffs
+        const numInnerPuffs = 3; // Add small puffs in the inner area
+        const innerRingRadius = 0.18; // Reduced from 0.25 for less spread
+        
+        // Pre-determine which particles will be the large ones (1 or 2 max)
+        const largeParticleIndices = [];
+        const numLargeParticles = Math.random() < 0.5 ? 1 : 2; // Either 1 or 2 large particles
+        
+        while (largeParticleIndices.length < numLargeParticles) {
+            const idx = Math.floor(Math.random() * numRingParticles);
+            if (!largeParticleIndices.includes(idx)) {
+                largeParticleIndices.push(idx);
+            }
+        }
+        
+        // Create outer ring puffs (larger ones)
         for (let i = 0; i < numRingParticles; i++) {
-            const angle = (i / numRingParticles) * Math.PI * 2;
+            // Much wider distribution around the circle
+            // More randomness in angle placement for less uniform pattern
+            const angle = (i / numRingParticles) * Math.PI * 2 + (Math.random() - 0.5) * 0.7;
             
-            // Slightly randomize the ring radius for a less perfect circle
-            const radiusVariation = initialRingRadius * (0.9 + Math.random() * 0.2);
+            // Less radius spread for tighter dispersion
+            const radiusVariation = initialRingRadius * (0.8 + Math.random() * 0.8); // Reduced from 1.0 + random * 1.2
             
             // Get a particle from the pool or create a new one
             const puffMesh = this._getParticle(false);
@@ -8655,78 +8758,169 @@ export class SmokeRingEffect {
                 puffMesh.geometry.computeVertexNormals();
             }
             
-            // Position in ring formation
-            puffMesh.position.x = Math.cos(angle) * radiusVariation;
-            puffMesh.position.y = Math.sin(angle) * radiusVariation;
-            puffMesh.position.z = 0.05 + Math.random() * 0.1;
+            // All particles initially start near the origin (gun position)
+            // They'll move to their final positions quickly during the first frames
+            puffMesh.position.x = Math.cos(angle) * 0.05; // Start close to center
+            puffMesh.position.y = Math.sin(angle) * 0.05; // Start close to center
+            puffMesh.position.z = 0.01; // Start very close to gun
             
-            // Random rotation
+            // Target positions for quick interpolation - closer to gun
+            const targetX = Math.cos(angle) * radiusVariation;
+            const targetY = Math.sin(angle) * radiusVariation;
+            const targetZ = 0.05 + Math.random() * 0.2; // Reduced from 0.3 for less z-spread
+            
+            // Fixed random rotation for initial appearance - don't animate rotation later
             puffMesh.rotation.x = Math.random() * Math.PI * 2;
             puffMesh.rotation.y = Math.random() * Math.PI * 2;
             puffMesh.rotation.z = Math.random() * Math.PI * 2;
             
-            // Start with small scale
+            // Determine size based on whether this is one of the pre-selected large particles
+            let baseSize;
+            if (largeParticleIndices.includes(i)) {
+                // This is one of the 1-2 large particles
+                baseSize = 1.4 + Math.random() * 0.8; // 1.4-2.2 size
+            } else {
+                // Regular smaller particles
+                baseSize = 0.6 + Math.random() * 0.4; // 0.6-1.0 size
+            }
+            
+            // Start with a very small scale (originating from gun)
             puffMesh.scale.set(0.05, 0.05, 0.05);
             
-            // Original speed and lifespan for visual fidelity
-            const outwardSpeed = 1.8 + Math.random() * 0.7;
+            // Slower outward speed for less spread
+            const outwardSpeed = largeParticleIndices.includes(i) ? 
+                1.0 + Math.random() * 0.6 : // Reduced from 1.5 + random * 0.8 
+                0.9 + Math.random() * 0.7;  // Reduced from 1.4 + random * 1.0
             
             this.puffs.push({
                 mesh: puffMesh,
                 age: 0,
-                lifespan: 0.6 + Math.random() * 0.3,
+                lifespan: largeParticleIndices.includes(i) ?
+                    1.0 + Math.random() * 1.2 : // Longer lifespan for larger clouds
+                    0.7 + Math.random() * 0.5,  // Shorter for smaller clouds
                 velocity: new THREE.Vector3(
                     Math.cos(angle) * outwardSpeed,
                     Math.sin(angle) * outwardSpeed,
-                    0.2 + Math.random() * 0.4
+                    largeParticleIndices.includes(i) ?
+                        0.01 + Math.random() * 0.1 : // Less vertical for big clouds
+                        0.05 + Math.random() * 0.2   // Reduced from 0.25 for less upward movement
                 ),
-                rotationSpeed: new THREE.Vector3(
-                    (Math.random() - 0.5) * 0.05,
-                    (Math.random() - 0.5) * 0.05,
-                    (Math.random() - 0.5) * 0.05
+                rotationSpeed: new THREE.Vector3(0, 0, 0), // No rotation
+                initialSize: baseSize, // Store the initial size for reference
+                // Add target position data for fast initial interpolation
+                targetPos: new THREE.Vector3(targetX, targetY, targetZ),
+                initialExpansionDone: false, // Track if initial expansion is complete
+                initialExpansionSpeed: largeParticleIndices.includes(i) ?
+                    30 + Math.random() * 15 : // Much faster expansion for large particles
+                    20 + Math.random() * 10   // Fast expansion for other particles
+            });
+        }
+        
+        // Create inner core small puffs
+        for (let i = 0; i < numInnerPuffs; i++) {
+            // Distribute small puffs randomly in the inner area
+            const angle = Math.random() * Math.PI * 2;
+            
+            // Use smaller radius for inner puffs with less spread
+            const radiusVariation = innerRingRadius * (0.5 + Math.random() * 0.7); // Reduced from 0.6 + random * 1.0
+            
+            // Get a particle from the pool or create a new one
+            const puffMesh = this._getParticle(false);
+            
+            // Compute normals for flat shading
+            if (puffMesh.geometry.attributes.normal) {
+                puffMesh.geometry.computeVertexNormals();
+            }
+            
+            // Start at the origin (gun position)
+            puffMesh.position.x = Math.cos(angle) * 0.03;
+            puffMesh.position.y = Math.sin(angle) * 0.03;
+            puffMesh.position.z = 0.01;
+            
+            // Target positions for quick interpolation - closer to gun
+            const targetX = Math.cos(angle) * radiusVariation;
+            const targetY = Math.sin(angle) * radiusVariation;
+            const targetZ = 0.02 + Math.random() * 0.1; // Reduced from 0.15 for less z-spread
+            
+            // Fixed random rotation
+            puffMesh.rotation.x = Math.random() * Math.PI * 2;
+            puffMesh.rotation.y = Math.random() * Math.PI * 2;
+            puffMesh.rotation.z = Math.random() * Math.PI * 2;
+            
+            // Small size for inner puffs
+            const baseSize = 0.2 + Math.random() * 0.2; // 0.2-0.4 size
+            
+            // Start very small
+            puffMesh.scale.set(0.03, 0.03, 0.03);
+            
+            // Slower outward speed for less spread
+            const outwardSpeed = 0.6 + Math.random() * 0.6; // Reduced from 0.9 + random * 0.8
+            
+            this.puffs.push({
+                mesh: puffMesh,
+                age: 0,
+                lifespan: 0.5 + Math.random() * 0.4, // Shorter lifespan for small inner puffs
+                velocity: new THREE.Vector3(
+                    Math.cos(angle) * outwardSpeed,
+                    Math.sin(angle) * outwardSpeed,
+                    0.03 + Math.random() * 0.09 // Reduced from 0.12 for less upward movement
                 ),
-                initialSize: 0.05 + Math.random() * 0.03
+                rotationSpeed: new THREE.Vector3(0, 0, 0), // No rotation
+                initialSize: baseSize,
+                // Add target position data for fast initial interpolation
+                targetPos: new THREE.Vector3(targetX, targetY, targetZ),
+                initialExpansionDone: false, // Track if initial expansion is complete
+                initialExpansionSpeed: 25 + Math.random() * 10 // Fast expansion speed
             });
         }
         
         // Original muzzle blast particles for visual fidelity
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < 1; i++) {
             const puffMesh = this._getParticle(true);
             
             // Position very close to origin with minimal spread
-            const smallOffset = 0.08;
+            const smallOffset = 0.03; // Start even closer to gun
             puffMesh.position.set(
                 (Math.random() - 0.5) * smallOffset,
                 (Math.random() - 0.5) * smallOffset,
                 0
             );
             
-            // Random rotation
+            // Target positions - muzzle particles expand in place - closer to gun
+            const targetX = (Math.random() - 0.5) * 0.08; // Reduced from 0.12
+            const targetY = (Math.random() - 0.5) * 0.08; // Reduced from 0.12
+            const targetZ = 0.02 + Math.random() * 0.02; // Reduced from 0.03
+            
+            // Fixed random rotation
             puffMesh.rotation.x = Math.random() * Math.PI * 2;
             puffMesh.rotation.y = Math.random() * Math.PI * 2;
             puffMesh.rotation.z = Math.random() * Math.PI * 2;
             
-            puffMesh.scale.set(0.05, 0.05, 0.05);
+            // Moderate muzzle particles
+            const baseSize = 0.6 + Math.random() * 0.2; // 0.6-0.8 size
             
-            // Random outward direction
+            // Start extremely small
+            puffMesh.scale.set(0.01, 0.01, 0.01);
+            
+            // Random outward direction with slower speed
             const angle = Math.random() * Math.PI * 2;
-            const speed = 1.5 + Math.random() * 0.6;
+            const speed = 0.9 + Math.random() * 0.6; // Reduced from 1.3 + random * 0.8
             
             this.puffs.push({
                 mesh: puffMesh,
                 age: 0,
-                lifespan: 0.4 + Math.random() * 0.2,
+                lifespan: 0.6 + Math.random() * 0.3,
                 velocity: new THREE.Vector3(
                     Math.cos(angle) * speed,
                     Math.sin(angle) * speed,
-                    0.3 + Math.random() * 0.3
+                    0.15 + Math.random() * 0.2 // Reduced from 0.2 + random * 0.3
                 ),
-                rotationSpeed: new THREE.Vector3(
-                    (Math.random() - 0.5) * 0.05,
-                    (Math.random() - 0.5) * 0.05,
-                    (Math.random() - 0.5) * 0.05
-                ),
-                initialSize: 0.06 + Math.random() * 0.04
+                rotationSpeed: new THREE.Vector3(0, 0, 0), // No rotation
+                initialSize: baseSize,
+                // Add target position data for fast initial interpolation
+                targetPos: new THREE.Vector3(targetX, targetY, targetZ),
+                initialExpansionDone: false, // Track if initial expansion is complete  
+                initialExpansionSpeed: 20 + Math.random() * 10 // Very fast expansion for muzzle flash
             });
         }
     }
@@ -8754,32 +8948,56 @@ export class SmokeRingEffect {
                 // Calculate life ratio
                 const lifeRatio = puff.age / puff.lifespan;
                 
-                // Batch position updates to improve performance
-                const positionX = puff.mesh.position.x + puff.velocity.x * clampedDelta;
-                const positionY = puff.mesh.position.y + puff.velocity.y * clampedDelta;
-                const positionZ = puff.mesh.position.z + puff.velocity.z * clampedDelta;
-                puff.mesh.position.set(positionX, positionY, positionZ);
-                
-                // Update rotation
-                puff.mesh.rotation.x += puff.rotationSpeed.x;
-                puff.mesh.rotation.y += puff.rotationSpeed.y;
-                puff.mesh.rotation.z += puff.rotationSpeed.z;
-                
-                // Original scale curve for visual fidelity
-                let scaleFactor;
-                
-                if (lifeRatio < 0.2) {
-                    // Quick growth phase - 0 to 0.2
-                    scaleFactor = lifeRatio / 0.2;
-                } else if (lifeRatio < 0.7) {
-                    // Maintain size with slight growth - 0.2 to 0.7
-                    scaleFactor = 1.0 + (lifeRatio - 0.2) * 0.3;
+                // Fast initial position interpolation (first ~50ms - even faster)
+                if (!puff.initialExpansionDone) {
+                    // Check if we're still in the initial fast expansion phase (now only 50ms)
+                    const initialPhaseComplete = puff.age > 0.05; // Reduced from 100ms to 50ms
+                    
+                    if (initialPhaseComplete) {
+                        // Mark initial expansion as done
+                        puff.initialExpansionDone = true;
+                        
+                        // Set position to target to ensure we reached it
+                        puff.mesh.position.copy(puff.targetPos);
+                    } else {
+                        // Very fast interpolation toward target position
+                        const lerpFactor = clampedDelta * puff.initialExpansionSpeed;
+                        
+                        puff.mesh.position.x += (puff.targetPos.x - puff.mesh.position.x) * lerpFactor;
+                        puff.mesh.position.y += (puff.targetPos.y - puff.mesh.position.y) * lerpFactor;
+                        puff.mesh.position.z += (puff.targetPos.z - puff.mesh.position.z) * lerpFactor;
+                        
+                        // Quickly scale up to initial size
+                        const targetScale = puff.initialSize * 0.9; // Target 90% of final size initially
+                        const currentScale = puff.mesh.scale.x;
+                        const newScale = currentScale + (targetScale - currentScale) * lerpFactor;
+                        puff.mesh.scale.set(newScale, newScale, newScale);
+                    }
                 } else {
-                    // Shrink phase - 0.7 to 1.0
-                    scaleFactor = 1.3 - (lifeRatio - 0.7) * (1.3 / 0.3);
-                }
+                    // Normal movement after initial expansion
+                    const positionX = puff.mesh.position.x + puff.velocity.x * clampedDelta;
+                    const positionY = puff.mesh.position.y + puff.velocity.y * clampedDelta;
+                    const positionZ = puff.mesh.position.z + puff.velocity.z * clampedDelta;
+                    puff.mesh.position.set(positionX, positionY, positionZ);
                 
-                puff.mesh.scale.set(scaleFactor, scaleFactor, scaleFactor);
+                    // Scale curve for visual fidelity after initial expansion - REDUCE MAX SCALE
+                    let scaleFactor;
+                    
+                    if (lifeRatio < 0.2) {
+                        // Quick growth phase - 0 to 0.2 - REDUCE PEAK
+                        scaleFactor = 0.9 + (lifeRatio / 0.2) * 0.2; // Start from 90% to 110% (down from 130%)
+                    } else if (lifeRatio < 0.7) {
+                        // Maintain size with slight growth - 0.2 to 0.7 - REDUCE PEAK
+                        scaleFactor = 1.1 + (lifeRatio - 0.2) * 0.1; // 110% to 120% (down from 130% to 150%)
+                    } else {
+                        // Shrink phase - 0.7 to 1.0
+                        scaleFactor = 1.2 - (lifeRatio - 0.7) * (1.2 / 0.3); // Shrink from 120% to 0%
+                    }
+                    
+                    // Apply scale based on the initial size to maintain relative proportions
+                    const scale = puff.initialSize * scaleFactor;
+                    puff.mesh.scale.set(scale, scale, scale);
+                }
                 
                 // Handle transparency in final phase
                 if (lifeRatio > 0.7) {
@@ -8790,8 +9008,8 @@ export class SmokeRingEffect {
                     puff.mesh.material.opacity = 1.0;
                 }
                 
-                // Original drag calculation
-                const dragFactor = lifeRatio < 0.5 ? 0.98 : 0.96;
+                // Almost no drag to allow particles to travel much further
+                const dragFactor = lifeRatio < 0.5 ? 0.995 : 0.99;
                 puff.velocity.multiplyScalar(dragFactor);
             } else {
                 // Add expired puffs back to the pool instead of making them invisible

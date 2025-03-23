@@ -817,22 +817,43 @@ export class Player {
     // Crosshair animation if aiming
     const crosshair = document.getElementById('crosshair');
     if (crosshair && this.isAiming) {
-      // Add subtle pulse animation based on player movement
+      // Add subtle size adjustment based on player movement
       const isMoving = this.isMoving();
-      const movementFactor = isMoving ? 1.0 + (this.velocity.length() * 0.008) : 1.0;
+      const movementFactor = isMoving ? 1.0 + (this.velocity.length() * 0.005) : 1.0;
       
-      // Calculate scaled size based on movement
-      const size = 16 * movementFactor;
+      // Calculate scaled size based on movement (further reduced from 60 to 40)
+      const size = 40 * movementFactor;
       crosshair.style.width = `${size}px`;
       crosshair.style.height = `${size}px`;
       
-      // Add slight opacity change based on movement
+      // Set opacity based on movement
       const opacity = isMoving ? 0.7 : 0.8;
-      crosshair.style.borderColor = `rgba(255, 255, 255, ${opacity})`;
       
-      // A slight color tint for low health
-      if (this.health < 30) {
-        crosshair.style.borderColor = `rgba(255, ${Math.floor(255 * (this.health/30))}, ${Math.floor(255 * (this.health/60))}, ${opacity})`;
+      // Update all SVG elements with the appropriate color
+      const strokeColor = this.health < 30 
+        ? `rgba(255, ${Math.floor(255 * (this.health/30))}, ${Math.floor(255 * (this.health/60))}, ${opacity})`
+        : `rgba(255, 255, 255, ${opacity})`;
+      
+      // Apply color to all SVG paths and circle
+      const pathElements = crosshair.querySelectorAll('path');
+      pathElements.forEach(el => {
+        el.setAttribute('stroke', strokeColor);
+      });
+      
+      const circleElement = crosshair.querySelector('circle');
+      if (circleElement) {
+        circleElement.setAttribute('fill', strokeColor);
+      }
+      
+      // Apply expansion animation class if not already applied
+      if (!crosshair.classList.contains('expand') && !crosshair.classList.contains('expanded')) {
+        crosshair.classList.add('expand');
+        
+        // After animation completes, mark as expanded
+        setTimeout(() => {
+          crosshair.classList.remove('expand');
+          crosshair.classList.add('expanded');
+        }, 250); // Match animation duration
       }
     }
   }

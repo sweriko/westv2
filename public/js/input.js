@@ -4,6 +4,7 @@
  * @param {Player} player - The local Player instance (first-person).
  * @param {SoundManager} soundManager - The SoundManager for audio feedback.
  */
+
 export function initInput(renderer, player, soundManager) {
   // Track if device is mobile
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -115,8 +116,15 @@ export function initInput(renderer, player, soundManager) {
       if (player.arms) {
         player.arms.setVisible(true);
       }
-      // Show crosshair when aiming
-      document.getElementById('crosshair').style.display = 'block';
+      
+      // Show and prepare crosshair for animation
+      const crosshair = document.getElementById('crosshair');
+      if (crosshair) {
+        // Reset any existing animation classes
+        crosshair.classList.remove('contract', 'expand', 'expanded');
+        crosshair.style.display = 'block';
+        // Animation will be handled in updateAiming
+      }
 
       if (soundManager) {
         soundManager.playSound("aimclick");
@@ -139,8 +147,22 @@ export function initInput(renderer, player, soundManager) {
       if (player.arms) {
         player.arms.setVisible(false);
       }
-      // Hide crosshair when not aiming
-      document.getElementById('crosshair').style.display = 'none';
+      
+      // Play contraction animation before hiding crosshair
+      const crosshair = document.getElementById('crosshair');
+      if (crosshair) {
+        // Reset any existing classes
+        crosshair.classList.remove('expand', 'expanded');
+        
+        // Add contraction animation
+        crosshair.classList.add('contract');
+        
+        // Hide crosshair after animation completes
+        setTimeout(() => {
+          crosshair.style.display = 'none';
+          crosshair.classList.remove('contract');
+        }, 250); // Match animation duration
+      }
     }
   });
 
@@ -380,7 +402,15 @@ function createMobileControls(player, soundManager) {
           if (player.arms) {
             player.arms.setVisible(true);
           }
-          document.getElementById('crosshair').style.display = 'block';
+          
+          // Show and prepare crosshair for animation
+          const crosshair = document.getElementById('crosshair');
+          if (crosshair) {
+            // Reset any existing animation classes
+            crosshair.classList.remove('contract', 'expand', 'expanded');
+            crosshair.style.display = 'block';
+            // Animation will be handled in updateAiming
+          }
           
           if (soundManager) {
             soundManager.playSound("aimclick");
@@ -470,7 +500,22 @@ function createMobileControls(player, soundManager) {
         if (player.arms) {
           player.arms.setVisible(false);
         }
-        document.getElementById('crosshair').style.display = 'none';
+        
+        // Play contraction animation before hiding crosshair
+        const crosshair = document.getElementById('crosshair');
+        if (crosshair) {
+          // Reset any existing classes
+          crosshair.classList.remove('expand', 'expanded');
+          
+          // Add contraction animation
+          crosshair.classList.add('contract');
+          
+          // Hide crosshair after animation completes
+          setTimeout(() => {
+            crosshair.style.display = 'none';
+            crosshair.classList.remove('contract');
+          }, 250); // Match animation duration
+        }
         
         // Reset visual feedback
         rightControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
@@ -508,7 +553,22 @@ function createMobileControls(player, soundManager) {
         if (player.arms) {
           player.arms.setVisible(false);
         }
-        document.getElementById('crosshair').style.display = 'none';
+        
+        // Play contraction animation before hiding crosshair
+        const crosshair = document.getElementById('crosshair');
+        if (crosshair) {
+          // Reset any existing classes
+          crosshair.classList.remove('expand', 'expanded');
+          
+          // Add contraction animation
+          crosshair.classList.add('contract');
+          
+          // Hide crosshair after animation completes
+          setTimeout(() => {
+            crosshair.style.display = 'none';
+            crosshair.classList.remove('contract');
+          }, 250); // Match animation duration
+        }
         
         // Reset visual feedback
         rightControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';

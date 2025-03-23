@@ -88,33 +88,215 @@ canvas {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.8);
-  border-radius: 50%;
+  width: 80px;
+  height: 80px;
   display: none; /* Will be controlled by JavaScript */
   pointer-events: none;
   z-index: 100;
-  box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+  will-change: transform, opacity;
 }
-#crosshair::before,
-#crosshair::after {
-  content: '';
-  position: absolute;
-  background-color: rgba(255, 255, 255, 0.8);
+
+#crosshair svg {
+  width: 100%;
+  height: 100%;
 }
-#crosshair::before {
-  width: 2px;
-  height: 8px;
-  top: 4px;
-  left: 7px;
+
+/* Corner group style and transforms */
+.corner-group {
+  transform-origin: 50px 50px;
+  opacity: 0;
+  will-change: transform, opacity;
 }
-#crosshair::after {
-  width: 8px;
-  height: 2px;
-  top: 7px;
-  left: 4px;
+
+/* Center dot animation */
+#crosshair circle {
+  opacity: 0;
+  will-change: opacity;
+  transition: opacity 250ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+
+#crosshair.expand circle {
+  opacity: 1;
+  transition-delay: 0ms; /* Fade in first */
+}
+
+#crosshair.expanded circle {
+  opacity: 1;
+}
+
+#crosshair.contract circle {
+  opacity: 0;
+  transition-delay: 0ms; /* Immediate fade out instead of delayed */
+}
+
+/* Top corner animations */
+@keyframes expand-top {
+  0% {
+    transform: translate(0, 35px) scale(0);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes contract-top {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(0, 35px) scale(0);
+    opacity: 0;
+  }
+}
+
+/* Bottom left corner animations */
+@keyframes expand-bottom-left {
+  0% {
+    transform: translate(30px, -25px) scale(0);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes contract-bottom-left {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(30px, -25px) scale(0);
+    opacity: 0;
+  }
+}
+
+/* Bottom right corner animations */
+@keyframes expand-bottom-right {
+  0% {
+    transform: translate(-30px, -25px) scale(0);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes contract-bottom-right {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-30px, -25px) scale(0);
+    opacity: 0;
+  }
+}
+
+/* Apply specific animations to each corner */
+#crosshair.expand #top-corner {
+  animation: expand-top 250ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+#crosshair.expand #bottom-left-corner {
+  animation: expand-bottom-left 250ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+#crosshair.expand #bottom-right-corner {
+  animation: expand-bottom-right 250ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+#crosshair.contract #top-corner {
+  animation: contract-top 250ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+#crosshair.contract #bottom-left-corner {
+  animation: contract-bottom-left 250ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+#crosshair.contract #bottom-right-corner {
+  animation: contract-bottom-right 250ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+/* Set expanded state */
+#crosshair.expanded #top-corner,
+#crosshair.expanded #bottom-left-corner,
+#crosshair.expanded #bottom-right-corner {
+  opacity: 1;
+  transform: translate(0, 0) scale(1);
+}
+
+/* Make all elements animate with the same timing function */
+#crosshair path,
+#crosshair g,
+#crosshair circle {
+  transition-property: opacity, transform;
+  transition-duration: 250ms;
+  transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Ensure elements fade out when contract class is present */
+#crosshair.contract circle {
+  opacity: 0;
+  transition-delay: 0ms; /* Immediate fade out instead of delayed */
+}
+
+/* Make corner groups start contracting before center dot fades */
+#crosshair.contract #top-corner {
+  animation-delay: 50ms !important; /* Delay to start after dot begins fading */
+}
+
+#crosshair.contract #bottom-left-corner {
+  animation-delay: 70ms !important; /* Slightly more delay */
+}
+
+#crosshair.contract #bottom-right-corner {
+  animation-delay: 70ms !important; /* Slightly more delay */
+}
+
+/* Individual delays for staggered animation */
+#top-corner {
+  animation-delay: 50ms !important; /* Delayed after center dot appears */
+}
+
+#bottom-left-corner {
+  animation-delay: 80ms !important; /* Delayed after center dot appears */
+}
+
+#bottom-right-corner {
+  animation-delay: 80ms !important; /* Delayed after center dot appears */
+}
+
+/* SVG Line styles */
+#crosshair line {
+  stroke-linecap: round;
+  transform-box: fill-box;
+  transform-origin: center;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* Remove the above styles and add these instead */
+#crosshair path {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Force hardware acceleration for smoother animations */
+#crosshair, #crosshair svg, #crosshair g, #crosshair path, #crosshair circle {
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  -webkit-perspective: 1000;
+  perspective: 1000;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+}
+
 #fps-counter {
   position: absolute;
   top: 20px;
