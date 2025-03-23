@@ -532,14 +532,7 @@ export class PhysicsSystem {
       });
       
       // Set a global flag to signal hit zone debug should be created
-      // This is important for making bullet.js know it should show hitboxes
       window.showHitZoneDebug = true;
-      
-      // Special handling for Proper Shootout mode - ensure boundary is visualized
-      if (window.properShootout && window.properShootout.inLobby && window.properShootout.mapBoundaryBody) {
-        this.createDebugMesh(window.properShootout.mapBoundaryBody);
-        console.log("Created debug visualization for Proper Shootout map boundary");
-      }
       
       console.log("Physics debug mode enabled - hit zones visible");
     }
@@ -611,52 +604,22 @@ export class PhysicsSystem {
   }
   
   /**
-   * Force recreation of hit zone debug boxes for all players
-   * Called when needed to refresh the visualizations
+   * Refreshes hit zone debug visualizations when debug mode is active
    */
   refreshHitZoneDebug() {
-    if (!this.debugMode || !window.scene) return;
-    
     console.log("Refreshing hit zone debug visualizations");
     
-    // First clean up existing hit zone debug objects
-    this.cleanupHitZoneDebug();
+    // Don't do anything if debug mode isn't enabled
+    if (!this.debugMode) return;
     
-    // Then force recreation for local player and all remote players
-    // Create a dummy bullet to use for hit zone checks
-    const dummyBullet = new window.Bullet(
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(0, 1, 0)
-    );
-    
-    // Check local player
-    if (window.localPlayer) {
-      dummyBullet.checkPlayerHitZones(window.localPlayer, new THREE.Vector3(0, 0, 0));
-    }
-    
-    // Check remote players
-    if (window.remotePlayers) {
-      window.remotePlayers.forEach(player => {
-        if (player) {
-          dummyBullet.checkPlayerHitZones(player, new THREE.Vector3(0, 0, 0));
-        }
-      });
-    }
-    
-    // Also make sure the Proper Shootout map boundary is visualized if in that mode
-    if (window.properShootout && window.properShootout.inLobby && window.properShootout.mapBoundaryBody) {
-      // Create debug mesh for Proper Shootout map boundary if it doesn't exist yet
-      let hasDebugMesh = false;
-      for (const debugMesh of this.debugMeshes) {
-        if (debugMesh.body === window.properShootout.mapBoundaryBody) {
-          hasDebugMesh = true;
-          break;
-        }
-      }
-      
-      if (!hasDebugMesh) {
-        this.createDebugMesh(window.properShootout.mapBoundaryBody);
-        console.log("Created missing debug visualization for Proper Shootout map boundary");
+    // Create debug boxes for all existing player models
+    if (window.playersMap) {
+      for (const [playerId, playerModel] of window.playersMap) {
+        const dummyBullet = new Bullet(
+          new THREE.Vector3(0, 0, 0),
+          new THREE.Vector3(0, 1, 0)
+        );
+        dummyBullet.checkPlayerHitZones(playerModel, new THREE.Vector3(0, 0, 0));
       }
     }
   }

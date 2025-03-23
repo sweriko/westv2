@@ -465,36 +465,6 @@ export class NetworkManager {
   }
 
   /**
-   * Sends a request to join a Proper Shootout match.
-   */
-  sendProperShootoutJoin() {
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      // Anti-cheat: Add sequence number for message ordering
-      this.sequenceNumber++;
-      
-      this.socket.send(JSON.stringify({
-        type: 'properShootoutJoin',
-        sequenceNumber: this.sequenceNumber
-      }));
-    }
-  }
-
-  /**
-   * Sends a request to leave the current Proper Shootout match.
-   */
-  sendProperShootoutLeave() {
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      // Anti-cheat: Add sequence number for message ordering
-      this.sequenceNumber++;
-      
-      this.socket.send(JSON.stringify({
-        type: 'properShootoutLeave',
-        sequenceNumber: this.sequenceNumber
-      }));
-    }
-  }
-
-  /**
    * Closes the connection manually.
    */
   disconnect() {

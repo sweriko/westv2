@@ -1,42 +1,47 @@
 // server.js
+console.log("Starting server initialization...");
 const express = require('express');
+console.log("Express loaded");
 const http = require('http');
+console.log("HTTP loaded");
 const WebSocket = require('ws');
+console.log("WebSocket loaded");
 const url = require('url');
+console.log("URL loaded");
 const app = express();
+console.log("Express app created");
 
 // Port default 8080 to match your previous Cloudflare Tunnel config
 const PORT = process.env.PORT || 8080;
+console.log("Port set to", PORT);
 
 // Serve static files from "public"
 app.use(express.static('public'));
+console.log("Static file serving configured");
 
 const server = http.createServer(app);
+console.log("HTTP server created");
 const wss = new WebSocket.Server({ server, clientTracking: true });
+console.log("WebSocket server created");
 
 // Track connected players
 const players = new Map();    // playerId -> { ws, sessionId, position, rotation, health, ... }
 const sessions = new Set();   // tracks sessionIds to prevent duplicate connections
 let nextPlayerId = 1;
+console.log("Player tracking variables initialized");
 
 // Position history tracking to reduce unnecessary corrections
 const playerPositionHistory = new Map(); // playerId -> array of recent positions
 const POSITION_HISTORY_SIZE = 10; // Number of positions to track per player
 const CORRECTION_COOLDOWN = 5000; // Minimum ms between position corrections
+console.log("Position history tracking initialized");
 
 // Track Quick Draw game mode queues and active duels
 // Support for 5 concurrent lobbies
 const MAX_ARENAS = 5;
 const quickDrawQueues = Array(MAX_ARENAS).fill(null).map(() => []);  // Array of queues for each arena
 const quickDrawDuels = new Map(); // Map of duelId -> { player1Id, player2Id, state, arenaIndex, ... }
-
-// Track Proper Shootout game mode
-const properShootoutLobbies = new Map(); // lobbyId -> { players: Set(), scores: Map() }
-let nextLobbyId = 1;
-const MAX_SHOOTOUT_PLAYERS = 10;
-const SHOOTOUT_WIN_SCORE = 10;
-const SHOOTOUT_MAP_CENTER = { x: 0, z: -100 }; // Coordinates matching the client map center
-const SHOOTOUT_MAP_DIMENSIONS = { width: 50, length: 50 };
+console.log("Quick Draw game mode variables initialized");
 
 // Anti-cheat: Game physics constants
 const GAME_CONSTANTS = {
@@ -103,9 +108,6 @@ wss.on('connection', (ws, req) => {
     inQuickDrawQueue: false,
     inQuickDrawDuel: false,
     quickDrawDuelId: null,
-    // Proper Shootout info
-    inProperShootout: false,
-    properShootoutLobbyId: null,
     // Additional player state
     bullets: 6,
     maxBullets: 6,
@@ -260,14 +262,6 @@ wss.on('connection', (ws, req) => {
           
         case 'quickDrawDecline':
           handleQuickDrawDeclineChallenge(playerId, data.challengerId);
-          break;
-          
-        case 'properShootoutJoin':
-          handleProperShootoutJoin(playerId);
-          break;
-          
-        case 'properShootoutLeave':
-          handleProperShootoutLeave(playerId);
           break;
 
         default:
@@ -509,21 +503,16 @@ function handlePlayerHit(playerId, data) {
   // Validate that players are in compatible game modes
   const sourceInQuickDraw = sourcePlayer.inQuickDrawDuel;
   const targetInQuickDraw = targetPlayer.inQuickDrawDuel;
-  const sourceInShootout = sourcePlayer.inProperShootout;
-  const targetInShootout = targetPlayer.inProperShootout;
   
-  // Verify that players are either both in QuickDraw, both in Shootout, or both in regular mode
+  // Verify that players are either both in QuickDraw or both in regular mode
   const bothInQuickDraw = sourceInQuickDraw && targetInQuickDraw && 
                          sourcePlayer.quickDrawDuelId === targetPlayer.quickDrawDuelId;
-  const bothInShootout = sourceInShootout && targetInShootout &&
-                         sourcePlayer.properShootoutLobbyId === targetPlayer.properShootoutLobbyId;
-  const bothInRegularMode = !sourceInQuickDraw && !targetInQuickDraw && 
-                           !sourceInShootout && !targetInShootout;
+  const bothInRegularMode = !sourceInQuickDraw && !targetInQuickDraw;
   
-  if (!(bothInQuickDraw || bothInShootout || bothInRegularMode)) {
+  if (!(bothInQuickDraw || bothInRegularMode)) {
     console.log(`Rejecting hit claim from player ${playerId} on ${targetId}: incompatible game modes`);
-    console.log(`Source: QuickDraw=${sourceInQuickDraw}, Shootout=${sourceInShootout}`);
-    console.log(`Target: QuickDraw=${targetInQuickDraw}, Shootout=${targetInShootout}`);
+    console.log(`Source: QuickDraw=${sourceInQuickDraw}`);
+    console.log(`Target: QuickDraw=${targetInQuickDraw}`);
     return sendErrorToPlayer(playerId, "Invalid hit: players in different game modes", false);
   }
   
@@ -619,41 +608,6 @@ function handlePlayerDeath(playerId, killedById) {
     }
   }
   
-  // If player was in Proper Shootout, handle kill scoring
-  if (player.inProperShootout && player.properShootoutLobbyId) {
-    const lobbyId = player.properShootoutLobbyId;
-    const lobby = properShootoutLobbies.get(lobbyId);
-    const killer = players.get(killedById);
-    
-    if (lobby && killer && killer.inProperShootout && killer.properShootoutLobbyId === lobbyId) {
-      // Increment killer's score
-      const currentKills = lobby.scores.get(killedById) || 0;
-      const newKills = currentKills + 1;
-      lobby.scores.set(killedById, newKills);
-      
-      // Notify lobby about the kill
-      notifyLobbyPlayers(lobbyId, {
-        type: 'properShootoutKill',
-        killerId: killedById,
-        victimId: playerId,
-        scores: getScoresArray(lobby)
-      });
-      
-      // Check if killer reached win condition
-      if (newKills >= SHOOTOUT_WIN_SCORE) {
-        // End the match
-        notifyLobbyPlayers(lobbyId, {
-          type: 'properShootoutEnd',
-          winnerId: killedById,
-          scores: getScoresArray(lobby)
-        });
-        
-        // Reset the lobby
-        resetProperShootoutLobby(lobbyId);
-      }
-    }
-  }
-  
   // Respawn the player
   respawnPlayer(playerId);
 }
@@ -670,19 +624,13 @@ function respawnPlayer(playerId) {
   player.isAiming = false;
   player.isShooting = false;
   
-  // If in Proper Shootout, use map-specific spawn
-  if (player.inProperShootout) {
-    const spawnPos = generateRandomShootoutPosition();
-    player.position = spawnPos;
-  } else {
-    // Generate random spawn position within town
-    const spawnX = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_WIDTH * 0.8;
-    const spawnY = 1.6;
-    const spawnZ = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_LENGTH * 0.8;
-    
-    // Set spawn position
-    player.position = { x: spawnX, y: spawnY, z: spawnZ };
-  }
+  // Generate random spawn position within town
+  const spawnX = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_WIDTH * 0.8;
+  const spawnY = 1.6;
+  const spawnZ = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_LENGTH * 0.8;
+  
+  // Set spawn position
+  player.position = { x: spawnX, y: spawnY, z: spawnZ };
   
   // Reset QuickDraw-related state if not in a duel
   if (!player.inQuickDrawDuel) {
@@ -822,11 +770,6 @@ function cleanupPlayer(playerId) {
       }
     }
     
-    // Proper Shootout cleanup
-    if (player.inProperShootout && player.properShootoutLobbyId) {
-      removePlayerFromShootoutLobby(playerId, player.properShootoutLobbyId);
-    }
-    
     players.delete(playerId);
     
     // Anti-cheat: Clean up associated data
@@ -886,22 +829,33 @@ function handleQuickDrawJoin(playerId, arenaIndex) {
   console.log(`Player ${playerId} joined Quick Draw queue for arena ${arenaIndex + 1}`);
   const playerData = players.get(playerId);
   
-  if (!playerData || playerData.inQuickDrawQueue || playerData.inQuickDrawDuel || playerData.inProperShootout) {
+  if (!playerData || playerData.inQuickDrawQueue || playerData.inQuickDrawDuel) {
     return; // Invalid state
   }
   
   // Add to the specific queue
-  playerData.inQuickDrawQueue = true;
-  playerData.quickDrawLobbyIndex = arenaIndex;
   quickDrawQueues[arenaIndex].push(playerId);
   
-  // Notify the player they joined the queue
-  playerData.ws.send(JSON.stringify({
-    type: 'quickDrawJoin',
-    arenaIndex: arenaIndex
-  }));
+  // Update player state
+  playerData.inQuickDrawQueue = true;
+  playerData.quickDrawLobbyIndex = arenaIndex;
   
-  // Check if we have enough players in this queue to start a match
+  // Notify the player and everyone else
+  if (playerData.ws.readyState === WebSocket.OPEN) {
+    playerData.ws.send(JSON.stringify({
+      type: 'joinedQuickDrawQueue',
+      arenaIndex: arenaIndex
+    }));
+  }
+  
+  // Broadcast to all players
+  broadcastToAll({
+    type: 'playerUpdate',
+    id: playerId,
+    quickDrawLobbyIndex: arenaIndex
+  });
+  
+  // Check if we can now start a duel
   checkQuickDrawQueue(arenaIndex);
 }
 
@@ -1275,430 +1229,8 @@ function endQuickDrawDuel(duelId, winnerId) {
 }
 
 /**
- * Handle a player joining a Proper Shootout match
+ * Handle a player challenging another player to a Quick Draw duel.
  * @param {number} playerId - The player's ID
- */
-function handleProperShootoutJoin(playerId) {
-  const player = players.get(playerId);
-  
-  if (!player) {
-    return; // Invalid player
-  }
-  
-  console.log(`Player ${playerId} requested to join Proper Shootout match`);
-  
-  // Check if player is already in a game mode
-  if (player.inQuickDrawQueue || player.inQuickDrawDuel || player.inProperShootout) {
-    return sendErrorToPlayer(playerId, "Already in a game mode", false);
-  }
-  
-  // Find a lobby with space or create a new one
-  let lobbyId = null;
-  let lobby = null;
-  
-  // Look for existing lobbies with space
-  for (const [id, existingLobby] of properShootoutLobbies.entries()) {
-    if (existingLobby.players.size < MAX_SHOOTOUT_PLAYERS) {
-      lobbyId = id;
-      lobby = existingLobby;
-      break;
-    }
-  }
-  
-  // Create a new lobby if none found
-  if (!lobbyId) {
-    lobbyId = `lobby_${nextLobbyId++}`;
-    lobby = {
-      id: lobbyId,
-      players: new Set(),
-      scores: new Map(), // playerId -> kills
-      startTime: Date.now()
-    };
-    properShootoutLobbies.set(lobbyId, lobby);
-    console.log(`Created new Proper Shootout lobby: ${lobbyId}`);
-  }
-  
-  // Add player to lobby
-  lobby.players.add(playerId);
-  lobby.scores.set(playerId, 0);
-  
-  // Update player state
-  player.inProperShootout = true;
-  player.properShootoutLobbyId = lobbyId;
-  
-  // Reset player health
-  player.health = 100;
-  
-  // Generate random spawn position
-  const spawnPos = generateRandomShootoutPosition();
-  
-  // Send join confirmation to player with spawn position
-  player.ws.send(JSON.stringify({
-    type: 'properShootoutJoin',
-    lobbyId: lobbyId,
-    position: spawnPos,
-    scores: getScoresArray(lobby)
-  }));
-  
-  // Notify other players in the lobby
-  notifyLobbyPlayers(lobbyId, {
-    type: 'properShootoutPlayerJoin',
-    playerId: playerId,
-    scores: getScoresArray(lobby)
-  }, playerId);
-  
-  console.log(`Player ${playerId} joined Proper Shootout lobby ${lobbyId}`);
-}
-
-/**
- * Handle a player leaving a Proper Shootout match
- * @param {number} playerId - The player's ID
- */
-function handleProperShootoutLeave(playerId) {
-  const player = players.get(playerId);
-  
-  if (!player || !player.inProperShootout) {
-    return; // Invalid state
-  }
-  
-  const lobbyId = player.properShootoutLobbyId;
-  const lobby = properShootoutLobbies.get(lobbyId);
-  
-  if (lobby) {
-    removePlayerFromShootoutLobby(playerId, lobbyId);
-  }
-  
-  // Update player state
-  player.inProperShootout = false;
-  player.properShootoutLobbyId = null;
-  
-  // Send leave confirmation to player
-  player.ws.send(JSON.stringify({
-    type: 'properShootoutLeave'
-  }));
-  
-  console.log(`Player ${playerId} left Proper Shootout lobby ${lobbyId}`);
-}
-
-/**
- * Remove a player from a Proper Shootout lobby and update lobby state
- * @param {number} playerId - The player's ID
- * @param {string} lobbyId - The lobby ID
- */
-function removePlayerFromShootoutLobby(playerId, lobbyId) {
-  const lobby = properShootoutLobbies.get(lobbyId);
-  
-  if (!lobby) {
-    return;
-  }
-  
-  // Remove player from lobby
-  lobby.players.delete(playerId);
-  lobby.scores.delete(playerId);
-  
-  // Notify other players in the lobby
-  notifyLobbyPlayers(lobbyId, {
-    type: 'properShootoutPlayerLeave',
-    playerId: playerId,
-    scores: getScoresArray(lobby)
-  });
-  
-  // If lobby is empty, remove it
-  if (lobby.players.size === 0) {
-    properShootoutLobbies.delete(lobbyId);
-    console.log(`Removed empty Proper Shootout lobby: ${lobbyId}`);
-  }
-}
-
-/**
- * Generate a random position within the Proper Shootout map
- * @returns {Object} - Random position {x, y, z}
- */
-function generateRandomShootoutPosition() {
-  const x = SHOOTOUT_MAP_CENTER.x + (Math.random() - 0.5) * (SHOOTOUT_MAP_DIMENSIONS.width - 5);
-  const y = 1.6; // Player height
-  const z = SHOOTOUT_MAP_CENTER.z + (Math.random() - 0.5) * (SHOOTOUT_MAP_DIMENSIONS.length - 5);
-  
-  return { x, y, z };
-}
-
-/**
- * Notify all players in a lobby about an event
- * @param {string} lobbyId - The lobby ID
- * @param {Object} data - The message data to send
- * @param {number} excludeId - Optional player ID to exclude
- */
-function notifyLobbyPlayers(lobbyId, data, excludeId = null) {
-  const lobby = properShootoutLobbies.get(lobbyId);
-  
-  if (!lobby) {
-    return;
-  }
-  
-  for (const playerId of lobby.players) {
-    if (excludeId !== null && playerId === excludeId) {
-      continue;
-    }
-    
-    const player = players.get(playerId);
-    if (player && player.ws.readyState === WebSocket.OPEN) {
-      player.ws.send(JSON.stringify(data));
-    }
-  }
-}
-
-/**
- * Convert lobby scores map to array for sending to clients
- * @param {Object} lobby - The lobby object
- * @returns {Array} - Array of {playerId, kills}
- */
-function getScoresArray(lobby) {
-  const scores = [];
-  
-  for (const [playerId, kills] of lobby.scores.entries()) {
-    scores.push({
-      playerId,
-      kills
-    });
-  }
-  
-  return scores;
-}
-
-/**
- * Reset a Proper Shootout lobby after a match ends
- * @param {string} lobbyId - The lobby ID
- */
-function resetProperShootoutLobby(lobbyId) {
-  const lobby = properShootoutLobbies.get(lobbyId);
-  
-  if (!lobby) {
-    return;
-  }
-  
-  // Create a new lobby with the same ID
-  const newLobby = {
-    id: lobbyId,
-    players: new Set(), // Start with no players
-    scores: new Map(),
-    startTime: Date.now()
-  };
-  
-  properShootoutLobbies.set(lobbyId, newLobby);
-  
-  // Remove players from the old lobby, they'll need to rejoin
-  for (const playerId of lobby.players) {
-    const player = players.get(playerId);
-    if (player) {
-      player.inProperShootout = false;
-      player.properShootoutLobbyId = null;
-    }
-  }
-  
-  console.log(`Reset Proper Shootout lobby: ${lobbyId}`);
-}
-
-// Anti-cheat: Server-side bullet physics update
-function updateBullets() {
-  const now = Date.now();
-  
-  // Update each active bullet
-  for (const [bulletId, bullet] of activeBullets.entries()) {
-    if (!bullet.active) continue;
-    
-    // Calculate time since last update
-    const deltaTime = (now - bullet.timeCreated) / 1000;
-    
-    // Calculate new position
-    const distanceThisFrame = bullet.speed * deltaTime;
-    bullet.position.x += bullet.direction.x * distanceThisFrame;
-    bullet.position.y += bullet.direction.y * distanceThisFrame;
-    bullet.position.z += bullet.direction.z * distanceThisFrame;
-    
-    // Update total distance traveled
-    bullet.distanceTraveled += distanceThisFrame;
-    
-    // Check if bullet has traveled too far
-    if (bullet.distanceTraveled >= bullet.maxDistance) {
-      bullet.active = false;
-      continue;
-    }
-    
-    // Check for collisions with terrain (ground or town boundary)
-    if (bullet.position.y <= 0.1) {
-      // Hit ground
-      bullet.active = false;
-      broadcastBulletImpact(bulletId, 'ground', null, bullet.position);
-      continue;
-    }
-    
-    // Check town boundaries (if not in a Quick Draw arena)
-    if (!isPositionInTown(bullet.position)) {
-      // Only check arena boundaries if source player is in a duel
-      const sourcePlayer = players.get(bullet.sourcePlayerId);
-      if (!sourcePlayer || !sourcePlayer.inQuickDrawDuel) {
-        bullet.active = false;
-        broadcastBulletImpact(bulletId, 'boundary', null, bullet.position);
-        continue;
-      }
-    }
-    
-    // Check for collisions with players
-    for (const [playerId, player] of players.entries()) {
-      // Skip collision with bullet owner
-      if (playerId === bullet.sourcePlayerId) continue;
-      
-      // Skip collisions across arena boundary
-      const bulletSourcePlayer = players.get(bullet.sourcePlayerId);
-      const targetInDuel = player.inQuickDrawDuel;
-      const sourceInDuel = bulletSourcePlayer ? bulletSourcePlayer.inQuickDrawDuel : false;
-      
-      // Only allow hits if both in same state (both in arena or both outside)
-      if (targetInDuel !== sourceInDuel) {
-        continue;
-      }
-      
-      // Check for collision
-      if (isPlayerHitByBullet(player, bullet)) {
-        bullet.active = false;
-        
-        // Calculate damage based on hit position (simplified for server-side)
-        // This is a simplified version; the client sends more detailed hit zone info
-        let damage = GAME_CONSTANTS.DAMAGE_PER_HIT;
-        let hitZone = 'body'; // Default to body hit
-        
-        // Very basic hit zone detection based on bullet height
-        const playerBottom = player.position.y - 1.6;
-        const playerTop = playerBottom + 2.0;
-        const relativeHeight = (bullet.position.y - playerBottom) / (playerTop - playerBottom);
-        
-        if (relativeHeight > 0.8) {
-          hitZone = 'head';
-          damage = 100; // Headshot is fatal
-        } else if (relativeHeight > 0.4) {
-          hitZone = 'body';
-          damage = 40; // Body shot
-        } else {
-          hitZone = 'limbs';
-          damage = 20; // Limb shot
-        }
-        
-        // Handle the hit
-        player.health = Math.max(player.health - damage, 0);
-        
-        // Notify the hit player
-        if (player.ws.readyState === WebSocket.OPEN) {
-          player.ws.send(JSON.stringify({
-            type: 'hit',
-            sourceId: bullet.sourcePlayerId,
-            bulletId: bulletId,
-            health: player.health,
-            hitZone: hitZone
-          }));
-        }
-        
-        // Broadcast hit to all players
-        broadcastBulletImpact(bulletId, 'player', playerId, bullet.position, hitZone);
-        
-        // Check for player death
-        if (player.health <= 0) {
-          handlePlayerDeath(playerId, bullet.sourcePlayerId);
-        }
-        
-        break;
-      }
-    }
-  }
-  
-  // Clean up inactive bullets
-  for (const [bulletId, bullet] of activeBullets.entries()) {
-    if (!bullet.active) {
-      activeBullets.delete(bulletId);
-    }
-  }
-}
-
-// Anti-cheat: Broadcast bullet impact to all players
-function broadcastBulletImpact(bulletId, hitType, targetId, position, hitZone) {
-  broadcastToAll({
-    type: 'bulletImpact',
-    bulletId: bulletId,
-    hitType: hitType,
-    targetId: targetId,
-    position: position,
-    hitZone: hitZone
-  });
-}
-
-// Heartbeat to remove stale connections
-const HEARTBEAT_INTERVAL = 30000; // 30s
-const CONNECTION_TIMEOUT = 60000; // 60s
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [id, player] of players.entries()) {
-    if (now - player.lastActivity > CONNECTION_TIMEOUT) {
-      console.log(`Removing stale connection for player ${id}`);
-      if (player.ws.readyState === WebSocket.OPEN) {
-        player.ws.close(1000, 'Connection timeout');
-      }
-      cleanupPlayer(id);
-    } else if (player.ws.readyState === WebSocket.OPEN) {
-      // keep alive
-      player.ws.send(JSON.stringify({ type: 'ping' }));
-    }
-  }
-}, HEARTBEAT_INTERVAL);
-
-// Anti-cheat: Run physics update loop
-setInterval(updateBullets, GAME_CONSTANTS.PHYSICS_UPDATE_INTERVAL);
-
-// Start server
-server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  
-  // If the environment variable USE_NGROK is set to 'true', start an ngrok tunnel.
-  if (process.env.USE_NGROK === 'true') {
-    // Dynamically require ngrok so it is only used when needed.
-    const ngrok = require('ngrok');
-    (async function() {
-      try {
-        // Connect ngrok to the same port that the server is running on.
-        const url = await ngrok.connect({
-          addr: PORT,
-          // You can add additional ngrok options here (e.g., authtoken, subdomain, region)
-        });
-        console.log(`ngrok tunnel established at ${url}`);
-      } catch (error) {
-        console.error('Error starting ngrok tunnel:', error);
-      }
-    })();
-  }
-});
-
-// Graceful shutdown
-process.on('SIGINT', () => {
-  console.log('Server shutting down...');
-  
-  // End all Quick Draw duels
-  for (const duelId of quickDrawDuels.keys()) {
-    endQuickDrawDuel(duelId, null);
-  }
-  
-  for (const [id, player] of players.entries()) {
-    if (player.ws.readyState === WebSocket.OPEN) {
-      player.ws.close(1000, 'Server shutting down');
-    }
-  }
-  server.close(() => {
-    console.log('Server shutdown complete.');
-    process.exit(0);
-  });
-});
-
-/**
- * Handle a direct QuickDraw challenge from one player to another
- * @param {number} playerId - The challenging player's ID
  * @param {number} targetPlayerId - The target player's ID
  */
 function handleQuickDrawChallenge(playerId, targetPlayerId) {
@@ -1709,11 +1241,11 @@ function handleQuickDrawChallenge(playerId, targetPlayerId) {
     return; // Invalid players
   }
   
-  if (player.inQuickDrawQueue || player.inQuickDrawDuel || player.inProperShootout) {
+  if (player.inQuickDrawQueue || player.inQuickDrawDuel) {
     return; // Challenger can't be in another game mode
   }
   
-  if (targetPlayer.inQuickDrawQueue || targetPlayer.inQuickDrawDuel || targetPlayer.inProperShootout) {
+  if (targetPlayer.inQuickDrawQueue || targetPlayer.inQuickDrawDuel) {
     return; // Target can't be in another game mode
   }
   
@@ -1820,8 +1352,8 @@ function handleQuickDrawAcceptChallenge(playerId, challengerId) {
     return; // Invalid players
   }
   
-  if (player.inQuickDrawQueue || player.inQuickDrawDuel || player.inProperShootout ||
-      challenger.inQuickDrawQueue || challenger.inQuickDrawDuel || challenger.inProperShootout) {
+  if (player.inQuickDrawQueue || player.inQuickDrawDuel ||
+      challenger.inQuickDrawQueue || challenger.inQuickDrawDuel) {
     return; // Players can't be in another game mode
   }
   
@@ -1907,3 +1439,86 @@ function handleQuickDrawDeclineChallenge(playerId, challengerId) {
     targetId: playerId
   }));
 }
+
+// Anti-cheat: Server-side bullet physics update
+function updateBullets() {
+  const now = Date.now();
+  
+  // Update each active bullet
+  for (const [bulletId, bullet] of activeBullets.entries()) {
+    if (!bullet.active) continue;
+    
+    // Calculate time since last update
+    const deltaTime = (now - bullet.timeCreated) / 1000;
+    
+    // Calculate new position
+    const distanceThisFrame = bullet.speed * deltaTime;
+    bullet.position.x += bullet.direction.x * distanceThisFrame;
+    bullet.position.y += bullet.direction.y * distanceThisFrame;
+    bullet.position.z += bullet.direction.z * distanceThisFrame;
+    
+    // Update total distance traveled
+    bullet.distanceTraveled += distanceThisFrame;
+    
+    // Check if bullet has traveled too far
+    if (bullet.distanceTraveled >= bullet.maxDistance) {
+      bullet.active = false;
+      continue;
+    }
+  }
+  
+  // Clean up inactive bullets
+  for (const [bulletId, bullet] of activeBullets.entries()) {
+    if (!bullet.active) {
+      activeBullets.delete(bulletId);
+    }
+  }
+}
+
+// Heartbeat to remove stale connections
+const HEARTBEAT_INTERVAL = 30000; // 30s
+const CONNECTION_TIMEOUT = 60000; // 60s
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, player] of players.entries()) {
+    if (now - player.lastActivity > CONNECTION_TIMEOUT) {
+      console.log(`Removing stale connection for player ${id}`);
+      if (player.ws.readyState === WebSocket.OPEN) {
+        player.ws.close(1000, 'Connection timeout');
+      }
+      cleanupPlayer(id);
+    } else if (player.ws.readyState === WebSocket.OPEN) {
+      // keep alive
+      player.ws.send(JSON.stringify({ type: 'ping' }));
+    }
+  }
+}, HEARTBEAT_INTERVAL);
+
+// Anti-cheat: Run physics update loop
+setInterval(updateBullets, GAME_CONSTANTS.PHYSICS_UPDATE_INTERVAL);
+
+// Start server
+server.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('Server shutting down...');
+  
+  // End all Quick Draw duels
+  for (const duelId of quickDrawDuels.keys()) {
+    endQuickDrawDuel(duelId, null);
+  }
+  
+  for (const [id, player] of players.entries()) {
+    if (player.ws.readyState === WebSocket.OPEN) {
+      player.ws.close(1000, 'Server shutting down');
+    }
+  }
+  server.close(() => {
+    console.log('Server shutdown complete.');
+    process.exit(0);
+  });
+});

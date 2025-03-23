@@ -80,18 +80,8 @@ export class Bullet {
       }
     }
     
-    // Similar check for Proper Shootout - only allow bullets from players in the same shootout match
-    if (window.properShootout && window.properShootout.inLobby && window.properShootout.isPointInMap(this.mesh.position)) {
-      const isLocalPlayerBullet = Number(this.sourcePlayerId) === Number(window.localPlayer.id);
-      const isPlayerInShootout = window.properShootout && window.properShootout.inLobby;
-      
-      // If bullet is inside shootout map but player is not in shootout, destroy it
-      if (!isPlayerInShootout && isLocalPlayerBullet) {
-        console.log("Destroying unauthorized bullet inside shootout map from player " + this.sourcePlayerId);
-        createImpactEffect(this.mesh.position, this.direction, scene, 'ground');
-        return { active: false, hit: { type: 'boundary', position: this.mesh.position } };
-      }
-    }
+    // If we're still active, update bullet position and check for player hits
+    this.lastPosition.copy(this.mesh.position);
     
     // Move the bullet
     const displacement = this.direction.clone().multiplyScalar(this.speed * deltaTime);
@@ -147,49 +137,14 @@ export class Bullet {
       }
     }
 
-    // Check for Proper Shootout map boundary
-    if (window.properShootout && window.properShootout.inLobby) {
-      const bulletInMap = window.properShootout.isPointInMap(endPos);
-      const prevInMap = window.properShootout.isPointInMap(this.lastPosition);
-      
-      // Calculate if bullet is crossing the boundary
-      const bulletCrossingBoundary = bulletInMap !== prevInMap;
-      
-      // If the bullet is crossing the boundary from inside to outside, destroy it
-      if (bulletCrossingBoundary && !bulletInMap) {
-        console.log("Bullet hit Proper Shootout map boundary - destroying it");
+    // Only check town boundary if not in QuickDraw duel
+    if (!(window.quickDraw && window.quickDraw.inDuel)) {
+      // Check town boundary
+      if (!withinTownBoundary(endPos)) {
+        // Show an impact effect on the invisible boundary
         createImpactEffect(endPos, this.direction, scene, 'ground');
-        return { active: false, hit: { type: 'boundary', position: endPos } };
-      }
-    }
-    // Only check town boundary if not in Proper Shootout
-    else if (window.physics && typeof window.physics.isPointInTown === 'function') {
-      const bulletInTown = window.physics.isPointInTown(endPos);
-      const prevInTown = window.physics.isPointInTown(this.lastPosition);
-      
-      // Calculate if bullet is crossing the boundary
-      const bulletCrossingBoundary = bulletInTown !== prevInTown;
-      
-      // If the bullet is crossing the boundary, destroy it
-      if (bulletCrossingBoundary) {
+        
         console.log("Bullet hit town boundary - destroying it");
-        createImpactEffect(endPos, this.direction, scene, 'ground');
-        return { active: false, hit: { type: 'boundary', position: endPos } };
-      }
-    } else if (window.townDimensions) {
-      // Fallback if physics isn't available but town dimensions are
-      const width = window.townDimensions.width;
-      const length = window.townDimensions.length;
-      
-      // Check if bullet is outside town boundary
-      if (
-        endPos.x < -width / 2 || 
-        endPos.x > width / 2 || 
-        endPos.z < -length / 2 || 
-        endPos.z > length / 2
-      ) {
-        console.log("Bullet hit town boundary - destroying it");
-        createImpactEffect(endPos, this.direction, scene, 'ground');
         return { active: false, hit: { type: 'boundary', position: endPos } };
       }
     }
@@ -217,8 +172,7 @@ export class Bullet {
         // Prevent hits across arena boundary or between different game modes
         // Only allow hits if players are in compatible states:
         // 1. Both in the same QuickDraw duel
-        // 2. Both in the same Proper Shootout match
-        // 3. Both in the regular town area (not in any game mode)
+        // 2. Both in the regular town area (not in any game mode)
         
         const sourcePlayerId = Number(this.sourcePlayerId);
         const targetPlayerId = Number(playerId);
@@ -228,19 +182,11 @@ export class Bullet {
         const targetPlayerInDuel = window.quickDraw && 
                                    window.quickDraw.duelOpponentId === targetPlayerId;
         
-        // Check if source and target are in Proper Shootout
-        const bulletPlayerInShootout = window.properShootout && window.properShootout.inLobby;
-        const targetPlayerInShootout = window.properShootout && 
-                                      window.localPlayer && 
-                                      window.localPlayer.id !== targetPlayerId; // Any non-local player in shootout mode
-        
         // Make sure players are in the same game mode to allow hits
         const bothInDuel = bulletPlayerInDuel && targetPlayerInDuel;
-        const bothInShootout = bulletPlayerInShootout && targetPlayerInShootout;
-        const bothInRegularTown = !bulletPlayerInDuel && !bulletPlayerInShootout && 
-                                 !targetPlayerInDuel && !targetPlayerInShootout;
+        const bothInRegularTown = !bulletPlayerInDuel && !targetPlayerInDuel;
         
-        if (!(bothInDuel || bothInShootout || bothInRegularTown)) {
+        if (!(bothInDuel || bothInRegularTown)) {
           continue; // Skip collision check if players are in different areas/modes
         }
         
@@ -709,4 +655,30 @@ export class Bullet {
   setLastHitZone(zone) {
     this.lastHitZone = zone;
   }
+}
+
+/**
+ * Helper function to check if a position is within the town boundary
+ * @param {THREE.Vector3} position - The position to check
+ * @returns {boolean} - True if within boundary, false if outside
+ */
+function withinTownBoundary(position) {
+  if (window.physics && typeof window.physics.isPointInTown === 'function') {
+    return window.physics.isPointInTown(position);
+  } else if (window.townDimensions) {
+    // Fallback if physics isn't available but town dimensions are
+    const width = window.townDimensions.width;
+    const length = window.townDimensions.length;
+    
+    // Check if position is within town boundaries
+    return (
+      position.x >= -width / 2 && 
+      position.x <= width / 2 && 
+      position.z >= -length / 2 && 
+      position.z <= length / 2
+    );
+  }
+  
+  // Default to true if we can't determine the boundary
+  return true;
 }
