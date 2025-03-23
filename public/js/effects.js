@@ -42,71 +42,41 @@ export function createMuzzleFlash(position, scene) {
   flashGroup.position.copy(position);
   scene.add(flashGroup);
 
-  const coreGeometry = new THREE.SphereGeometry(0.05, 8, 8);
+  // Create just a single bright orange core for the muzzle flash
+  const coreGeometry = new THREE.SphereGeometry(0.06, 8, 8);
   const coreMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFFFFFF,
+    color: 0xFF6B00, // Bright orange
     transparent: true,
     opacity: 1
   });
   const core = new THREE.Mesh(coreGeometry, coreMaterial);
+  // Make it slightly elongated in the x-direction (along the barrel)
+  core.scale.x = 1.8;
   flashGroup.add(core);
 
-  const middleGeometry = new THREE.SphereGeometry(0.08, 8, 8);
-  const middleMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFFFF00,
-    transparent: true,
-    opacity: 0.8
-  });
-  const middle = new THREE.Mesh(middleGeometry, middleMaterial);
-  middle.scale.x = 1.5;
-  flashGroup.add(middle);
-
-  const outerGeometry = new THREE.SphereGeometry(0.12, 8, 8);
-  const outerMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFF6B00,
-    transparent: true,
-    opacity: 0.5
-  });
-  const outer = new THREE.Mesh(outerGeometry, outerMaterial);
-  outer.scale.x = 2;
-  flashGroup.add(outer);
-
-  const particleCount = 8;
-  for (let i = 0; i < particleCount; i++) {
-    const particleGeometry = new THREE.SphereGeometry(0.02, 4, 4);
-    const particleMaterial = new THREE.MeshBasicMaterial({
-      color: 0xFFFF00,
-      transparent: true,
-      opacity: 0.7
-    });
-    const particle = new THREE.Mesh(particleGeometry, particleMaterial);
-    const angle = Math.random() * Math.PI * 2;
-    const radius = 0.05 + Math.random() * 0.1;
-    particle.position.set(
-      Math.cos(angle) * radius,
-      Math.sin(angle) * radius,
-      (Math.random() - 0.5) * 0.1
-    );
-    flashGroup.add(particle);
-  }
-
-  const flashLight = new THREE.PointLight(0xFF9900, 1, 2);
+  // Add a simple point light for illumination
+  const flashLight = new THREE.PointLight(0xFF6B00, 1.5, 2);
   flashLight.position.set(0, 0, 0);
   flashGroup.add(flashLight);
 
-  const duration = 100;
+  // Make the flash effect much shorter
+  const duration = 60; // milliseconds (reduced from 100)
   const startTime = performance.now();
 
   function animateFlash(timestamp) {
     const elapsed = timestamp - startTime;
     const progress = elapsed / duration;
     if (progress < 1) {
-      core.scale.multiplyScalar(0.95);
-      const fadeOpacity = 1 - progress;
-      coreMaterial.opacity = fadeOpacity;
-      middleMaterial.opacity = fadeOpacity * 0.8;
-      outerMaterial.opacity = fadeOpacity * 0.5;
-      flashLight.intensity = 1 - progress;
+      // Simple scale pulsation for more dramatic effect
+      core.scale.x = 1.8 * (1 - progress * 0.5);
+      
+      // Quicker fade out
+      const fadeOpacity = 1 - progress * 1.2; // Faster falloff
+      coreMaterial.opacity = Math.max(0, fadeOpacity);
+      
+      // Light intensity follows the same curve
+      flashLight.intensity = 1.5 * (1 - progress);
+      
       requestAnimationFrame(animateFlash);
     } else {
       scene.remove(flashGroup);
@@ -220,166 +190,6 @@ export function createSmokeEffect(position, direction, scene) {
   }
   
   requestAnimationFrame(animateSmoke);
-}
-
-/**
- * Preloads the shockwave ring effect by creating a disposable instance
- * This forces Three.js to compile the shaders and cache resources
- * @param {THREE.Scene} scene - The scene where the preloaded effect will be created
- */
-export function preloadShockwaveRing(scene) {
-  // Skip on mobile devices
-  if (window.isMobile) {
-    return;
-  }
-  
-  // Create a dummy position and direction
-  const dummyPosition = new THREE.Vector3(0, -1000, 0); // Far below the scene
-  const dummyDirection = new THREE.Vector3(0, 1, 0);
-  
-  // Create all the geometries and materials that would be used
-  const ringGroup = new THREE.Group();
-  ringGroup.position.copy(dummyPosition);
-  scene.add(ringGroup);
-  
-  // Create all the same geometries and materials as the real effect
-  const ringGeometry = new THREE.TorusGeometry(0.1, 0.01, 8, 16);
-  const ringMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFF8C00,
-    transparent: true,
-    opacity: 0,  // Make it invisible
-    side: THREE.DoubleSide
-  });
-  const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-  ringGroup.add(ring);
-  
-  const outerRingGeometry = new THREE.TorusGeometry(0.15, 0.005, 8, 16);
-  const outerRingMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFF4500,
-    transparent: true,
-    opacity: 0,  // Make it invisible
-    side: THREE.DoubleSide
-  });
-  const outerRing = new THREE.Mesh(outerRingGeometry, outerRingMaterial);
-  ringGroup.add(outerRing);
-  
-  const innerRingGeometry = new THREE.TorusGeometry(0.05, 0.01, 8, 16);
-  const innerRingMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFFFFFF,
-    transparent: true,
-    opacity: 0,  // Make it invisible
-    side: THREE.DoubleSide
-  });
-  const innerRing = new THREE.Mesh(innerRingGeometry, innerRingMaterial);
-  ringGroup.add(innerRing);
-  
-  // Remove and dispose after a short delay
-  setTimeout(() => {
-    scene.remove(ringGroup);
-    
-    // Dispose geometries and materials
-    ringGeometry.dispose();
-    ringMaterial.dispose();
-    outerRingGeometry.dispose();
-    outerRingMaterial.dispose();
-    innerRingGeometry.dispose();
-    innerRingMaterial.dispose();
-  }, 100);
-}
-
-/**
- * Creates a shockwave ring effect in the shooting direction.
- * @param {THREE.Vector3} position - Effect start position.
- * @param {THREE.Vector3} direction - Firing direction.
- * @param {THREE.Scene} scene - The scene to add the effect.
- */
-export function createShockwaveRing(position, direction, scene) {
-  // Skip shockwave effect on mobile devices
-  if (window.isMobile) {
-    return;
-  }
-
-  const ringGroup = new THREE.Group();
-  ringGroup.position.copy(position);
-  scene.add(ringGroup);
-
-  // Face ring perpendicular to firing direction
-  ringGroup.lookAt(position.clone().add(direction));
-
-  // Create a simple ring with a flat material
-  const ringGeometry = new THREE.TorusGeometry(0.1, 0.01, 8, 16);
-  const ringMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFF8C00,
-    transparent: true,
-    opacity: 0.7,
-    side: THREE.DoubleSide
-  });
-  const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-  ringGroup.add(ring);
-
-  // Create a second, larger ring with different opacity
-  const outerRingGeometry = new THREE.TorusGeometry(0.15, 0.005, 8, 16);
-  const outerRingMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFF4500,
-    transparent: true,
-    opacity: 0.4,
-    side: THREE.DoubleSide
-  });
-  const outerRing = new THREE.Mesh(outerRingGeometry, outerRingMaterial);
-  ringGroup.add(outerRing);
-
-  // Create inner bright flash ring
-  const innerRingGeometry = new THREE.TorusGeometry(0.05, 0.01, 8, 16);
-  const innerRingMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFFFFFF,
-    transparent: true,
-    opacity: 0.9,
-    side: THREE.DoubleSide
-  });
-  const innerRing = new THREE.Mesh(innerRingGeometry, innerRingMaterial);
-  ringGroup.add(innerRing);
-
-  // Animation variables
-  let startTime = null;
-  const duration = 300; // milliseconds
-
-  function animateShockwave(timestamp) {
-    if (!startTime) startTime = timestamp;
-    const elapsed = timestamp - startTime;
-    const progress = Math.min(elapsed / duration, 1.0);
-
-    if (progress < 1.0) {
-      // Expand rings
-      const scale = 1 + progress * 2;
-      ring.scale.set(scale, scale, scale);
-      
-      const outerScale = 1 + progress * 3;
-      outerRing.scale.set(outerScale, outerScale, outerScale);
-      
-      const innerScale = 1 + progress * 4;
-      innerRing.scale.set(innerScale, innerScale, innerScale);
-      
-      // Fade out
-      ring.material.opacity = 0.7 * (1 - progress);
-      outerRing.material.opacity = 0.4 * (1 - progress);
-      innerRing.material.opacity = 0.9 * (1 - Math.pow(progress, 0.5));
-      
-      requestAnimationFrame(animateShockwave);
-    } else {
-      // Clean up
-      scene.remove(ringGroup);
-      
-      // Dispose geometries and materials
-      ringGeometry.dispose();
-      ringMaterial.dispose();
-      outerRingGeometry.dispose();
-      outerRingMaterial.dispose();
-      innerRingGeometry.dispose();
-      innerRingMaterial.dispose();
-    }
-  }
-
-  requestAnimationFrame(animateShockwave);
 }
 
 /**

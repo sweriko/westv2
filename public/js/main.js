@@ -5,7 +5,7 @@ import { Player } from './player.js';
 import { networkManager } from './network.js';
 import { MultiplayerManager } from './multiplayerManager.js';
 import { Bullet } from './bullet.js';
-import { createMuzzleFlash, createSmokeEffect, createShockwaveRing, createImpactEffect, preloadMuzzleFlash, preloadSmokeEffect, preloadShockwaveRing, SmokeRingEffect } from './effects.js';
+import { createMuzzleFlash, createSmokeEffect, createImpactEffect, preloadMuzzleFlash, preloadSmokeEffect, SmokeRingEffect } from './effects.js';
 import { QuickDraw } from './quickDraw.js';
 import { updateAmmoUI, updateHealthUI } from './ui.js';
 import { PhysicsSystem } from './physics.js';
@@ -92,8 +92,6 @@ function init() {
       preloadMuzzleFlash(scene);
       // Preload smoke effect
       preloadSmokeEffect(scene);
-      // Preload shockwave ring effect
-      preloadShockwaveRing(scene);
       
       // Initialize a smoke ring effect pool for reuse
       for (let i = 0; i < 3; i++) {
@@ -467,7 +465,6 @@ function spawnBullet(sourcePlayerId, position, direction, bulletId = null) {
   // Visual effects
   createMuzzleFlash(position, scene);
   createSmokeEffect(position, direction, scene);
-  createShockwaveRing(position, direction, scene);
   
   // Only add smoke ring effects if not on mobile
   if (!window.isMobile) {
