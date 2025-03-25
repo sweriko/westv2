@@ -35,47 +35,99 @@ function springInterpolation(start, end, t, damping, frequency) {
 /**
  * Creates a muzzle flash effect at the given position.
  * @param {THREE.Vector3} position - Effect position.
+ * @param {THREE.Vector3} direction - Firing direction.
  * @param {THREE.Scene} scene - The scene to add the effect.
+ * @param {Object} options - Optional positioning overrides.
  */
-export function createMuzzleFlash(position, scene) {
+export function createMuzzleFlash(position, direction, scene, options = null) {
   const flashGroup = new THREE.Group();
-  flashGroup.position.copy(position);
+  
+  // Get effect configuration - either from options or defaults
+  let forwardOffset = 0.05;
+  let scale = 1.0;
+  let xOffset = 0;
+  let yOffset = 0;
+  
+  // If we have options from the viewmodel, use those for positioning
+  if (options) {
+    forwardOffset = options.forward_offset !== undefined ? options.forward_offset : forwardOffset;
+    scale = options.scale !== undefined ? options.scale : scale;
+    xOffset = options.x_offset !== undefined ? options.x_offset : xOffset;
+    yOffset = options.y_offset !== undefined ? options.y_offset : yOffset;
+  }
+  
+  // Position the flash with the appropriate offsets
+  const adjustedPosition = position.clone();
+  
+  // Apply direction-based forward offset
+  if (direction) {
+    const forwardDir = direction.clone().normalize().multiplyScalar(forwardOffset);
+    adjustedPosition.add(forwardDir);
+    
+    // Apply lateral offsets if specified
+    if (xOffset !== 0 || yOffset !== 0) {
+      // Calculate right and up vectors
+      const right = new THREE.Vector3();
+      const up = new THREE.Vector3(0, 1, 0);
+      right.crossVectors(direction, up).normalize();
+      
+      // Recalculate up to ensure it's perpendicular
+      up.crossVectors(right, direction).normalize();
+      
+      // Apply offsets
+      if (xOffset !== 0) {
+        adjustedPosition.add(right.multiplyScalar(xOffset));
+      }
+      
+      if (yOffset !== 0) {
+        adjustedPosition.add(up.multiplyScalar(yOffset));
+      }
+    }
+  }
+  
+  flashGroup.position.copy(adjustedPosition);
+  
+  // Orient the flash group in the firing direction if provided
+  if (direction) {
+    flashGroup.lookAt(adjustedPosition.clone().add(direction));
+  }
+  
   scene.add(flashGroup);
 
-  // Create just a single bright orange core for the muzzle flash
-  const coreGeometry = new THREE.SphereGeometry(0.06, 8, 8);
+  // Create a brighter and larger core for more visible muzzle flash
+  const coreGeometry = new THREE.SphereGeometry(0.08 * scale, 8, 8);
   const coreMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFF6B00, // Bright orange
+    color: 0xFF9C00, // Bright orange-yellow
     transparent: true,
     opacity: 1
   });
   const core = new THREE.Mesh(coreGeometry, coreMaterial);
-  // Make it slightly elongated in the x-direction (along the barrel)
-  core.scale.x = 1.8;
+  // Make it more elongated in the z-direction (along the barrel)
+  core.scale.z = 2.2;
   flashGroup.add(core);
 
-  // Add a simple point light for illumination
-  const flashLight = new THREE.PointLight(0xFF6B00, 1.5, 2);
+  // Add a brighter point light for illumination
+  const flashLight = new THREE.PointLight(0xFF9C00, 2.0, 2.5 * scale);
   flashLight.position.set(0, 0, 0);
   flashGroup.add(flashLight);
 
-  // Make the flash effect much shorter
-  const duration = 60; // milliseconds (reduced from 100)
+  // Slightly longer duration for better visibility
+  const duration = 80; // milliseconds
   const startTime = performance.now();
 
   function animateFlash(timestamp) {
     const elapsed = timestamp - startTime;
     const progress = elapsed / duration;
     if (progress < 1) {
-      // Simple scale pulsation for more dramatic effect
-      core.scale.x = 1.8 * (1 - progress * 0.5);
+      // More dramatic scale pulsation 
+      core.scale.z = 2.2 * (1 - progress * 0.6);
       
-      // Quicker fade out
-      const fadeOpacity = 1 - progress * 1.2; // Faster falloff
+      // Smoother fade out
+      const fadeOpacity = 1 - Math.pow(progress, 1.5);
       coreMaterial.opacity = Math.max(0, fadeOpacity);
       
-      // Light intensity follows the same curve
-      flashLight.intensity = 1.5 * (1 - progress);
+      // Light intensity follows similar curve
+      flashLight.intensity = 2.0 * (1 - Math.pow(progress, 1.2));
       
       requestAnimationFrame(animateFlash);
     } else {
@@ -398,92 +450,6 @@ export function applyRecoil(player) {
     }
   }
   requestAnimationFrame(recoverFromRecoil);
-}
-
-/**
- * Enhanced shell ejection with realistic physics.
- * @param {Player} player - The player instance.
- * @param {THREE.Scene} scene - The scene to add the shell.
- * @param {SoundManager} soundManager - For playing sound effects.
- */
-export function ejectShell(player, scene, soundManager) {
-  const shellGroup = new THREE.Group();
-
-  const shellGeometry = new THREE.CylinderGeometry(0.01, 0.015, 0.04, 8);
-  const shellMaterial = new THREE.MeshStandardMaterial({
-    color: 0xD4AF37,
-    metalness: 0.8,
-    roughness: 0.2
-  });
-  const shell = new THREE.Mesh(shellGeometry, shellMaterial);
-  shellGroup.add(shell);
-
-  const primerGeometry = new THREE.CircleGeometry(0.006, 8);
-  const primerMaterial = new THREE.MeshStandardMaterial({
-    color: 0xA0A0A0,
-    metalness: 0.7,
-    roughness: 0.3
-  });
-  const primer = new THREE.Mesh(primerGeometry, primerMaterial);
-  primer.position.y = -0.02;
-  primer.rotation.x = Math.PI / 2;
-  shellGroup.add(primer);
-
-  const shellStart = player.revolver.getBarrelTipWorldPosition();
-  shellGroup.position.copy(shellStart);
-  shellGroup.position.x += 0.05;
-  shellGroup.position.y -= 0.02;
-  scene.add(shellGroup);
-
-  const physics = {
-    velocity: new THREE.Vector3(
-      0.8 + Math.random() * 0.4,
-      0.5 + Math.random() * 0.3,
-      (Math.random() - 0.5) * 0.2
-    ),
-    rotationSpeed: new THREE.Vector3(
-      Math.random() * 0.2,
-      Math.random() * 0.2,
-      Math.random() * 0.2
-    ),
-    gravity: 0.015,
-    drag: 0.99
-  };
-
-  const duration = 2000;
-  const startTime = performance.now();
-
-  function animateShell(timestamp) {
-    const elapsed = timestamp - startTime;
-    if (elapsed < duration) {
-      shellGroup.position.x += physics.velocity.x * 0.016;
-      shellGroup.position.y += physics.velocity.y * 0.016;
-      shellGroup.position.z += physics.velocity.z * 0.016;
-      physics.velocity.y -= physics.gravity;
-      physics.velocity.multiplyScalar(physics.drag);
-      shellGroup.rotation.x += physics.rotationSpeed.x;
-      shellGroup.rotation.y += physics.rotationSpeed.y;
-      shellGroup.rotation.z += physics.rotationSpeed.z;
-
-      // Bounce logic on ground impact.
-      if (shellGroup.position.y < 0.02 && physics.velocity.y < 0) {
-        physics.velocity.y = -physics.velocity.y * 0.6;
-        physics.velocity.x *= 0.8;
-        physics.velocity.z *= 0.8;
-        shellGroup.position.y = 0.02;
-        physics.rotationSpeed.x = Math.random() * 0.4;
-        physics.rotationSpeed.z = Math.random() * 0.4;
-      }
-      requestAnimationFrame(animateShell);
-    } else {
-      scene.remove(shellGroup);
-      shellGeometry.dispose();
-      shellMaterial.dispose();
-      primerGeometry.dispose();
-      primerMaterial.dispose();
-    }
-  }
-  requestAnimationFrame(animateShell);
 }
 
 /**

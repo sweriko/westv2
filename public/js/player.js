@@ -1,6 +1,7 @@
 import { Revolver } from './revolver.js';
+import { Viewmodel } from './viewmodel.js';
 import { updateAmmoUI, updateHealthUI } from './ui.js';
-import { applyRecoil, ejectShell } from './effects.js';
+import { applyRecoil } from './effects.js';
 import { networkManager } from './network.js';
 
 /**
@@ -63,10 +64,17 @@ export class Player {
     
     // Gun
     this.revolver = new Revolver();
+    this.viewmodel = new Viewmodel();
     this.holsterOffset = new THREE.Vector3(0.6, -0.5, -0.8);
     this.aimOffset = new THREE.Vector3(0.3, -0.3, -0.5);
     this.currentGunOffset = this.holsterOffset.clone();
+    
+    // Add both models to camera, but we'll only show the viewmodel
     this.camera.add(this.revolver.group);
+    this.camera.add(this.viewmodel.group);
+    
+    // Hide the old revolver permanently
+    this.revolver.group.visible = false;
 
     // FOV transition smoothing
     this.currentFOV = this.defaultFOV;
@@ -231,7 +239,25 @@ export class Player {
     // Smoothly interpolate the gun offset & FOV
     const targetOffset = this.isAiming && this.canAim ? this.aimOffset : this.holsterOffset;
     this.currentGunOffset.lerp(targetOffset, 0.1);
-    this.revolver.group.position.copy(this.currentGunOffset);
+    
+    // We no longer update the revolver position
+    // this.revolver.group.position.copy(this.currentGunOffset);
+    
+    // Update viewmodel animation - Ensure this is being called!
+    if (this.viewmodel) {
+      // Log the first few updates to verify it's called
+      if (this.updateCount === undefined) {
+        this.updateCount = 0;
+      }
+      if (this.updateCount < 10) {
+        console.log(`Player.update calling viewmodel.update with deltaTime=${deltaTime}`);
+        this.updateCount++;
+      }
+      
+      this.viewmodel.update(deltaTime);
+    } else {
+      console.warn("Viewmodel is not initialized!");
+    }
 
     // Adjust FOV based on sprinting and aiming with smoother transitions
     if (this.isAiming && this.canAim) {
@@ -609,8 +635,13 @@ export class Player {
     this.canShoot = false;
     setTimeout(() => { this.canShoot = true; }, 250);
 
-    // Find bullet spawn
-    const bulletStart = this.revolver.getBarrelTipWorldPosition();
+    // Play the shooting animation on the viewmodel
+    if (this.isAiming) {
+      this.viewmodel.playShootAnim();
+    }
+
+    // Find bullet spawn - use viewmodel instead of revolver
+    const bulletStart = this.viewmodel.getBarrelTipWorldPosition();
     const shootDir = new THREE.Vector3();
     this.camera.getWorldDirection(shootDir);
 
@@ -747,13 +778,6 @@ export class Player {
       this.soundManager.playSound("reloading");
     }
 
-    // Eject shells sequentially
-    for (let i = 0; i < this.maxBullets - this.bullets; i++) {
-      setTimeout(() => {
-        ejectShell(this, this.scene, this.soundManager);
-      }, i * 200);
-    }
-    
     // Anti-cheat: Notify server about reload start
     networkManager.sendReload();
 
@@ -814,6 +838,34 @@ export class Player {
    * @param {number} deltaTime - Time elapsed since last frame
    */
   updateAiming(deltaTime) {
+    // Static variable to track previous aiming state
+    if (this.updateAiming.lastAimingState === undefined) {
+      this.updateAiming.lastAimingState = false;
+    }
+    
+    // Check if aiming state changed
+    if (this.isAiming !== this.updateAiming.lastAimingState) {
+      // State changed - handle animations
+      if (this.isAiming) {
+        // Starting to aim - play draw animation and show model
+        this.viewmodel.group.visible = true;
+        this.viewmodel.playDrawAim();
+      } else {
+        // Stopping aim - play holster animation
+        this.viewmodel.playHolsterAnim();
+        
+        // When holster animation finishes, hide the model
+        setTimeout(() => {
+          if (!this.isAiming) { // Double-check we're still not aiming
+            this.viewmodel.group.visible = false;
+          }
+        }, 500); // Adjust based on holster animation length
+      }
+      
+      // Update the tracked state
+      this.updateAiming.lastAimingState = this.isAiming;
+    }
+    
     // Crosshair animation if aiming
     const crosshair = document.getElementById('crosshair');
     if (crosshair && this.isAiming) {

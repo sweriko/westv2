@@ -111,7 +111,9 @@ export function initInput(renderer, player, soundManager) {
     // Right-click => Aim (only if canAim is true)
     if (event.button === 2 && player.canAim) {
       player.isAiming = true;
-      player.revolver.group.visible = true;
+      // We don't manually show the viewmodel here anymore - it's handled in updateAiming
+      // player.revolver.group.visible = true;
+      
       // Optionally show arms in first-person
       if (player.arms) {
         player.arms.setVisible(true);
@@ -132,7 +134,7 @@ export function initInput(renderer, player, soundManager) {
     }
     // Left-click => Shoot (only if aiming)
     else if (event.button === 0) {
-      if (player.revolver.group.visible && !player.isReloading) {
+      if (player.isAiming && !player.isReloading) {
         player.shoot();
       }
     }
@@ -143,7 +145,9 @@ export function initInput(renderer, player, soundManager) {
     // Stop aiming on right-click release
     if (event.button === 2) {
       player.isAiming = false;
-      player.revolver.group.visible = false;
+      // We don't manually hide the viewmodel here anymore - it's handled in updateAiming after holster animation
+      // player.revolver.group.visible = false;
+      
       if (player.arms) {
         player.arms.setVisible(false);
       }
@@ -398,10 +402,8 @@ function createMobileControls(player, soundManager) {
           
           // Start aiming immediately on touch
           player.isAiming = true;
-          player.revolver.group.visible = true;
-          if (player.arms) {
-            player.arms.setVisible(true);
-          }
+          // We don't manually show the viewmodel here anymore - it's handled in updateAiming
+          // player.revolver.group.visible = true;
           
           // Show and prepare crosshair for animation
           const crosshair = document.getElementById('crosshair');
@@ -496,10 +498,8 @@ function createMobileControls(player, soundManager) {
       if (touch.identifier === rightSideTouchId) {
         // Stop aiming but don't shoot
         player.isAiming = false;
-        player.revolver.group.visible = false;
-        if (player.arms) {
-          player.arms.setVisible(false);
-        }
+        // We don't manually hide the viewmodel here anymore - it's handled in updateAiming after holster animation
+        // player.revolver.group.visible = false;
         
         // Play contraction animation before hiding crosshair
         const crosshair = document.getElementById('crosshair');
@@ -549,10 +549,8 @@ function createMobileControls(player, soundManager) {
       if (touch.identifier === rightSideTouchId) {
         rightSideTouchId = null;
         player.isAiming = false;
-        player.revolver.group.visible = false;
-        if (player.arms) {
-          player.arms.setVisible(false);
-        }
+        // We don't manually hide the viewmodel here anymore - it's handled in updateAiming after holster animation
+        // player.revolver.group.visible = false;
         
         // Play contraction animation before hiding crosshair
         const crosshair = document.getElementById('crosshair');

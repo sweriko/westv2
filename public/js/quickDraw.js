@@ -310,6 +310,14 @@ export class QuickDraw {
             }
         };
         
+        this.networkManager.sendQuickDrawPenalty = () => {
+            if (this.networkManager.socket && this.networkManager.socket.readyState === WebSocket.OPEN) {
+                this.networkManager.socket.send(JSON.stringify({
+                    type: 'quickDrawPenalty'
+                }));
+            }
+        };
+        
         // Hook into the existing socket onmessage handler
         const originalOnMessage = this.networkManager.socket.onmessage;
         this.networkManager.socket.onmessage = (event) => {
@@ -764,7 +772,8 @@ export class QuickDraw {
     }
 
     /**
-     * Update method called from main animation loop.
+     * Checks the Quick Draw state and updates game elements accordingly
+     * @param {number} deltaTime - Time elapsed since last frame
      */
     update(deltaTime) {
         // Skip if player not initialized
@@ -1064,6 +1073,23 @@ export class QuickDraw {
         this.penaltyEndTime = Date.now() + 3000;
         this.localPlayer.canAim = false;
         
+        // Force holster any weapon that might be drawn
+        if (this.localPlayer.isAiming) {
+            this.localPlayer.isAiming = false;
+            
+            // Play the holstering animation
+            if (this.localPlayer.viewmodel) {
+                this.localPlayer.viewmodel.playHolsterAnim();
+                
+                // Hide viewmodel after holster animation completes
+                setTimeout(() => {
+                    if (this.localPlayer.viewmodel) {
+                        this.localPlayer.viewmodel.group.visible = false;
+                    }
+                }, 500);
+            }
+        }
+        
         // Show the penalty message
         this.showMessage('TOO EARLY! Penalty!', 2000);
         
@@ -1103,6 +1129,11 @@ export class QuickDraw {
                 penaltyOverlay.parentNode.removeChild(penaltyOverlay);
             }
         }, 1500);
+        
+        // Send penalty to server for validation
+        if (this.networkManager && typeof this.networkManager.sendQuickDrawPenalty === 'function') {
+            this.networkManager.sendQuickDrawPenalty();
+        }
     }
 
     /**

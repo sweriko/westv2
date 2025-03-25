@@ -9,6 +9,8 @@ import { createMuzzleFlash, createSmokeEffect, createImpactEffect, preloadMuzzle
 import { QuickDraw } from './quickDraw.js';
 import { updateAmmoUI, updateHealthUI } from './ui.js';
 import { PhysicsSystem } from './physics.js';
+import { Revolver } from './revolver.js';
+import { Viewmodel } from './viewmodel.js';
 
 // Check if device is mobile
 function isMobileDevice() {
@@ -372,7 +374,12 @@ function handleLocalPlayerShoot(bulletStart, shootDir) {
   if (!window.isMobile) {
     const availableSmokeRing = smokeRings.find(ring => !ring.active);
     if (availableSmokeRing) {
-      availableSmokeRing.create(bulletStart.clone(), shootDir.clone());
+      // Get the effect positioning options from the viewmodel if available
+      let smokeRingOptions = null;
+      if (localPlayer.viewmodel && localPlayer.viewmodel.EFFECTS && localPlayer.viewmodel.EFFECTS.SMOKE_RING) {
+        smokeRingOptions = localPlayer.viewmodel.EFFECTS.SMOKE_RING;
+      }
+      availableSmokeRing.create(bulletStart.clone(), shootDir.clone(), smokeRingOptions);
     }
   }
 }
@@ -386,7 +393,7 @@ function handleLocalPlayerShoot(bulletStart, shootDir) {
 function handleRemotePlayerShoot(playerId, bulletData, bulletId) {
   const startPos = new THREE.Vector3(bulletData.position.x, bulletData.position.y, bulletData.position.z);
   const dir = new THREE.Vector3(bulletData.direction.x, bulletData.direction.y, bulletData.direction.z);
-
+  
   spawnBullet(playerId, startPos, dir, bulletId);
 }
 
@@ -462,8 +469,22 @@ function spawnBullet(sourcePlayerId, position, direction, bulletId = null) {
     bulletMap.set(bulletId, bullet);
   }
 
+  // Get the effect positioning options from the local player viewmodel if available
+  let muzzleFlashOptions = null;
+  let smokeEffectOptions = null;
+  
+  // Only use viewmodel options for the local player's effects
+  if (sourcePlayerId === localPlayer.id && localPlayer.viewmodel && localPlayer.viewmodel.EFFECTS) {
+    if (localPlayer.viewmodel.EFFECTS.MUZZLE_FLASH) {
+      muzzleFlashOptions = localPlayer.viewmodel.EFFECTS.MUZZLE_FLASH;
+    }
+    if (localPlayer.viewmodel.EFFECTS.SMOKE_RING) {
+      smokeEffectOptions = localPlayer.viewmodel.EFFECTS.SMOKE_RING;
+    }
+  }
+
   // Visual effects
-  createMuzzleFlash(position, scene);
+  createMuzzleFlash(position, direction, scene, muzzleFlashOptions);
   createSmokeEffect(position, direction, scene);
   
   // Only add smoke ring effects if not on mobile
@@ -487,7 +508,7 @@ function spawnBullet(sourcePlayerId, position, direction, bulletId = null) {
     
     // Activate the smoke ring
     if (smokeRing) {
-      smokeRing.create(position, direction);
+      smokeRing.create(position, direction, smokeEffectOptions);
     }
   }
 

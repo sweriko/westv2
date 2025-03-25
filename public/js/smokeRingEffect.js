@@ -59,8 +59,9 @@ export class SmokeRingEffect {
      * Create a smoke ring effect at the specified position and direction
      * @param {THREE.Vector3} position - The position to create the smoke ring
      * @param {THREE.Vector3} direction - The direction the weapon is firing
+     * @param {Object} options - Optional positioning overrides
      */
-    create(position, direction) {
+    create(position, direction, options = null) {
         // Reuse particles instead of removing them
         for (let i = 0; i < this.group.children.length; i++) {
             const mesh = this.group.children[i];
@@ -69,9 +70,58 @@ export class SmokeRingEffect {
         }
         this.puffs = [];
         
-        // Position the smoke ring at the muzzle
-        this.group.position.copy(position);
-        this.group.lookAt(position.clone().add(direction));
+        // Get effect configuration - either from options or from default constants
+        let forwardOffset = 0.05;
+        let xOffset = 0;
+        let yOffset = 0;
+        let scale = 1.0;
+        
+        // If we have options from the viewmodel, use those for positioning
+        if (options) {
+            forwardOffset = options.forward_offset || forwardOffset;
+            xOffset = options.x_offset || xOffset;
+            yOffset = options.y_offset || yOffset;
+            scale = options.scale || scale;
+        }
+        
+        // Position the smoke ring with the appropriate offsets
+        const adjustedPosition = position.clone();
+        
+        // Apply direction-based forward offset
+        const forwardDir = direction.clone().normalize().multiplyScalar(forwardOffset);
+        adjustedPosition.add(forwardDir);
+        
+        // Apply lateral offsets if specified
+        if (xOffset !== 0 || yOffset !== 0) {
+            // We need to calculate the right and up vectors relative to the firing direction
+            // to apply the x/y offsets correctly
+            const right = new THREE.Vector3();
+            const up = new THREE.Vector3(0, 1, 0);
+            right.crossVectors(direction, up).normalize();
+            
+            // Recalculate up to ensure it's perpendicular
+            up.crossVectors(right, direction).normalize();
+            
+            // Apply offsets
+            if (xOffset !== 0) {
+                adjustedPosition.add(right.multiplyScalar(xOffset));
+            }
+            
+            if (yOffset !== 0) {
+                adjustedPosition.add(up.multiplyScalar(yOffset));
+            }
+        }
+        
+        // Position the smoke ring at the adjusted position
+        this.group.position.copy(adjustedPosition);
+        this.group.lookAt(adjustedPosition.clone().add(direction));
+        
+        // Apply scale if different from default
+        if (scale !== 1.0) {
+            this.group.scale.set(scale, scale, scale);
+        } else {
+            this.group.scale.set(1, 1, 1);
+        }
         
         // Create the smoke ring effect
         this._createSmokeRing();
