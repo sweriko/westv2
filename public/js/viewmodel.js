@@ -270,34 +270,23 @@ export class Viewmodel {
     const shootAction = this._findAnimation('shooting', ['Shoot', 'shoot', 'Fire', 'fire']);
     if (!shootAction) return;
     
-    // If we were in DrawAim, need to keep track so we can return to it
-    const wasInDrawAim = this.currentAction && 
-                          this.currentAction.clampWhenFinished && 
-                          this.currentAction._clip.name.toLowerCase().includes('draw');
+    // Make sure the model is visible
+    this.group.visible = true;
     
     // Reset the mixer - this stops all current animations
     this.mixer.stopAllAction();
     
     // Configure the shooting animation
     shootAction.loop = THREE.LoopOnce;
-    shootAction.clampWhenFinished = false; // Don't freeze at the end
+    shootAction.clampWhenFinished = true; // Keep it frozen on the last frame
     shootAction.timeScale = 1.2; // Slightly faster for responsiveness
     shootAction.reset();
     shootAction.play();
     
     this.currentAction = shootAction;
     
-    // After shooting finishes, return to DrawAim
-    if (wasInDrawAim) {
-      // Get the animation duration
-      const duration = shootAction._clip.duration;
-      setTimeout(() => {
-        // Check if we're still in shooting animation
-        if (this.currentAction === shootAction) {
-          this.playDrawAim();
-        }
-      }, duration * 1000); // Convert to milliseconds
-    }
+    // We don't need to transition back to DrawAim anymore
+    // We want to stay on the last frame of the shooting animation
   }
   
   /**
@@ -353,6 +342,17 @@ export class Viewmodel {
     idleAction.play();
     
     this.currentAction = idleAction;
+  }
+  
+  /**
+   * Returns true if the current animation is a shooting animation
+   * @returns {boolean} True if currently in shooting animation
+   */
+  isInShootAnimation() {
+    return this.currentAction && 
+           this.currentAction._clip && 
+           ['shoot', 'fire', 'shooting'].some(name => 
+             this.currentAction._clip.name.toLowerCase().includes(name));
   }
   
   /**

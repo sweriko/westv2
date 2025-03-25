@@ -849,7 +849,11 @@ export class Player {
       if (this.isAiming) {
         // Starting to aim - play draw animation and show model
         this.viewmodel.group.visible = true;
-        this.viewmodel.playDrawAim();
+        
+        // Only play the draw animation if we're not already in a shooting animation
+        if (!this.viewmodel.isInShootAnimation()) {
+          this.viewmodel.playDrawAim();
+        }
       } else {
         // Stopping aim - play holster animation
         this.viewmodel.playHolsterAnim();
