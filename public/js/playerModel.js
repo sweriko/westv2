@@ -80,68 +80,6 @@ export class PlayerArms {
       this.leftArm.visible = false;
     }
   }
-
-  /**
-   * Plays a smooth reload animation using the left arm.
-   * (This method is for the first-person arms model and remains unchanged.)
-   */
-  playReloadAnimation() {
-    const originalPos = this.leftArm.position.clone();
-    const originalRot = this.leftArm.rotation.clone();
-
-    function easeInOutCubic(t) {
-      return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-    }
-
-    const frames = [
-      { t: 0,   pos: { x: -0.3, y: -0.4, z: -0.3 },      rot: { x: 0, y: 0, z: 0 } },
-      { t: 300, pos: { x: -0.1, y: -0.2, z: -0.3 },      rot: { x: -0.2, y: 0.1, z: 0.1 } },
-      { t: 600, pos: { x: -0.1, y: -0.2, z: -0.3 },      rot: { x: -0.3, y: 0.1, z: 0.1 } },
-      { t: 900, pos: { x: -0.3, y: -0.4, z: -0.3 },      rot: { x: 0, y: 0, z: 0 } }
-    ];
-
-    const startTime = performance.now();
-
-    const animate = (time) => {
-      const elapsed = time - startTime;
-      let currentFrame = frames[0];
-      let nextFrame = frames[frames.length - 1];
-      for (let i = 0; i < frames.length - 1; i++) {
-        if (elapsed >= frames[i].t && elapsed < frames[i + 1].t) {
-          currentFrame = frames[i];
-          nextFrame = frames[i + 1];
-          break;
-        }
-      }
-      const segmentDuration = nextFrame.t - currentFrame.t;
-      let segmentTime = elapsed - currentFrame.t;
-      let alpha = Math.min(segmentTime / segmentDuration, 1);
-      alpha = easeInOutCubic(alpha);
-
-      const lerp = (a, b, t) => a + (b - a) * t;
-      const newPos = {
-        x: lerp(currentFrame.pos.x, nextFrame.pos.x, alpha),
-        y: lerp(currentFrame.pos.y, nextFrame.pos.y, alpha),
-        z: lerp(currentFrame.pos.z, nextFrame.pos.z, alpha)
-      };
-      const newRot = {
-        x: lerp(currentFrame.rot.x, nextFrame.rot.x, alpha),
-        y: lerp(currentFrame.rot.y, nextFrame.rot.y, alpha),
-        z: lerp(currentFrame.rot.z, nextFrame.rot.z, alpha)
-      };
-
-      this.leftArm.position.set(newPos.x, newPos.y, newPos.z);
-      this.leftArm.rotation.set(newRot.x, newRot.y, newRot.z);
-
-      if (elapsed < frames[frames.length - 1].t) {
-        requestAnimationFrame(animate);
-      } else {
-        this.leftArm.position.copy(originalPos);
-        this.leftArm.rotation.copy(originalRot);
-      }
-    };
-    requestAnimationFrame(animate);
-  }
 }
 
 /**
@@ -164,8 +102,8 @@ export class ThirdPersonModel {
     this.targetPosition = this.group.position.clone();
     this.targetRotation = this.group.rotation.y;
 
-    // Build a basic "Minecraft-like" character.
-    this.createBlockyCharacter();
+    // Load the T-pose model
+    this.loadTposeModel();
     scene.add(this.group);
 
     this.walkCycle = 0;
@@ -176,101 +114,88 @@ export class ThirdPersonModel {
     this.hitFeedbackTimeout = null;
   }
 
-  createBlockyCharacter() {
-    // Head
-    const headGeo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
-    const headMat = new THREE.MeshStandardMaterial({ color: 0xC68642 });
-    this.head = new THREE.Mesh(headGeo, headMat);
-    this.head.position.y = 1.6;
-    this.group.add(this.head);
-
-    // Body
-    const bodyGeo = new THREE.BoxGeometry(0.4, 0.6, 0.2);
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3F51B5 });
-    this.body = new THREE.Mesh(bodyGeo, bodyMat);
-    this.body.position.y = 1.1;
-    this.group.add(this.body);
-
-    // Arms
-    this.createBlockyArms();
-    // Legs
-    this.createBlockyLegs();
-    // Hat
-    this.createCowboyHat();
-
-    // Use the normal revolver model on the left arm.
-    this.addRevolver();
+  loadTposeModel() {
+    // Create loader instance
+    const loader = new THREE.GLTFLoader();
+    
+    // Load the tpose.glb model
+    loader.load('models/tpose.glb', (gltf) => {
+      this.tposeModel = gltf.scene;
+      
+      // User indicated the model is offset Y by half its size downwards by default
+      // So we need to raise it up to compensate
+      this.tposeModel.position.set(0, 0.9, 0); // Raise it by 0.9 units
+      
+      // Set an appropriate scale for the model
+      this.tposeModel.scale.set(0.8, 0.8, 0.8);
+      
+      // Add the model to the group
+      this.group.add(this.tposeModel);
+      
+      // Debug info
+      console.log('T-pose model loaded successfully');
+      
+      // Look through the model to set up meshes correctly
+      this.tposeModel.traverse(child => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+          child.userData.isPlayerMesh = true;
+        }
+      });
+      
+      // Store references to bones/objects for animation if needed
+      this.setupModelReferences();
+      
+      // Add revolver to the model's hand
+      this.addRevolver();
+    }, 
+    undefined,
+    (error) => {
+      console.error('Error loading tpose.glb model:', error);
+    });
   }
 
-  createBlockyArms() {
-    // Right arm
-    const armGeo = new THREE.BoxGeometry(0.2, 0.6, 0.2);
-    const skinMat = new THREE.MeshStandardMaterial({ color: 0xC68642 });
-    this.rightArm = new THREE.Group();
-    const rightArmMesh = new THREE.Mesh(armGeo, skinMat);
-    rightArmMesh.position.y = -0.3;
-    this.rightArm.add(rightArmMesh);
-    this.rightArm.position.set(0.3, 1.4, 0);
-    this.group.add(this.rightArm);
-
-    // Left arm (holding the revolver)
-    this.leftArm = new THREE.Group();
-    const leftArmMesh = new THREE.Mesh(armGeo, skinMat);
-    leftArmMesh.position.y = -0.3;
-    this.leftArm.add(leftArmMesh);
-    this.leftArm.position.set(-0.3, 1.4, 0);
-    this.group.add(this.leftArm);
-  }
-
-  createBlockyLegs() {
-    const legGeo = new THREE.BoxGeometry(0.2, 0.6, 0.2);
-    const pantsMat = new THREE.MeshStandardMaterial({ color: 0x1A237E });
-    // Right leg
-    this.rightLeg = new THREE.Group();
-    const rightLegMesh = new THREE.Mesh(legGeo, pantsMat);
-    rightLegMesh.position.y = -0.3;
-    this.rightLeg.add(rightLegMesh);
-    this.rightLeg.position.set(0.1, 0.8, 0);
-    this.group.add(this.rightLeg);
-
-    // Left leg
-    this.leftLeg = new THREE.Group();
-    const leftLegMesh = new THREE.Mesh(legGeo, pantsMat);
-    leftLegMesh.position.y = -0.3;
-    this.leftLeg.add(leftLegMesh);
-    this.leftLeg.position.set(-0.1, 0.8, 0);
-    this.group.add(this.leftLeg);
-  }
-
-  createCowboyHat() {
-    const hatMat = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
-
-    // Hat brim
-    const brimGeo = new THREE.BoxGeometry(0.5, 0.05, 0.5);
-    this.hatBrim = new THREE.Mesh(brimGeo, hatMat);
-    this.hatBrim.position.y = 0.225;
-    this.head.add(this.hatBrim);
-
-    // Hat top
-    const topGeo = new THREE.BoxGeometry(0.3, 0.15, 0.3);
-    this.hatTop = new THREE.Mesh(topGeo, hatMat);
-    this.hatTop.position.y = 0.325;
-    this.head.add(this.hatTop);
+  setupModelReferences() {
+    // Find and store references to important bones/objects in the model
+    // This depends on the structure of the tpose.glb model
+    if (this.tposeModel) {
+      // Example: Find head, arms, etc. based on their names in the model
+      this.head = this.tposeModel.getObjectByName('Head') || this.tposeModel;
+      this.rightArm = this.tposeModel.getObjectByName('RightArm') || this.tposeModel;
+      this.leftArm = this.tposeModel.getObjectByName('LeftArm') || this.tposeModel;
+      this.rightLeg = this.tposeModel.getObjectByName('RightLeg') || this.tposeModel;
+      this.leftLeg = this.tposeModel.getObjectByName('LeftLeg') || this.tposeModel;
+      this.body = this.tposeModel.getObjectByName('Body') || this.tposeModel;
+    }
   }
 
   /**
-   * Adds the normal revolver model to the third-person model's left arm.
-   * The left arm holds the revolver.
+   * Adds the revolver model to the model's left arm.
    */
   addRevolver() {
     this.revolver = new Revolver();
-    // Attach the revolver to the left arm.
-    this.leftArm.add(this.revolver.group);
-    // Set default positions and rotations for non-aiming state.
+    
+    // Initialize rotations
     this.revolverDefaultRotation = new THREE.Euler(-Math.PI / -1.5, Math.PI, 0);
     this.revolverAimingRotation = new THREE.Euler(-Math.PI / 0.7, Math.PI, 0);
-    this.revolver.group.position.set(0.05, -0.8, -0.1);
-    this.revolver.group.rotation.copy(this.revolverDefaultRotation);
+    
+    // Find a suitable hand/arm attachment point in the model
+    let handAttachment = this.leftArm;
+    
+    // For T-pose model, we need to adjust the position and rotation
+    this.revolver.group.position.set(0.1, 0, 0.1);
+    this.revolver.group.rotation.set(0, Math.PI / 2, 0);
+    this.revolver.group.scale.set(0.5, 0.5, 0.5);
+    
+    // Attach revolver to the hand
+    if (handAttachment) {
+      handAttachment.add(this.revolver.group);
+    } else {
+      // If no hand attachment found, attach to the main model
+      this.tposeModel.add(this.revolver.group);
+    }
+    
     this.revolver.group.visible = true;
   }
 
@@ -301,6 +226,15 @@ export class ThirdPersonModel {
     this.group.position.lerp(this.targetPosition, 0.1);
     this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, this.targetRotation, 0.1);
     this.updateCollisionBox();
+    
+    // If we're using the tpose model, ensure its Y position is maintained at the correct offset
+    if (this.tposeModel && this.tposeModel.position) {
+      // Maintain the proper Y offset for the tpose model
+      // If walking, the walk animation will handle the bobbing
+      if (!this.isWalking) {
+        this.tposeModel.position.y = 0.9;
+      }
+    }
   }
 
   /**
@@ -312,9 +246,12 @@ export class ThirdPersonModel {
     
     // Update target position from network data (shifting from eye-level to model base)
     if (playerData.position) {
+      // Apply standard eye-level to base offset
+      const yOffset = 1.6;
+      
       const newPos = new THREE.Vector3(
         playerData.position.x,
-        playerData.position.y - 1.6,
+        playerData.position.y - yOffset,
         playerData.position.z
       );
       this.targetPosition.copy(newPos);
@@ -336,11 +273,6 @@ export class ThirdPersonModel {
       this.setNormalPose();
     }
 
-    // If reloading, play the reload animation
-    if (playerData.isReloading) {
-      this.playReloadAnimation();
-    }
-
     // Update health if provided
     if (playerData.health !== undefined) {
       this.health = playerData.health;
@@ -349,106 +281,49 @@ export class ThirdPersonModel {
 
   /**
    * Sets the model's pose for aiming.
-   * The revolver (left arm) is rotated up by 90°.
    */
   setAimingPose() {
-    // Right arm remains at default.
-    this.rightArm.rotation.set(0, 0, 0);
-    this.rightArm.position.set(0.3, 1.4, 0);
-
-    // Left arm (holding revolver) rotates upward.
-    this.leftArm.rotation.set(-Math.PI / 2, 0, 0);
-    this.leftArm.position.set(-0.3, 1.4, 0);
-
-    if (this.revolver) {
+    if (this.leftArm && this.leftArm !== this.tposeModel && this.leftArm.rotation) {
+      this.leftArm.rotation.set(-Math.PI / 3, 0, 0);
+    }
+    
+    if (this.head && this.head !== this.tposeModel && this.head.rotation) {
+      this.head.rotation.x = 0.1;
+    }
+    
+    if (this.revolver && this.revolver.group && this.revolverAimingRotation) {
       this.revolver.group.rotation.copy(this.revolverAimingRotation);
     }
-
-    this.head.rotation.x = 0.1;
   }
 
   /**
    * Sets the model's pose for normal (non-aiming) state.
-   * The revolver (left arm) is rotated down a bit.
    */
   setNormalPose() {
-    // Right arm stays default.
-    this.rightArm.rotation.set(0, 0, 0);
-    this.rightArm.position.set(0.3, 1.4, 0);
-
-    // Left arm (holding revolver) is held lower.
-    this.leftArm.rotation.set(-Math.PI / 15, 0, 0);
-    this.leftArm.position.set(-0.3, 1.4, 0);
-
-    if (this.revolver) {
+    if (this.leftArm && this.leftArm !== this.tposeModel && this.leftArm.rotation) {
+      this.leftArm.rotation.set(0, 0, 0);
+    }
+    
+    if (this.rightArm && this.rightArm !== this.tposeModel && this.rightArm.rotation) {
+      this.rightArm.rotation.set(0, 0, 0);
+    }
+    
+    if (this.head && this.head !== this.tposeModel && this.head.rotation) {
+      this.head.rotation.x = 0;
+    }
+    
+    if (this.revolver && this.revolver.group && this.revolverDefaultRotation) {
       this.revolver.group.rotation.copy(this.revolverDefaultRotation);
     }
-
-    this.head.rotation.x = 0;
   }
 
   /**
-   * Plays a smooth reload animation for the model.
-   * The reload animation is performed by the right arm.
+   * Placeholder for reload animation (kept for interface compatibility).
+   * Shell ejection is handled separately in effects.js.
    */
   playReloadAnimation() {
-    const originalPos = this.rightArm.position.clone();
-    const originalRot = this.rightArm.rotation.clone();
-
-    // Define keyframes (in ms) for the right arm reload motion.
-    const frames = [
-      { t: 0,    pos: { x: 0.3,  y: 1.4, z: 0 },        rot: { x: 0,       y: 0, z: 0 } },
-      { t: 250,  pos: { x: 0.2,  y: 1.5, z: 0 },        rot: { x: -Math.PI / 4, y: 0, z: -Math.PI / 4 } },
-      { t: 500,  pos: { x: 0.3,  y: 1.4, z: 0 },        rot: { x: 0,       y: 0, z: 0 } },
-      { t: 750,  pos: { x: 0.2,  y: 1.5, z: 0 },        rot: { x: -Math.PI / 4, y: 0, z: -Math.PI / 4 } },
-      { t: 1000, pos: { x: 0.3,  y: 1.4, z: 0 },        rot: { x: 0,       y: 0, z: 0 } }
-    ];
-
-    const startTime = performance.now();
-
-    const animate = (time) => {
-      const elapsed = time - startTime;
-      let currentFrame = frames[0];
-      let nextFrame = frames[frames.length - 1];
-      for (let i = 0; i < frames.length - 1; i++) {
-        if (elapsed >= frames[i].t && elapsed < frames[i + 1].t) {
-          currentFrame = frames[i];
-          nextFrame = frames[i + 1];
-          break;
-        }
-      }
-      const segmentDuration = nextFrame.t - currentFrame.t;
-      let segmentTime = elapsed - currentFrame.t;
-      let alpha = Math.min(segmentTime / segmentDuration, 1);
-
-      // Cubic easing for smooth interpolation.
-      const easeInOutCubic = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      alpha = easeInOutCubic(alpha);
-
-      const lerp = (a, b, t) => a + (b - a) * t;
-      const newPos = {
-        x: lerp(currentFrame.pos.x, nextFrame.pos.x, alpha),
-        y: lerp(currentFrame.pos.y, nextFrame.pos.y, alpha),
-        z: lerp(currentFrame.pos.z, nextFrame.pos.z, alpha)
-      };
-      const newRot = {
-        x: lerp(currentFrame.rot.x, nextFrame.rot.x, alpha),
-        y: lerp(currentFrame.rot.y, nextFrame.rot.y, alpha),
-        z: lerp(currentFrame.rot.z, nextFrame.rot.z, alpha)
-      };
-
-      this.rightArm.position.set(newPos.x, newPos.y, newPos.z);
-      this.rightArm.rotation.set(newRot.x, newRot.y, newRot.z);
-
-      if (elapsed < frames[frames.length - 1].t) {
-        requestAnimationFrame(animate);
-      } else {
-        this.rightArm.position.copy(originalPos);
-        this.rightArm.rotation.copy(originalRot);
-      }
-    };
-
-    requestAnimationFrame(animate);
+    // Empty stub - reload animations have been removed
+    return;
   }
 
   /**
@@ -456,34 +331,63 @@ export class ThirdPersonModel {
    * @param {number} deltaTime
    */
   animateWalk(deltaTime) {
+    if (!this.isWalking) return;
+    
     this.walkCycle += deltaTime * 5;
-    // Leg swing
-    this.rightLeg.rotation.x = Math.sin(this.walkCycle) * 0.7;
-    this.leftLeg.rotation.x = Math.sin(this.walkCycle + Math.PI) * 0.7;
-
-    // Arm swing (if not in an aiming pose)
-    if (this.rightArm.rotation.x === 0 && this.leftArm.rotation.x === 0) {
-      this.rightArm.rotation.x = Math.sin(this.walkCycle + Math.PI) * 0.5;
-      this.leftArm.rotation.x = Math.sin(this.walkCycle) * 0.5;
+    
+    // Simple animation for the tpose model - just a slight up/down bob
+    const bobAmount = Math.sin(this.walkCycle) * 0.05;
+    
+    // Apply bob to the model itself, not the group (to maintain proper positioning)
+    if (this.tposeModel && this.tposeModel.position) {
+      // Keep the base y-offset of 0.9 and add the bob
+      this.tposeModel.position.y = 0.9 + bobAmount;
     }
-
-    // Subtle body bob
-    this.body.position.y = 1.1 + Math.abs(Math.sin(this.walkCycle * 2)) * 0.05;
+    
+    // If we have identified body parts, we can animate them
+    if (this.rightLeg && this.rightLeg !== this.tposeModel && this.rightLeg.rotation) {
+      this.rightLeg.rotation.x = Math.sin(this.walkCycle) * 0.3;
+    }
+    
+    if (this.leftLeg && this.leftLeg !== this.tposeModel && this.leftLeg.rotation) {
+      this.leftLeg.rotation.x = Math.sin(this.walkCycle + Math.PI) * 0.3;
+    }
+    
+    // Arm swing (if identified properly)
+    if (this.rightArm && this.rightArm !== this.tposeModel && this.rightArm.rotation) {
+      this.rightArm.rotation.x = Math.sin(this.walkCycle + Math.PI) * 0.2;
+    }
+    
+    if (this.leftArm && this.leftArm !== this.tposeModel && this.leftArm.rotation) {
+      this.leftArm.rotation.x = Math.sin(this.walkCycle) * 0.2;
+    }
   }
 
   /**
    * Resets the walk animation.
    */
   resetWalkAnimation() {
-    this.rightLeg.rotation.x = 0;
-    this.leftLeg.rotation.x = 0;
-
-    if (Math.abs(this.rightArm.rotation.x) < 0.1 &&
-        Math.abs(this.leftArm.rotation.x) < 0.1) {
+    // Reset the tpose model position to its base offset
+    if (this.tposeModel && this.tposeModel.position) {
+      this.tposeModel.position.y = 0.9; // Reset to the base Y offset
+    }
+    
+    // Reset individual part rotations if they exist
+    if (this.rightLeg && this.rightLeg !== this.tposeModel && this.rightLeg.rotation) {
+      this.rightLeg.rotation.x = 0;
+    }
+    
+    if (this.leftLeg && this.leftLeg !== this.tposeModel && this.leftLeg.rotation) {
+      this.leftLeg.rotation.x = 0;
+    }
+    
+    if (this.rightArm && this.rightArm !== this.tposeModel && this.rightArm.rotation) {
       this.rightArm.rotation.x = 0;
+    }
+    
+    if (this.leftArm && this.leftArm !== this.tposeModel && this.leftArm.rotation) {
       this.leftArm.rotation.x = 0;
     }
-    this.body.position.y = 1.1;
   }
 
   /**
@@ -508,8 +412,6 @@ export class ThirdPersonModel {
 
   /**
    * Provides visual feedback (temporary red flash) when the model is hit.
-   * The original materials are stored on each mesh (if not already stored)
-   * and restored after 200ms.
    */
   showHitFeedback() {
     // Clear any existing hit feedback timeout.
@@ -548,6 +450,5 @@ export class ThirdPersonModel {
   takeDamage(amount) {
     this.health = Math.max(this.health - amount, 0);
     console.log(`Remote player ${this.playerId} took ${amount} damage. Health: ${this.health}`);
-    // Optionally, you could change the model's appearance or remove it on death.
   }
 }
