@@ -122,12 +122,11 @@ export class ThirdPersonModel {
     loader.load('models/tpose.glb', (gltf) => {
       this.tposeModel = gltf.scene;
       
-      // User indicated the model is offset Y by half its size downwards by default
-      // So we need to raise it up to compensate
-      this.tposeModel.position.set(0, 0.9, 0); // Raise it by 0.9 units
+    
+      this.tposeModel.position.set(0, 0, 0);
       
       // Set an appropriate scale for the model
-      this.tposeModel.scale.set(0.8, 0.8, 0.8);
+      this.tposeModel.scale.set(1, 1, 1);
       
       // Add the model to the group
       this.group.add(this.tposeModel);
@@ -226,15 +225,6 @@ export class ThirdPersonModel {
     this.group.position.lerp(this.targetPosition, 0.1);
     this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, this.targetRotation, 0.1);
     this.updateCollisionBox();
-    
-    // If we're using the tpose model, ensure its Y position is maintained at the correct offset
-    if (this.tposeModel && this.tposeModel.position) {
-      // Maintain the proper Y offset for the tpose model
-      // If walking, the walk animation will handle the bobbing
-      if (!this.isWalking) {
-        this.tposeModel.position.y = 0.9;
-      }
-    }
   }
 
   /**
@@ -317,14 +307,7 @@ export class ThirdPersonModel {
     }
   }
 
-  /**
-   * Placeholder for reload animation (kept for interface compatibility).
-   * Shell ejection is handled separately in effects.js.
-   */
-  playReloadAnimation() {
-    // Empty stub - reload animations have been removed
-    return;
-  }
+
 
   /**
    * Animates the walk cycle.
@@ -334,15 +317,6 @@ export class ThirdPersonModel {
     if (!this.isWalking) return;
     
     this.walkCycle += deltaTime * 5;
-    
-    // Simple animation for the tpose model - just a slight up/down bob
-    const bobAmount = Math.sin(this.walkCycle) * 0.05;
-    
-    // Apply bob to the model itself, not the group (to maintain proper positioning)
-    if (this.tposeModel && this.tposeModel.position) {
-      // Keep the base y-offset of 0.9 and add the bob
-      this.tposeModel.position.y = 0.9 + bobAmount;
-    }
     
     // If we have identified body parts, we can animate them
     if (this.rightLeg && this.rightLeg !== this.tposeModel && this.rightLeg.rotation) {
@@ -367,11 +341,6 @@ export class ThirdPersonModel {
    * Resets the walk animation.
    */
   resetWalkAnimation() {
-    // Reset the tpose model position to its base offset
-    if (this.tposeModel && this.tposeModel.position) {
-      this.tposeModel.position.y = 0.9; // Reset to the base Y offset
-    }
-    
     // Reset individual part rotations if they exist
     if (this.rightLeg && this.rightLeg !== this.tposeModel && this.rightLeg.rotation) {
       this.rightLeg.rotation.x = 0;
