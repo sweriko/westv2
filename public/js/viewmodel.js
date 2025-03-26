@@ -150,21 +150,18 @@ export class Viewmodel {
   }
   
   /**
-   * Creates an anchor point for muzzle flash effects
+   * Create and position the muzzle flash anchor
    * @private
    */
   _createMuzzleFlashAnchor() {
-    this.muzzleFlashAnchor = new THREE.Object3D();
+    // Create an anchor point for muzzle flash effects
+    this.muzzleFlashAnchor = new THREE.Group();
     
-    // Try to find barrel/muzzle in the model
-    let muzzle = null;
-    this.model.traverse(child => {
-      if (child.name && (child.name.toLowerCase().includes('muzzle') || 
-          child.name.toLowerCase().includes('barrel'))) {
-        muzzle = child;
-        console.log(`Found barrel element: ${child.name}`);
-      }
-    });
+    // Try to find the barrel / muzzle in the model
+    const muzzle = this.model.getObjectByName('barrel') || 
+                   this.model.getObjectByName('muzzle') ||
+                   this.model.getObjectByName('barrelEnd') ||
+                   this.model.getObjectByName('barrel_end');
     
     if (muzzle) {
       // If found, attach to the muzzle
@@ -175,7 +172,9 @@ export class Viewmodel {
         this.EFFECTS.MUZZLE_FLASH.y,
         this.EFFECTS.MUZZLE_FLASH.z
       );
-      console.log("Muzzle flash anchor attached to barrel");
+      if (window.debugMode) {
+        console.log("Muzzle flash anchor attached to barrel");
+      }
     } else {
       // If not found, attach to model root with an estimated position
       this.model.add(this.muzzleFlashAnchor);
@@ -186,7 +185,9 @@ export class Viewmodel {
         this.EFFECTS.MUZZLE_FLASH.y,
         this.EFFECTS.MUZZLE_FLASH.z
       );
-      console.log("Muzzle flash anchor attached to model root - no barrel found");
+      if (window.debugMode) {
+        console.log("Muzzle flash anchor attached to model root - no barrel found");
+      }
     }
   }
   

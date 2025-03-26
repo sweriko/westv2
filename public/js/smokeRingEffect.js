@@ -46,11 +46,41 @@ export class SmokeRingEffect {
             this.particlePool.push(mesh);
         }
         
-        // Create a dummy smoke ring to warm up all the logic
-        this._createSmokeRing();
+        // Store original position of the group
+        const originalPosition = this.group.position.clone();
         
-        // Reset everything
+        // Move group far below scene to hide preload animations
+        this.group.position.set(0, -1000, 0);
+        
+        // Create a dummy direction for the effect
+        const dummyDirection = new THREE.Vector3(0, 0, 1);
+        
+        // Create a full smoke ring effect in the hidden location
+        this._createSmokeRing();
+        this.active = true;
+        
+        // Simulate animation frames manually for each effect
+        // This forces shader compilation and resource allocation before the user sees it
+        const timesteps = [0, 16, 32, 48, 64, 80, 96, 112, 128];
+        
+        // Manually advance animation by simulating update calls
+        for (const timestep of timesteps) {
+            this.update(timestep / 1000); // Convert ms to seconds for the update method
+        }
+        
+        // Reset everything after preloading
         this.puffs = [];
+        this.active = false;
+        
+        // Return group to original position
+        this.group.position.copy(originalPosition);
+        
+        // Clear all used particles back to pool
+        for (let i = 0; i < this.group.children.length; i++) {
+            const mesh = this.group.children[i];
+            mesh.visible = false;
+            this.particlePool.push(mesh);
+        }
         
         return this; // For chaining
     }

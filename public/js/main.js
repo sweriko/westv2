@@ -46,15 +46,24 @@ let maxSmokeRings = 10; // Limit to prevent performance issues
 window.showHitZoneDebug = false;
 window.showTownColliders = true; // Enable by default to help with debugging
 
+// Initialize the application
 function init() {
   try {
-    // Initialize physics system first so it's available for the scene
-    physics = new PhysicsSystem();
-    window.physics = physics; // Make physics globally accessible
-
+    // Set debug mode flag
+    window.debugMode = false; // Set to true to enable verbose console logging
+    
+    // Detect if we're on a mobile device
+    window.isMobile = isMobileDevice();
+    
+    // Setup scene - use the scene from initScene instead of creating a new one
     const sceneSetup = initScene();
     camera = sceneSetup.camera;
     renderer = sceneSetup.renderer;
+    // scene is now initialized through initScene()
+
+    // Initialize physics system first so it's available for the scene
+    physics = new PhysicsSystem();
+    window.physics = physics; // Make physics globally accessible
 
     const soundManager = new SoundManager();
     // Load shot sounds
@@ -93,6 +102,42 @@ function init() {
         // Preload resources to prevent fps drop on first use
         smokeRing.preload();
         smokeRings.push(smokeRing);
+      }
+      
+      // Simulate a complete dummy shot cycle in a hidden area
+      // This ensures all shaders are compiled and resources are allocated
+      console.log("Pre-rendering a dummy shot to warm up rendering pipeline...");
+      const dummyPosition = new THREE.Vector3(0, -1000, 0);
+      const dummyDirection = new THREE.Vector3(0, 0, 1);
+      
+      // Create all effects that happen during a shot
+      createMuzzleFlash(dummyPosition, dummyDirection, scene);
+      createSmokeEffect(dummyPosition, dummyDirection, scene);
+      
+      // Create a few impact effects of different types
+      createImpactEffect(dummyPosition, dummyDirection, scene, 'wood');
+      createImpactEffect(dummyPosition, dummyDirection, scene, 'metal');
+      createImpactEffect(dummyPosition, dummyDirection, scene, 'dirt');
+      
+      // Create a dummy bullet - but don't track it since this is just preloading
+      const dummyBullet = new Bullet(dummyPosition, dummyDirection);
+      scene.add(dummyBullet.mesh);
+      // Remove after a short delay
+      setTimeout(() => {
+        scene.remove(dummyBullet.mesh);
+      }, 100);
+      
+      // Simulate multiple frames of animation
+      for (let i = 0; i < 5; i++) {
+        // Force animation frames without waiting
+        const fakeTime = performance.now() + i * 16; // Simulate ~60fps
+        
+        // Manually call update functions for each particle system
+        for (let j = 0; j < smokeRings.length; j++) {
+          if (smokeRings[j].active) {
+            smokeRings[j].update(0.016); // 16ms in seconds
+          }
+        }
       }
     }
     

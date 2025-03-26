@@ -33,215 +33,287 @@ function springInterpolation(start, end, t, damping, frequency) {
 }
 
 /**
- * Creates a muzzle flash effect at the given position.
- * @param {THREE.Vector3} position - Effect position.
- * @param {THREE.Vector3} direction - Firing direction.
- * @param {THREE.Scene} scene - The scene to add the effect.
- * @param {Object} options - Optional positioning overrides.
+ * Creates a muzzle flash effect at the given position with the specified direction
+ * @param {THREE.Vector3} position - Starting position of the muzzle flash
+ * @param {THREE.Vector3} direction - Direction the flash should face
+ * @param {THREE.Scene} scene - The scene to add the effect to
+ * @param {Object} options - Optional configuration for the effect
+ * @param {boolean} isPreloading - Whether this is being created for preloading
+ * @returns {Object} The created flash group and meshes for preloading
  */
-export function createMuzzleFlash(position, direction, scene, options = null) {
-  const flashGroup = new THREE.Group();
-  
-  // Get effect configuration - either from options or defaults
-  let forwardOffset = 0.05;
-  let scale = 1.0;
-  let xOffset = 0;
-  let yOffset = 0;
-  
-  // If we have options from the viewmodel, use those for positioning
-  if (options) {
-    forwardOffset = options.forward_offset !== undefined ? options.forward_offset : forwardOffset;
-    scale = options.scale !== undefined ? options.scale : scale;
-    xOffset = options.x_offset !== undefined ? options.x_offset : xOffset;
-    yOffset = options.y_offset !== undefined ? options.y_offset : yOffset;
-  }
-  
-  // Position the flash with the appropriate offsets
-  const adjustedPosition = position.clone();
-  
-  // Apply direction-based forward offset
-  if (direction) {
-    const forwardDir = direction.clone().normalize().multiplyScalar(forwardOffset);
-    adjustedPosition.add(forwardDir);
-    
-    // Apply lateral offsets if specified
-    if (xOffset !== 0 || yOffset !== 0) {
-      // Calculate right and up vectors
-      const right = new THREE.Vector3();
-      const up = new THREE.Vector3(0, 1, 0);
-      right.crossVectors(direction, up).normalize();
-      
-      // Recalculate up to ensure it's perpendicular
-      up.crossVectors(right, direction).normalize();
-      
-      // Apply offsets
-      if (xOffset !== 0) {
-        adjustedPosition.add(right.multiplyScalar(xOffset));
-      }
-      
-      if (yOffset !== 0) {
-        adjustedPosition.add(up.multiplyScalar(yOffset));
-      }
-    }
-  }
-  
-  flashGroup.position.copy(adjustedPosition);
-  
-  // Orient the flash group in the firing direction if provided
-  if (direction) {
-    flashGroup.lookAt(adjustedPosition.clone().add(direction));
-  }
-  
-  scene.add(flashGroup);
-
-  // Create a brighter and larger core for more visible muzzle flash
-  const coreGeometry = new THREE.SphereGeometry(0.08 * scale, 8, 8);
-  const coreMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFF9C00, // Bright orange-yellow
-    transparent: true,
-    opacity: 1
-  });
-  const core = new THREE.Mesh(coreGeometry, coreMaterial);
-  // Make it more elongated in the z-direction (along the barrel)
-  core.scale.z = 2.2;
-  flashGroup.add(core);
-
-  // Add a brighter point light for illumination
-  const flashLight = new THREE.PointLight(0xFF9C00, 2.0, 2.5 * scale);
-  flashLight.position.set(0, 0, 0);
-  flashGroup.add(flashLight);
-
-  // Slightly longer duration for better visibility
-  const duration = 80; // milliseconds
-  const startTime = performance.now();
-
-  function animateFlash(timestamp) {
-    const elapsed = timestamp - startTime;
-    const progress = elapsed / duration;
-    if (progress < 1) {
-      // More dramatic scale pulsation 
-      core.scale.z = 2.2 * (1 - progress * 0.6);
-      
-      // Smoother fade out
-      const fadeOpacity = 1 - Math.pow(progress, 1.5);
-      coreMaterial.opacity = Math.max(0, fadeOpacity);
-      
-      // Light intensity follows similar curve
-      flashLight.intensity = 2.0 * (1 - Math.pow(progress, 1.2));
-      
-      requestAnimationFrame(animateFlash);
-    } else {
-      scene.remove(flashGroup);
-      disposeHierarchy(flashGroup);
-    }
-  }
-  requestAnimationFrame(animateFlash);
-}
-
-/**
- * Creates a smoke effect emanating from a given position.
- * @param {THREE.Vector3} position - Start position.
- * @param {THREE.Vector3} direction - Direction of smoke.
- * @param {THREE.Scene} scene - The scene to add the effect.
- */
-export function createSmokeEffect(position, direction, scene) {
-  // Skip smoke effect on mobile devices
-  if (window.isMobile) {
+export function createMuzzleFlash(position, direction, scene, options = null, isPreloading = false) {
+  // Skip on mobile devices
+  if (window.isMobile && !isPreloading) {
     return;
   }
   
-  // Original smoke effect code for desktop
+  // Create flash group
+  const flashGroup = new THREE.Group();
+  flashGroup.position.copy(position);
+  
+  // Make the flash face the direction of fire
+  flashGroup.lookAt(position.clone().add(direction));
+  
+  // Add to scene
+  scene.add(flashGroup);
+  
+  // Configure flash based on options
+  const flashSize = (options && options.size) || 0.2;
+  const flashColor = (options && options.color) || 0xFFF7D6;
+  const flashDuration = (options && options.duration) || 0.05;
+  
+  // Create core flash - using MeshBasicMaterial without emissive properties
+  const flashGeometry = new THREE.IcosahedronGeometry(flashSize, 1);
+  const flashMaterial = new THREE.MeshBasicMaterial({
+    color: flashColor,
+    transparent: true,
+    opacity: 0.9
+  });
+  const flash = new THREE.Mesh(flashGeometry, flashMaterial);
+  
+  // Position the flash slightly in front
+  flash.position.z = 0.1;
+  
+  // Add some random rotation
+  flash.rotation.x = Math.random() * Math.PI;
+  flash.rotation.y = Math.random() * Math.PI;
+  flash.rotation.z = Math.random() * Math.PI;
+  
+  // Add flash to group
+  flashGroup.add(flash);
+  
+  // Add a glow for better visibility - using MeshBasicMaterial without emissive properties
+  const glowGeometry = new THREE.IcosahedronGeometry(flashSize * 1.5, 0);
+  const glowMaterial = new THREE.MeshBasicMaterial({
+    color: flashColor,
+    transparent: true,
+    opacity: 0.5
+  });
+  const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+  
+  // Position the glow slightly in front and larger
+  glow.position.z = 0.05;
+  glow.scale.set(1.5, 1.5, 0.5);
+  
+  // Add glow to group
+  flashGroup.add(glow);
+  
+  // Create animation tracking variables
+  const startTime = performance.now();
+  const endTime = startTime + flashDuration * 1000;
+  
+  // Store references needed for the animation
+  // This closure makes everything accessible to the animateFlash function
+  const animation = { startTime, endTime, flash, glow, flashGroup };
+  
+  // Function to animate the flash
+  function animateFlash(timestamp) {
+    // Calculate how far through the animation we are (0 to 1)
+    const elapsed = timestamp - animation.startTime;
+    const duration = animation.endTime - animation.startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    
+    // If animation complete, remove from scene
+    if (progress >= 1) {
+      if (!isPreloading) {
+        scene.remove(animation.flashGroup);
+        animation.flash.geometry.dispose();
+        animation.flash.material.dispose();
+        animation.glow.geometry.dispose();
+        animation.glow.material.dispose();
+      }
+      return false;
+    }
+    
+    // Create a decay curve - quick fade out
+    // Use quadratic easing for more visual pop at the start
+    const opacityFactor = 1 - (progress * progress);
+    
+    // Update materials
+    animation.flash.material.opacity = 0.9 * opacityFactor;
+    animation.glow.material.opacity = 0.5 * opacityFactor;
+    
+    // Scale down as it fades
+    const scaleFactor = 1 - progress * 0.3;
+    animation.flashGroup.scale.set(scaleFactor, scaleFactor, 1);
+    
+    // Continue animation
+    if (!isPreloading) {
+      requestAnimationFrame(animateFlash);
+    }
+    return true;
+  }
+  
+  // Start animation loop if not preloading (preloading will call this manually)
+  if (!isPreloading) {
+    requestAnimationFrame(animateFlash);
+  }
+  
+  // Return objects needed for preloading
+  return { flashGroup, flash, glow, animateFlash };
+}
+
+/**
+ * Creates a smoke effect at the given position with the specified direction
+ * @param {THREE.Vector3} position - Starting position of the smoke
+ * @param {THREE.Vector3} direction - Direction the smoke should face
+ * @param {THREE.Scene} scene - The scene to add the effect to
+ * @param {boolean} isPreloading - Whether this is being created for preloading
+ * @returns {Object} The created smoke group and particles for preloading
+ */
+export function createSmokeEffect(position, direction, scene, isPreloading = false) {
+  // Skip on mobile devices
+  if (window.isMobile && !isPreloading) {
+    return;
+  }
+  
+  // Create a group for the smoke particles
   const smokeGroup = new THREE.Group();
   smokeGroup.position.copy(position);
+  
+  // Orient the smoke in the direction of fire
+  smokeGroup.lookAt(position.clone().add(direction));
+  
+  // Add to scene
   scene.add(smokeGroup);
-
-  // Create a small group of smoke particles
-  const numParticles = 5;
+  
+  // Generate a random number of particles
+  const numParticles = Math.floor(5 + Math.random() * 3);
   const particles = [];
-
+  
+  // Create individual smoke particles
   for (let i = 0; i < numParticles; i++) {
-    const particleGeometry = new THREE.IcosahedronGeometry(0.01 + Math.random() * 0.02, 0);
+    // Random size for each particle
+    const size = 0.01 + Math.random() * 0.02;
+    
+    // Create geometry
+    const particleGeometry = new THREE.IcosahedronGeometry(size, 0);
+    
+    // Smoke material - semi-transparent gray
     const particleMaterial = new THREE.MeshBasicMaterial({
       color: 0xCCCCCC,
       transparent: true,
-      opacity: 0.7
+      opacity: 0.3 + Math.random() * 0.4
     });
     
+    // Create mesh
     const particle = new THREE.Mesh(particleGeometry, particleMaterial);
     
-    // Randomize initial position slightly around gun muzzle
+    // Random initial position with slight offset from center
+    const offset = 0.03;
     particle.position.set(
-      (Math.random() - 0.5) * 0.04,
-      (Math.random() - 0.5) * 0.04,
-      (Math.random() - 0.5) * 0.04
+      (Math.random() - 0.5) * offset,
+      (Math.random() - 0.5) * offset,
+      (Math.random() - 0.5) * offset
     );
     
-    // Calculate movement direction (mostly forward along shooting direction)
-    const particleDir = direction.clone();
-    particleDir.x += (Math.random() - 0.5) * 0.2;  // Add some randomness
-    particleDir.y += (Math.random() - 0.5) * 0.2;
-    particleDir.z += (Math.random() - 0.5) * 0.2;
-    particleDir.normalize();
+    // Random rotation
+    particle.rotation.set(
+      Math.random() * Math.PI * 2,
+      Math.random() * Math.PI * 2,
+      Math.random() * Math.PI * 2
+    );
+    
+    // Add to group
+    smokeGroup.add(particle);
+    
+    // Generate velocity for this particle
+    // Base direction is the fire direction but with added spread
+    const spread = 0.3;
+    const vel = direction.clone().normalize();
+    
+    // Add some randomization to velocity
+    vel.x += (Math.random() - 0.5) * spread;
+    vel.y += (Math.random() - 0.5) * spread;
+    vel.z += (Math.random() - 0.5) * spread;
+    
+    // Scale velocity by a random factor
+    vel.multiplyScalar(0.3 + Math.random() * 0.5);
     
     // Store particle properties
     particles.push({
       mesh: particle,
-      velocity: particleDir.multiplyScalar(0.5 + Math.random() * 0.5),
+      velocity: vel,
       life: 0,
       maxLife: 0.5 + Math.random() * 0.5
     });
-    
-    smokeGroup.add(particle);
   }
   
-  // Animation loop for smoke particles
-  let startTime = null;
+  // Animation variables
+  const startTime = performance.now();
+  const state = { particles, startTime, lastTime: startTime };
+  
+  // Function to animate the smoke particles
   function animateSmoke(timestamp) {
-    if (!startTime) startTime = timestamp;
-    const elapsed = (timestamp - startTime) / 1000; // Convert to seconds
+    // Calculate time delta
+    const dt = (timestamp - state.lastTime) / 1000; // in seconds
+    state.lastTime = timestamp;
     
-    let allDead = true;
+    // Track if any particles are still alive
+    let anyAlive = false;
     
-    for (const particle of particles) {
-      particle.life += 0.016; // Approximate time step
+    // Update each particle
+    for (const particle of state.particles) {
+      // Increase particle life
+      particle.life += dt;
       
+      // Check if particle is still alive
       if (particle.life < particle.maxLife) {
-        allDead = false;
+        anyAlive = true;
         
-        // Move particle based on velocity
-        particle.mesh.position.add(particle.velocity.clone().multiplyScalar(0.016));
+        // Calculate remaining life as a percentage
+        const lifePercent = particle.life / particle.maxLife;
         
-        // Slow down over time (air resistance)
-        particle.velocity.multiplyScalar(0.96);
+        // Move particle based on its velocity
+        particle.mesh.position.x += particle.velocity.x * dt;
+        particle.mesh.position.y += particle.velocity.y * dt;
+        particle.mesh.position.z += particle.velocity.z * dt;
         
-        // Expand slightly
-        const scale = 1 + particle.life * 3;
+        // Slow down over time - apply drag
+        particle.velocity.multiplyScalar(0.98);
+        
+        // Fade out as it ages
+        particle.mesh.material.opacity = 0.5 * (1 - lifePercent);
+        
+        // Grow slightly larger
+        const scale = 1 + lifePercent * 2;
         particle.mesh.scale.set(scale, scale, scale);
         
-        // Fade out
-        const lifeRatio = particle.life / particle.maxLife;
-        if (lifeRatio > 0.7) {
-          particle.mesh.material.opacity = 0.7 * (1 - (lifeRatio - 0.7) / 0.3);
-        }
+        // Rotate slowly for some movement
+        particle.mesh.rotation.x += dt * 0.2;
+        particle.mesh.rotation.y += dt * 0.1;
       } else {
-        // Hide particle when dead
+        // Particle has expired, make it invisible
         particle.mesh.visible = false;
       }
     }
     
-    if (!allDead) {
-      requestAnimationFrame(animateSmoke);
-    } else {
-      // Clean up when all particles are dead
-      scene.remove(smokeGroup);
-      particles.forEach(particle => {
-        if (particle.mesh.material) particle.mesh.material.dispose();
-        if (particle.mesh.geometry) particle.mesh.geometry.dispose();
+    // If all particles are dead and not preloading, remove the effect
+    if (!anyAlive && !isPreloading) {
+      // Clean up
+      particles.forEach(p => {
+        smokeGroup.remove(p.mesh);
+        p.mesh.geometry.dispose();
+        p.mesh.material.dispose();
       });
+      scene.remove(smokeGroup);
+      return false;
     }
+    
+    // Continue animation if needed
+    if (!isPreloading) {
+      requestAnimationFrame(animateSmoke);
+    }
+    return true;
   }
   
-  requestAnimationFrame(animateSmoke);
+  // Start animation loop if not preloading (preloading will call this manually)
+  if (!isPreloading) {
+    requestAnimationFrame(animateSmoke);
+  }
+  
+  // Return objects needed for preloading
+  return { smokeGroup, particles, animateSmoke };
 }
 
 /**
@@ -463,53 +535,42 @@ export function preloadSmokeEffect(scene) {
     return;
   }
   
-  // Create a dummy position and direction far below the scene
+  // Create a dummy position far below the scene where it won't be visible
   const dummyPosition = new THREE.Vector3(0, -1000, 0);
   const dummyDirection = new THREE.Vector3(0, 1, 0);
   
-  // Create a smoke group
-  const smokeGroup = new THREE.Group();
-  smokeGroup.position.copy(dummyPosition);
-  scene.add(smokeGroup);
+  // Create a fully realized smoke effect to warm up all rendering pathways
+  // This will ensure the first visible effect doesn't cause frame drops
+  const smokeEffect = createSmokeEffect(dummyPosition, dummyDirection, scene, true);
   
-  // Create particles with 0 opacity
-  const numParticles = 5;
-  const particles = [];
+  // Force a few animation frames to ensure shaders are compiled
+  const fakeTimestamps = [0, 16, 32, 48, 64, 80, 96];
+  let frameIndex = 0;
   
-  for (let i = 0; i < numParticles; i++) {
-    const particleGeometry = new THREE.IcosahedronGeometry(0.01 + Math.random() * 0.02, 0);
-    const particleMaterial = new THREE.MeshBasicMaterial({
-      color: 0xCCCCCC,
-      transparent: true,
-      opacity: 0 // Make it invisible
-    });
-    
-    const particle = new THREE.Mesh(particleGeometry, particleMaterial);
-    smokeGroup.add(particle);
-    
-    // Store particle properties
-    particles.push({
-      mesh: particle,
-      velocity: dummyDirection.clone().multiplyScalar(0.5),
-      life: 0,
-      maxLife: 0.5
-    });
+  function simulateFrames() {
+    if (frameIndex < fakeTimestamps.length) {
+      // Manually advance the animation
+      smokeEffect.animateSmoke(performance.now() + fakeTimestamps[frameIndex]);
+      frameIndex++;
+      setTimeout(simulateFrames, 0); // Use setTimeout to avoid blocking the main thread
+    } else {
+      // Clean up after simulation is complete
+      setTimeout(() => {
+        scene.remove(smokeEffect.smokeGroup);
+        smokeEffect.particles.forEach(p => {
+          p.mesh.geometry.dispose();
+          p.mesh.material.dispose();
+        });
+      }, 100);
+    }
   }
   
-  // Remove and dispose after a short delay
-  setTimeout(() => {
-    // Clean up
-    particles.forEach(p => {
-      smokeGroup.remove(p.mesh);
-      p.mesh.geometry.dispose();
-      p.mesh.material.dispose();
-    });
-    scene.remove(smokeGroup);
-  }, 100);
+  // Start simulating frames immediately
+  simulateFrames();
 }
 
 /**
- * Preloads the muzzle flash effect by creating an invisible instance
+ * Preloads the muzzle flash effect by creating a full instance and running its animation
  * @param {THREE.Scene} scene - The scene to add the preloaded effect
  */
 export function preloadMuzzleFlash(scene) {
@@ -520,28 +581,39 @@ export function preloadMuzzleFlash(scene) {
   
   // Create a dummy position far below the scene
   const dummyPosition = new THREE.Vector3(0, -1000, 0);
+  const dummyDirection = new THREE.Vector3(0, 1, 0);
   
-  // Create flash group
-  const flashGroup = new THREE.Group();
-  flashGroup.position.copy(dummyPosition);
-  scene.add(flashGroup);
+  // Create a full muzzle flash effect - and capture the returned animation function
+  const flashEffect = createMuzzleFlash(dummyPosition, dummyDirection, scene, null, true);
   
-  // Create core flash
-  const flashGeometry = new THREE.IcosahedronGeometry(0.1, 0);
-  const flashMaterial = new THREE.MeshBasicMaterial({
-    color: 0xFFF7D6,
-    transparent: true,
-    opacity: 0 // Make it invisible
-  });
-  const flash = new THREE.Mesh(flashGeometry, flashMaterial);
-  flashGroup.add(flash);
+  // Force a few animation frames to ensure shaders are compiled
+  const fakeTimestamps = [0, 16, 32, 48, 64];
+  let frameIndex = 0;
   
-  // Remove and dispose after a short delay
-  setTimeout(() => {
-    scene.remove(flashGroup);
-    flashGeometry.dispose();
-    flashMaterial.dispose();
-  }, 100);
+  function simulateFrames() {
+    if (frameIndex < fakeTimestamps.length) {
+      // Manually advance the animation using the function from the returned effect
+      flashEffect.animateFlash(performance.now() + fakeTimestamps[frameIndex]);
+      frameIndex++;
+      setTimeout(simulateFrames, 0); // Use setTimeout to avoid blocking the main thread
+    } else {
+      // Clean up after simulation is complete
+      setTimeout(() => {
+        scene.remove(flashEffect.flashGroup);
+        if (flashEffect.flash) {
+          flashEffect.flash.geometry.dispose();
+          flashEffect.flash.material.dispose();
+        }
+        if (flashEffect.glow) {
+          flashEffect.glow.geometry.dispose();
+          flashEffect.glow.material.dispose();
+        }
+      }, 100);
+    }
+  }
+  
+  // Start simulating frames immediately
+  simulateFrames();
 }
 
 // Export the SmokeRingEffect class
