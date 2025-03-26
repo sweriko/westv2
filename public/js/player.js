@@ -128,20 +128,10 @@ export class Player {
    * Spawn the player at a random position along the main street
    */
   spawnPlayerRandomly() {
-    // Default position if town dimensions aren't available
-    let spawnX = 0;
-    let spawnY = 1.6;
-    let spawnZ = 0;
-
-    // If town dimensions are available, use them for spawn positioning
-    if (window.townDimensions) {
-      const streetWidth = window.townDimensions.streetWidth;
-      const townLength = window.townDimensions.length;
-      
-      // Random position within the street area
-      spawnX = (Math.random() - 0.5) * streetWidth * 0.8; // 80% of street width to avoid edges
-      spawnZ = (Math.random() - 0.5) * townLength * 0.8; // 80% of town length
-    }
+    // Random position within a reasonable area
+    const spawnX = (Math.random() - 0.5) * 10; // Random X between -5 and 5
+    const spawnY = 1.6; // Eye level
+    const spawnZ = (Math.random() - 0.5) * 40; // Random Z between -20 and 20
 
     this.group.position.set(spawnX, spawnY, spawnZ);
     
@@ -535,8 +525,8 @@ export class Player {
   }
 
   /**
-   * Check if a position is valid regarding boundaries
-   * @param {THREE.Vector3} position - The position to check
+   * Checks if a player's position is within game boundaries.
+   * @param {THREE.Vector3} position - Position to check
    * @returns {boolean} - True if the position is valid
    */
   checkBoundaryCollision(position) {
@@ -553,32 +543,6 @@ export class Player {
       // If player is not in a duel, they must stay outside
       if (!window.quickDraw.inDuel && inArena && !wasInArena) {
         return false; // Can't enter arena from outside (except via the portal)
-      }
-    }
-    
-    // Check Proper Shootout map boundary
-    if (window.properShootout && window.properShootout.inLobby) {
-      // If in Proper Shootout, only check those boundaries and ignore town boundaries
-      return window.properShootout.isPointInMap(position);
-    }
-    
-    // Check town boundary
-    if (window.physics && typeof window.physics.isPointInTown === 'function') {
-      if (!window.physics.isPointInTown(position)) {
-        return false; // Can't leave town
-      }
-    } else if (window.townDimensions) {
-      // Fallback if physics isn't available but town dimensions are
-      const width = window.townDimensions.width;
-      const length = window.townDimensions.length;
-      
-      if (
-        position.x < -width / 2 || 
-        position.x > width / 2 || 
-        position.z < -length / 2 || 
-        position.z > length / 2
-      ) {
-        return false; // Can't leave town
       }
     }
     

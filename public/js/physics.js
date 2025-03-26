@@ -1,6 +1,6 @@
 /**
  * Physics system using cannon.js for collision detection and physics simulation.
- * Focused on creating invisible boundaries for the QuickDraw arenas and town.
+ * Focused on creating invisible boundaries for the QuickDraw arenas.
  */
 export class PhysicsSystem {
   constructor() {
@@ -47,111 +47,6 @@ export class PhysicsSystem {
     groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2); // Rotate to be flat
     this.world.addBody(groundBody);
     this.bodies.push(groundBody);
-  }
-  
-  /**
-   * Creates an invisible boundary for the town to prevent players from leaving
-   * @param {number} width - Width of the town
-   * @param {number} length - Length of the town
-   * @param {number} height - Height of the barrier
-   * @returns {CANNON.Body} - The created physics body
-   */
-  createTownBoundary(width, length, height) {
-    // First remove any existing town boundaries
-    this.removeTownBoundary();
-    
-    // Create a physics body for the town boundary
-    const boundaryBody = new CANNON.Body({
-      mass: 0, // Static body
-      material: this.defaultMaterial
-    });
-    
-    // Add a box shape for each border
-    const halfWidth = width / 2;
-    const halfLength = length / 2;
-    const borderThickness = 0.5;
-    
-    // Left border (negative X)
-    const leftBorderShape = new CANNON.Box(new CANNON.Vec3(
-      borderThickness / 2, 
-      height / 2, 
-      length / 2
-    ));
-    boundaryBody.addShape(
-      leftBorderShape, 
-      new CANNON.Vec3(-halfWidth, height / 2, 0)
-    );
-    
-    // Right border (positive X)
-    const rightBorderShape = new CANNON.Box(new CANNON.Vec3(
-      borderThickness / 2, 
-      height / 2, 
-      length / 2
-    ));
-    boundaryBody.addShape(
-      rightBorderShape, 
-      new CANNON.Vec3(halfWidth, height / 2, 0)
-    );
-    
-    // Front border (negative Z)
-    const frontBorderShape = new CANNON.Box(new CANNON.Vec3(
-      width / 2, 
-      height / 2, 
-      borderThickness / 2
-    ));
-    boundaryBody.addShape(
-      frontBorderShape, 
-      new CANNON.Vec3(0, height / 2, -halfLength)
-    );
-    
-    // Back border (positive Z)
-    const backBorderShape = new CANNON.Box(new CANNON.Vec3(
-      width / 2, 
-      height / 2, 
-      borderThickness / 2
-    ));
-    boundaryBody.addShape(
-      backBorderShape, 
-      new CANNON.Vec3(0, height / 2, halfLength)
-    );
-    
-    boundaryBody.townBoundary = true; // Tag this body as a town boundary
-    boundaryBody.collisionFilterGroup = 2; // Group 2 for boundaries
-    
-    // Add the boundary body to the world
-    this.world.addBody(boundaryBody);
-    this.bodies.push(boundaryBody);
-    
-    // Create a reference to easily find this body later
-    this.townBoundaryBody = boundaryBody;
-    
-    // If debug mode is enabled, create a visual representation
-    if (this.debugMode) {
-      this.createDebugMesh(boundaryBody);
-    }
-    
-    console.log("Created town boundary with width", width, "and length", length);
-    
-    return boundaryBody;
-  }
-  
-  /**
-   * Removes the town boundary if it exists
-   */
-  removeTownBoundary() {
-    if (this.townBoundaryBody) {
-      this.world.removeBody(this.townBoundaryBody);
-      
-      // Remove from our bodies array
-      const index = this.bodies.indexOf(this.townBoundaryBody);
-      if (index !== -1) {
-        this.bodies.splice(index, 1);
-      }
-      
-      // Clear the reference
-      this.townBoundaryBody = null;
-      console.log("Removed town boundary");
-    }
   }
   
   /**
@@ -349,28 +244,6 @@ export class PhysicsSystem {
     return horizontalDist < radius;
   }
 
-  /**
-   * Checks if a point is inside the town boundary
-   * @param {THREE.Vector3} point - The point to check
-   * @returns {boolean} - True if inside, false if outside
-   */
-  isPointInTown(point) {
-    // If no town boundary exists, return true (no restriction)
-    if (!window.townDimensions) return true;
-    
-    // Get town dimensions
-    const width = window.townDimensions.width;
-    const length = window.townDimensions.length;
-    
-    // Check if the point is within the town boundaries
-    return (
-      point.x > -width / 2 && 
-      point.x < width / 2 && 
-      point.z > -length / 2 && 
-      point.z < length / 2
-    );
-  }
-  
   /**
    * Creates a debug mesh to visualize a physics body
    * @param {CANNON.Body} body - The physics body to visualize

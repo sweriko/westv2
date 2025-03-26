@@ -137,18 +137,6 @@ export class Bullet {
       }
     }
 
-    // Only check town boundary if not in QuickDraw duel
-    if (!(window.quickDraw && window.quickDraw.inDuel)) {
-      // Check town boundary
-      if (!withinTownBoundary(endPos)) {
-        // Show an impact effect on the invisible boundary
-        createImpactEffect(endPos, this.direction, scene, 'ground');
-        
-        console.log("Bullet hit town boundary - destroying it");
-        return { active: false, hit: { type: 'boundary', position: endPos } };
-      }
-    }
-
     // Anti-cheat: For local bullets, collision detection is only client-side prediction
     // For remote bullets, we rely on client-side collision for visual effects
     
@@ -655,30 +643,4 @@ export class Bullet {
   setLastHitZone(zone) {
     this.lastHitZone = zone;
   }
-}
-
-/**
- * Helper function to check if a position is within the town boundary
- * @param {THREE.Vector3} position - The position to check
- * @returns {boolean} - True if within boundary, false if outside
- */
-function withinTownBoundary(position) {
-  if (window.physics && typeof window.physics.isPointInTown === 'function') {
-    return window.physics.isPointInTown(position);
-  } else if (window.townDimensions) {
-    // Fallback if physics isn't available but town dimensions are
-    const width = window.townDimensions.width;
-    const length = window.townDimensions.length;
-    
-    // Check if position is within town boundaries
-    return (
-      position.x >= -width / 2 && 
-      position.x <= width / 2 && 
-      position.z >= -length / 2 && 
-      position.z <= length / 2
-    );
-  }
-  
-  // Default to true if we can't determine the boundary
-  return true;
 }

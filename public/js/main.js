@@ -1,4 +1,4 @@
-import { initScene, createNPC, updateNPC, updateFPS, scene } from './scene.js';
+import { initScene, updateFPS, scene } from './scene.js';
 import { initInput } from './input.js';
 import { SoundManager } from './soundManager.js';
 import { Player } from './player.js';
@@ -32,7 +32,7 @@ let remotePlayers = new Map();  // (playerId => ThirdPersonModel)
 let playersMap = new Map();     // Master map including local + remote
 
 // Scenes, camera, etc.
-let renderer, camera, npc;
+let renderer, camera;
 let multiplayerManager;
 let quickDraw;
 let physics;
@@ -77,15 +77,6 @@ function init() {
     physics = new PhysicsSystem();
     window.physics = physics; // Make physics globally accessible
 
-    // Create town boundary if dimensions are available
-    if (window.townDimensions) {
-      physics.createTownBoundary(
-        window.townDimensions.width,
-        window.townDimensions.length,
-        5 // Height of the barrier
-      );
-    }
-    
     // Preload all visual effects to prevent FPS drops on first use
     if (!window.isMobile) {
       console.log("Preloading visual effects...");
@@ -117,9 +108,6 @@ function init() {
     // Make localPlayer globally accessible for hit updates.
     window.localPlayer = localPlayer;
 
-    // Create an NPC target
-    npc = createNPC(scene);
-
     // Initialize input
     initInput(renderer, localPlayer, soundManager);
     
@@ -131,48 +119,6 @@ function init() {
     
     // Share the main physics system with game modes
     quickDraw.physics = physics;
-    
-    // Debug toggle for physics visualization (press P)
-    window.addEventListener('keydown', (event) => {
-      if (event.code === 'KeyP') {
-        if (physics) {
-          const isDebugMode = !physics.debugMode;
-          physics.setDebugMode(isDebugMode);
-          console.log(`Physics debug mode: ${isDebugMode ? 'ENABLED' : 'DISABLED'}`);
-          
-          // Set the global debug flag
-          window.showHitZoneDebug = isDebugMode;
-          
-          // If turning on debug mode, update hit zone debug for all existing players
-          if (isDebugMode) {
-            // Create debug boxes for remote players and local player with a delay
-            // (to allow for physics debug state to be fully set)
-            setTimeout(() => {
-              // First trigger hit zone debugging on the local player
-              if (localPlayer) {
-                const dummyBullet = new Bullet(
-                  new THREE.Vector3(0, 0, 0),
-                  new THREE.Vector3(0, 1, 0)
-                );
-                dummyBullet.checkPlayerHitZones(localPlayer, new THREE.Vector3(0, 0, 0));
-              }
-              
-              // Then create debug boxes for all remote players
-              for (const [playerId, remotePlayer] of remotePlayers.entries()) {
-                // Force a collision check to create debug boxes
-                const dummyBullet = new Bullet(
-                  new THREE.Vector3(0, 0, 0),
-                  new THREE.Vector3(0, 1, 0)
-                );
-                dummyBullet.checkPlayerHitZones(remotePlayer, new THREE.Vector3(0, 0, 0));
-              }
-              
-              console.log("Hit zone debug boxes created for all players");
-            }, 50);
-          }
-        }
-      }
-    });
     
     // Make updateHealthUI globally accessible for the Quick Draw mode to use
     window.updateHealthUI = updateHealthUI;
@@ -263,6 +209,48 @@ function init() {
       }
     };
 
+    // Debug toggle for physics visualization (press P)
+    window.addEventListener('keydown', (event) => {
+      if (event.code === 'KeyP') {
+        if (physics) {
+          const isDebugMode = !physics.debugMode;
+          physics.setDebugMode(isDebugMode);
+          console.log(`Physics debug mode: ${isDebugMode ? 'ENABLED' : 'DISABLED'}`);
+          
+          // Set the global debug flag
+          window.showHitZoneDebug = isDebugMode;
+          
+          // If turning on debug mode, update hit zone debug for all existing players
+          if (isDebugMode) {
+            // Create debug boxes for remote players and local player with a delay
+            // (to allow for physics debug state to be fully set)
+            setTimeout(() => {
+              // First trigger hit zone debugging on the local player
+              if (localPlayer) {
+                const dummyBullet = new Bullet(
+                  new THREE.Vector3(0, 0, 0),
+                  new THREE.Vector3(0, 1, 0)
+                );
+                dummyBullet.checkPlayerHitZones(localPlayer, new THREE.Vector3(0, 0, 0));
+              }
+              
+              // Then create debug boxes for all remote players
+              for (const [playerId, remotePlayer] of remotePlayers.entries()) {
+                // Force a collision check to create debug boxes
+                const dummyBullet = new Bullet(
+                  new THREE.Vector3(0, 0, 0),
+                  new THREE.Vector3(0, 1, 0)
+                );
+                dummyBullet.checkPlayerHitZones(remotePlayer, new THREE.Vector3(0, 0, 0));
+              }
+              
+              console.log("Hit zone debug boxes created for all players");
+            }, 50);
+          }
+        }
+      }
+    });
+
     // Start the animation loop
     animate(0);
     showGameInstructions();
@@ -288,9 +276,6 @@ function animate(time) {
   // Update local player
   localPlayer.update(deltaTime);
 
-  // Update NPC using the imported updateNPC function
-  updateNPC(npc, deltaTime);
-
   // Update remote players (animations, movement interpolation, etc.)
   multiplayerManager.update(deltaTime);
   
@@ -312,7 +297,7 @@ function animate(time) {
   // Update bullets (both local & remote)
   for (let i = bullets.length - 1; i >= 0; i--) {
     const bullet = bullets[i];
-    const result = bullet.update(deltaTime, npc, scene, playersMap);
+    const result = bullet.update(deltaTime, null, scene, playersMap);
     if (!result.active) {
       // If bullet hit something or traveled too far
       if (result.hit && result.hit.type === 'player') {
@@ -558,10 +543,9 @@ function showGameInstructions() {
     <p>Left-click (while aiming): Shoot</p>
     <p>R: Reload</p>
     <p>Space: Jump</p>
-    <p>P: Toggle physics debug visualization</p>
+    <p>P: Toggle hit zone debug visualization</p>
     <p><strong>Touch anywhere to start</strong></p>
     <p><strong>New:</strong> Find the Quick Draw portal near spawn to duel other players!</p>
-    <p><strong>Town Boundary:</strong> You must stay within the town limits and can only access the duel arena through the portal.</p>
     <p><strong>Hit Zones:</strong> Headshots deal 100 damage, body shots 40, and limb shots 20.</p>`;
   
   document.getElementById('game-container').appendChild(instructions);

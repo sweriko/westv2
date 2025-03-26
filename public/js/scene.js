@@ -54,6 +54,13 @@ function createWesternTown() {
   const TOWN_LENGTH = 100; // Length of the town (Z-axis)
   const STREET_WIDTH = 15; // Width of the main street
 
+  // Make town dimensions globally accessible
+  window.townDimensions = {
+    width: TOWN_WIDTH,
+    length: TOWN_LENGTH,
+    streetWidth: STREET_WIDTH
+  };
+
   // Create the ground (smaller than the original 1000x1000)
   const groundGeometry = new THREE.PlaneGeometry(TOWN_WIDTH, TOWN_LENGTH);
   const groundMaterial = new THREE.MeshStandardMaterial({
@@ -94,16 +101,6 @@ function createWesternTown() {
     const offset = i * buildingSpacing - TOWN_LENGTH / 2 + buildingSpacing / 2;
     createWesternBuilding(STREET_WIDTH / 2 + 5, 0, offset);
   }
-
-  // Create a visible border around the town
-  createTownBorder(TOWN_WIDTH, TOWN_LENGTH);
-  
-  // Store these values in a global variable for access in other files
-  window.townDimensions = {
-    width: TOWN_WIDTH,
-    length: TOWN_LENGTH,
-    streetWidth: STREET_WIDTH
-  };
 }
 
 /**
@@ -240,121 +237,6 @@ function createWesternBuilding(x, y, z) {
   }
   
   scene.add(buildingGroup);
-}
-
-/**
- * Creates a visible border around the town
- * @param {number} width - Width of the town
- * @param {number} length - Length of the town
- */
-function createTownBorder(width, length) {
-  const borderHeight = 0.5;
-  const borderWidth = 0.5;
-  
-  // Border material
-  const borderMaterial = new THREE.MeshStandardMaterial({
-    color: 0x8B4513, // Brown
-    roughness: 0.8,
-    metalness: 0.2
-  });
-  
-  // Create four border segments
-  const createBorderSegment = (x, z, sizeX, sizeZ) => {
-    const geometry = new THREE.BoxGeometry(sizeX, borderHeight, sizeZ);
-    const border = new THREE.Mesh(geometry, borderMaterial);
-    border.position.set(x, borderHeight / 2, z);
-    border.castShadow = true;
-    border.receiveShadow = true;
-    scene.add(border);
-    return border;
-  };
-  
-  // Left border (negative X)
-  const leftBorder = createBorderSegment(-width / 2, 0, borderWidth, length);
-  
-  // Right border (positive X)
-  const rightBorder = createBorderSegment(width / 2, 0, borderWidth, length);
-  
-  // Front border (negative Z)
-  const frontBorder = createBorderSegment(0, -length / 2, width, borderWidth);
-  
-  // Back border (positive Z)
-  const backBorder = createBorderSegment(0, length / 2, width, borderWidth);
-  
-  // Store border references in a global variable
-  window.townBorders = {
-    left: leftBorder,
-    right: rightBorder,
-    front: frontBorder,
-    back: backBorder,
-    width: width,
-    length: length,
-    height: borderHeight
-  };
-}
-
-/**
- * Creates a simple NPC target.
- * @param {THREE.Scene} scene - The scene to add the NPC.
- * @returns {THREE.Group} - The NPC group.
- */
-export function createNPC(scene) {
-  const npcGroup = new THREE.Group();
-  const bodyGeometry = new THREE.CylinderGeometry(0.4, 0.3, 1.5, 8);
-  const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0x8B0000 });
-  const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-  body.position.y = 0.9;
-  npcGroup.add(body);
-  const headGeometry = new THREE.SphereGeometry(0.2, 16, 16);
-  const headMaterial = new THREE.MeshStandardMaterial({ color: 0xDEB887 });
-  const head = new THREE.Mesh(headGeometry, headMaterial);
-  head.position.y = 1.8;
-  npcGroup.add(head);
-  const hatGeometry = new THREE.CylinderGeometry(0.25, 0.25, 0.15, 8);
-  const hatMaterial = new THREE.MeshStandardMaterial({ color: 0x000000 });
-  const hat = new THREE.Mesh(hatGeometry, hatMaterial);
-  hat.position.y = 2.0;
-  npcGroup.add(hat);
-
-  // Position the NPC within the town instead of at (0, 0, -10)
-  if (window.townDimensions) {
-    // Place NPC at a random position in the town
-    const x = (Math.random() - 0.5) * window.townDimensions.streetWidth * 0.8;
-    const z = -window.townDimensions.length * 0.3; // Towards the front of the town
-    npcGroup.position.set(x, 0, z);
-  } else {
-    // Default position as fallback
-    npcGroup.position.set(0, 0, -10);
-  }
-  
-  scene.add(npcGroup);
-  return npcGroup;
-}
-
-/**
- * Updates the NPC's position.
- * @param {THREE.Group} npc - The NPC group.
- * @param {number} deltaTime - Time elapsed since last frame.
- */
-export function updateNPC(npc, deltaTime) {
-  if (npc) {
-    npc.userData.direction = npc.userData.direction || 1;
-    
-    // Adjust the movement range to be appropriate for the town size
-    const movementRange = window.townDimensions ? 
-      window.townDimensions.streetWidth * 0.4 : // 40% of street width if town exists
-      15; // Original value as fallback
-    
-    npc.position.x += npc.userData.direction * 2 * deltaTime;
-    
-    if (npc.position.x > movementRange) {
-      npc.userData.direction = -1;
-      npc.rotation.y = Math.PI / 2;
-    } else if (npc.position.x < -movementRange) {
-      npc.userData.direction = 1;
-      npc.rotation.y = -Math.PI / 2;
-    }
-  }
 }
 
 /**
