@@ -1,5 +1,6 @@
 // /public/js/scene.js
 export let scene;
+import { DesertTerrain } from './desertTerrain.js';
 
 /**
  * Initializes the Three.js scene, camera, and renderer.
@@ -20,8 +21,8 @@ export function initScene() {
   }
   gameContainer.appendChild(renderer.domElement);
 
-  // Initialize with a default blue color
-  scene.background = new THREE.Color(0x336699);
+  // Initialize with a desert sand color instead of blue
+  scene.background = new THREE.Color(0xe6c288);
   
   // Load the equirectangular texture and apply it directly
   const textureLoader = new THREE.TextureLoader();
@@ -43,8 +44,9 @@ export function initScene() {
     console.log("Skybox mesh added to scene");
   });
   
-  // Keep fog but adjust it to work with skybox
-  scene.fog = new THREE.Fog(0x87CEEB, 150, 700);
+  // Change fog color to match desert colors instead of blue
+  const desertFogColor = new THREE.Color(0xe6c288); // Desert sand color
+  scene.fog = new THREE.Fog(desertFogColor, 250, 900); // Increased fog distances
 
   const camera = new THREE.PerspectiveCamera(
     75,
@@ -53,18 +55,24 @@ export function initScene() {
     1000
   );
 
-  const ambientLight = new THREE.AmbientLight(0x404040);
+  // Increase ambient light intensity and warm it up to match desert environment
+  const ambientLight = new THREE.AmbientLight(0xffebc8, 0.6);
   scene.add(ambientLight);
 
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-  directionalLight.position.set(1, 1, 0.5).normalize();
+  // Adjust directional light to be softer and more diffused for desert environment
+  const directionalLight = new THREE.DirectionalLight(0xffffb3, 1.0);
+  directionalLight.position.set(1, 1.2, 0.5).normalize();
   directionalLight.castShadow = true;
   directionalLight.shadow.mapSize.width = 2048;
   directionalLight.shadow.mapSize.height = 2048;
+  directionalLight.shadow.radius = 3; // Add shadow blur for softer shadows
   scene.add(directionalLight);
 
   // Create the western town instead of just a ground plane
   createWesternTown();
+  
+  // Create the desert terrain
+  createDesertTerrain();
 
   return { camera, renderer };
 }
@@ -320,5 +328,34 @@ export function updateFPS(renderer, camera, deltaTime) {
   if (fpsCounter) {
     const currentFPS = deltaTime > 0 ? Math.round(1 / deltaTime) : 0;
     fpsCounter.textContent = `FPS: ${currentFPS}`;
+  }
+}
+
+/**
+ * Creates desert terrain around the town
+ */
+function createDesertTerrain() {
+  // Create desert terrain after town dimensions are set
+  if (window.townDimensions) {
+    console.log("Creating desert terrain around town...");
+    const desertTerrain = new DesertTerrain(scene, window.townDimensions);
+    desertTerrain.generate();
+    
+    // Store terrain instance for potential access later
+    window.desertTerrain = desertTerrain;
+  } else {
+    // If town dimensions aren't available yet, wait for them
+    console.log("Waiting for town dimensions before creating desert terrain...");
+    const checkInterval = setInterval(() => {
+      if (window.townDimensions) {
+        console.log("Town dimensions available, creating desert terrain...");
+        const desertTerrain = new DesertTerrain(scene, window.townDimensions);
+        desertTerrain.generate();
+        
+        // Store terrain instance for potential access later
+        window.desertTerrain = desertTerrain;
+        clearInterval(checkInterval);
+      }
+    }, 100);
   }
 }

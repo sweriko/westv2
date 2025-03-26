@@ -45,8 +45,42 @@ export class PhysicsSystem {
       material: this.defaultMaterial
     });
     groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2); // Rotate to be flat
+    
+    // Tag as ground for quick identification
+    groundBody.isGround = true;
+    
     this.world.addBody(groundBody);
     this.bodies.push(groundBody);
+  }
+  
+  /**
+   * Gets the terrain height at a specific world position
+   * @param {number} x - World x coordinate
+   * @param {number} z - World z coordinate
+   * @returns {number} - Height at that point (0 if terrain not available)
+   */
+  getTerrainHeightAt(x, z) {
+    // If desert terrain is available, use its height
+    if (window.desertTerrain) {
+      // Get blend factor - 0 means town (flat), 1 means desert
+      const townBlend = window.desertTerrain.getTownBlendFactor(x, z);
+      
+      if (townBlend > 0) {
+        // If outside town area, calculate terrain height
+        const baseNoise = window.desertTerrain.baseNoise.noise(
+          x * window.desertTerrain.config.noiseScale.base, 
+          z * window.desertTerrain.config.noiseScale.base
+        ) * window.desertTerrain.config.heightScale.base;
+        
+        const duneHeight = window.desertTerrain.getDirectionalDuneHeight(x, z);
+        
+        // Scale by blend factor for smooth transition
+        return (baseNoise + duneHeight * townBlend) * townBlend;
+      }
+    }
+    
+    // Default height for town area or if terrain not available
+    return 0;
   }
   
   /**

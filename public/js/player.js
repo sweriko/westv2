@@ -32,6 +32,7 @@ export class Player {
     this.id = null; // will be set by networkManager.onInit
     this.velocity = new THREE.Vector3();
     this.canJump = false;
+    this.gravity = 20; // Gravity force for physics
 
     // Movement flags
     this.moveForward = false;
@@ -348,36 +349,42 @@ export class Player {
     // Store previous position before movement for collision detection
     this.previousPosition.copy(this.group.position);
 
-    // Handle gravity and jumping first
-    const wasOnGround = this.canJump;
-    const isJumping = this.velocity.y > 0 && !this.canJump;
+    // Store previous info for comparing changes
+    const wasOnGround = this.group.position.y <= 1.6 || this.isOnObject;
+    const wasJumping = this.isJumping;
     
-    // Store the previous jumping state to detect when we first start jumping
-    const wasJumping = this.isJumping || false;
-    this.isJumping = isJumping;
+    // Calculate new vertical position with gravity
+    if (!wasOnGround) {
+      this.velocity.y -= this.gravity * deltaTime;
+    }
+    const newVerticalPos = {
+      y: this.group.position.y + (this.velocity.y * deltaTime)
+    };
     
-    // Apply gravity
-    this.velocity.y -= 20 * deltaTime;
+    // Check if player will land on an object (like a crate)
+    const feetPos = new THREE.Vector3(
+      this.group.position.x,
+      this.group.position.y - 1.6, // Adjust for player height
+      this.group.position.z
+    );
+    const isOnObject = this.checkStandingOnObject(feetPos);
     
-    // Calculate new vertical position first
-    const newVerticalPos = this.group.position.clone();
-    newVerticalPos.y += this.velocity.y * deltaTime;
+    // Get terrain height at current position
+    let terrainHeight = 0;
+    if (window.physics) {
+      terrainHeight = window.physics.getTerrainHeightAt(this.group.position.x, this.group.position.z);
+    }
     
-    // Check if player is standing on something or has hit ceiling
-    const playerFeetPos = this.group.position.clone();
-    playerFeetPos.y -= 1.5; // Position at feet
-    
-    const playerHeadPos = this.group.position.clone();
-    playerHeadPos.y += 0.3; // Position at head
-    
-    // Cast ray from player feet downward to check for ground
-    const isOnObject = this.checkStandingOnObject(playerFeetPos);
-    
-    // Cast ray from player head upward to check for ceiling
-    const hitCeiling = this.checkHittingCeiling(playerHeadPos);
+    // Check if player would hit a ceiling
+    const headPos = new THREE.Vector3(
+      this.group.position.x,
+      this.group.position.y + 0.3, // Adjust for player height
+      this.group.position.z
+    );
+    const hitCeiling = this.checkCeilingCollision(headPos);
     
     // Handle vertical movement
-    if (this.velocity.y <= 0 && (newVerticalPos.y <= 1.6 || isOnObject)) {
+    if (this.velocity.y <= 0 && (newVerticalPos.y <= 1.6 + terrainHeight || isOnObject)) {
       // Player landed on ground or object
       if (this.velocity.y < -3 && !wasOnGround) {
         // Play landing sound if falling fast enough
@@ -387,10 +394,10 @@ export class Player {
       }
       
       // Set to ground or object height
-      if (isOnObject && isOnObject.y > 1.6) {
+      if (isOnObject && isOnObject.y > 1.6 + terrainHeight) {
         this.group.position.y = isOnObject.y;
       } else {
-        this.group.position.y = 1.6; // Regular ground level
+        this.group.position.y = 1.6 + terrainHeight; // Regular ground level + terrain
       }
       
       this.velocity.y = 0;
@@ -425,7 +432,7 @@ export class Player {
     this.group.position.z = finalPosition.z;
     
     // Handle jump sound - only play when we first start jumping (not previously jumping)
-    if (isJumping && !wasJumping && this.soundManager) {
+    if (this.isJumping && !wasJumping && this.soundManager) {
       this.soundManager.playSound("jump", 300); // Play jump sound with 300ms cooldown
     }
   }
@@ -1132,7 +1139,7 @@ export class Player {
    * @param {THREE.Vector3} headPosition - Position of player's head
    * @returns {THREE.Vector3|false} The detected ceiling position or false
    */
-  checkHittingCeiling(headPosition) {
+  checkCeilingCollision(headPosition) {
     // Early return if physics not initialized
     if (!window.physics || !window.physics.bodies) {
       return false;
