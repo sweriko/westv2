@@ -34,16 +34,19 @@ export class MultiplayerManager {
       console.log(`Local player initialized with ID: ${this.localPlayerId}`);
 
       // Add all existing players (these are remote from our POV)
-      initData.players.forEach(playerData => {
-        this.addPlayer(playerData.id, playerData);
-      });
-      this.notifyPlayersUpdated();
+      if (initData.players && Array.isArray(initData.players)) {
+        initData.players.forEach(playerData => {
+          this.addPlayer(playerData.id, playerData);
+        });
+        this.notifyPlayersUpdated();
+      }
     };
 
     networkManager.onPlayerJoined = (playerData) => {
-      if (playerData.id === this.localPlayerId) return; // skip ourself
-      this.addPlayer(playerData.id, playerData);
-      this.notifyPlayersUpdated();
+      if (playerData && playerData.id !== this.localPlayerId) {
+        this.addPlayer(playerData.id, playerData);
+        this.notifyPlayersUpdated();
+      }
     };
 
     networkManager.onPlayerLeft = (playerId) => {
@@ -53,10 +56,11 @@ export class MultiplayerManager {
 
     networkManager.onPlayerUpdate = (playerId, updatedData) => {
       if (playerId === this.localPlayerId) return; // skip ourself
+      
       const playerModel = this.remotePlayers.get(playerId);
       if (playerModel) {
         playerModel.update(updatedData);
-      } else {
+      } else if (updatedData) {
         // If we don't have this model yet, create it
         this.addPlayer(playerId, updatedData);
       }
@@ -96,13 +100,13 @@ export class MultiplayerManager {
         }
         
         // Show damage indicator with proper hit zone
-        if (typeof window.showDamageIndicator === 'function') {
-          window.showDamageIndicator(damage, hitZone);
+        if (typeof showDamageIndicator === 'function') {
+          showDamageIndicator(damage, hitZone);
         }
         
         // Ensure health UI is updated
-        if (typeof window.updateHealthUI === 'function') {
-          window.updateHealthUI(window.localPlayer);
+        if (typeof updateHealthUI === 'function') {
+          updateHealthUI(window.localPlayer);
         }
       }
     };
@@ -110,7 +114,11 @@ export class MultiplayerManager {
     // Anti-cheat: Broadcast that some player was hit (server validated)
     networkManager.onPlayerHitBroadcast = (targetId, sourceId, hitPos, newHealth, hitZone) => {
       console.log(`Player ${targetId} was hit by ${sourceId} in the ${hitZone || 'body'}`);
-      const tPlayer = this.remotePlayers.get(parseInt(targetId));
+      
+      // Convert targetId to integer if it's a string
+      const playerId = typeof targetId === 'string' ? parseInt(targetId, 10) : targetId;
+      const tPlayer = this.remotePlayers.get(playerId);
+      
       if (tPlayer) {
         tPlayer.showHitFeedback();
         
@@ -198,64 +206,70 @@ export class MultiplayerManager {
       color = 0xFFFF00; // Yellow for limb shots
     }
     
-    // Create a particle system for the hit marker
-    const geometry = new THREE.BufferGeometry();
-    const vertices = [];
-    
-    // Create particles in a small sphere
-    const particleCount = 10;
-    const radius = 0.1;
-    
-    for (let i = 0; i < particleCount; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.random() * Math.PI;
-      const x = radius * Math.sin(phi) * Math.cos(theta);
-      const y = radius * Math.sin(phi) * Math.sin(theta);
-      const z = radius * Math.cos(phi);
+    try {
+      // Create a particle system for the hit marker
+      const geometry = new THREE.BufferGeometry();
+      const vertices = [];
       
-      vertices.push(x, y, z);
-    }
-    
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    
-    const material = new THREE.PointsMaterial({
-      color: color,
-      size: 0.05,
-      transparent: true,
-      opacity: 1
-    });
-    
-    const particles = new THREE.Points(geometry, material);
-    particles.position.copy(position);
-    window.scene.add(particles);
-    
-    // Animate the particles
-    const startTime = performance.now();
-    const duration = 500; // ms
-    
-    function animateParticles() {
-      const elapsed = performance.now() - startTime;
-      const progress = elapsed / duration;
+      // Create particles in a small sphere
+      const particleCount = 10;
+      const radius = 0.1;
       
-      if (progress < 1) {
-        // Expand particles
-        particles.scale.set(1 + progress * 2, 1 + progress * 2, 1 + progress * 2);
-        // Fade out
-        material.opacity = 1 - progress;
+      for (let i = 0; i < particleCount; i++) {
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.random() * Math.PI;
+        const x = radius * Math.sin(phi) * Math.cos(theta);
+        const y = radius * Math.sin(phi) * Math.sin(theta);
+        const z = radius * Math.cos(phi);
         
-        requestAnimationFrame(animateParticles);
-      } else {
-        // Clean up
-        window.scene.remove(particles);
-        geometry.dispose();
-        material.dispose();
+        vertices.push(x, y, z);
       }
+      
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      
+      const material = new THREE.PointsMaterial({
+        color: color,
+        size: 0.05,
+        transparent: true,
+        opacity: 1
+      });
+      
+      const particles = new THREE.Points(geometry, material);
+      particles.position.copy(position);
+      window.scene.add(particles);
+      
+      // Animate the particles
+      const startTime = performance.now();
+      const duration = 500; // ms
+      
+      function animateParticles() {
+        const elapsed = performance.now() - startTime;
+        const progress = elapsed / duration;
+        
+        if (progress < 1) {
+          // Expand particles
+          particles.scale.set(1 + progress * 2, 1 + progress * 2, 1 + progress * 2);
+          // Fade out
+          material.opacity = 1 - progress;
+          
+          requestAnimationFrame(animateParticles);
+        } else {
+          // Clean up
+          window.scene.remove(particles);
+          geometry.dispose();
+          material.dispose();
+        }
+      }
+      
+      requestAnimationFrame(animateParticles);
+    } catch (error) {
+      console.error("Error creating hit marker:", error);
     }
-    
-    requestAnimationFrame(animateParticles);
   }
 
   addPlayer(playerId, data) {
+    if (!playerId || !data) return;
+    
     console.log(`Adding remote player ${playerId}`);
     const model = new ThirdPersonModel(this.scene, playerId);
     model.update(data);
@@ -263,6 +277,8 @@ export class MultiplayerManager {
   }
 
   removePlayer(playerId) {
+    if (!playerId) return;
+    
     console.log(`Removing remote player ${playerId}`);
     const model = this.remotePlayers.get(playerId);
     if (model) {
@@ -272,14 +288,12 @@ export class MultiplayerManager {
   }
 
   update(deltaTime) {
-    // Animate each remote player's walk cycle and smoothly update movement
+    // Animate each remote player's movement
     for (const [playerId, remoteModel] of this.remotePlayers.entries()) {
-      if (remoteModel.isWalking) {
-        remoteModel.animateWalk(deltaTime);
-      } else {
-        remoteModel.resetWalkAnimation();
+      if (remoteModel && typeof remoteModel.animateMovement === 'function') {
+        // The animateMovement method now handles all animations internally
+        remoteModel.animateMovement(deltaTime);
       }
-      remoteModel.animateMovement(deltaTime);
     }
   }
 
