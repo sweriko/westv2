@@ -67,9 +67,7 @@ function init() {
 
     const soundManager = new SoundManager();
     // Load shot sounds
-    soundManager.loadSound("shot2", "sounds/shot2.mp3");
-    soundManager.loadSound("shot3", "sounds/shot3.mp3");
-    soundManager.loadSound("shot5", "sounds/shot5.mp3");
+    soundManager.loadSound("shot", "sounds/shot.mp3");
     soundManager.loadSound("aimclick", "sounds/aimclick.mp3");
     soundManager.loadSound("shellejection", "sounds/shellejection.mp3");
     soundManager.loadSound("reloading", "sounds/reloading.mp3");
@@ -491,7 +489,11 @@ function handleBulletImpact(bulletId, hitType, targetId, position, hitZone) {
       
       // Play headshot sound if it was a headshot
       if (hitZone === 'head' && localPlayer && localPlayer.soundManager) {
-        localPlayer.soundManager.playSound("headshotmarker", 100);
+        // For headshots, play both a spatialized and a direct sound for better feedback
+        // Direct non-spatialized sound for clear feedback
+        localPlayer.soundManager.playSound("headshotmarker", 100, 0.8);
+        // Spatial sound for immersion
+        localPlayer.soundManager.playSoundAt("headshotmarker", impactPosition, 100, 0.5, false);
       }
     }
   }
@@ -559,12 +561,18 @@ function spawnBullet(sourcePlayerId, position, direction, bulletId = null) {
     }
   }
 
-  // Sound: randomly choose one of the three shot sounds
+  // Sound: play the single shot sound
   if (localPlayer.soundManager) {
-    const shotSounds = ["shot2", "shot3", "shot5"];
-    const randomIndex = Math.floor(Math.random() * shotSounds.length);
-    const shotSound = shotSounds[randomIndex];
-    localPlayer.soundManager.playSound(shotSound);
+    if (sourcePlayerId === localPlayer.id) {
+      // Play a non-spatialized gunshot for the local player to sound more immediate
+      localPlayer.soundManager.playSound("shot", 50, 1.0);
+      
+      // Also play a quieter spatialized version for better immersion
+      localPlayer.soundManager.playSoundAt("shot", position, 50, 0.5);
+    } else {
+      // For remote players, use full spatialized audio
+      localPlayer.soundManager.playSoundAt("shot", position, 50, 0.8);
+    }
   }
 
   return bullet;

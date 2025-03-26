@@ -1,44 +1,160 @@
 export class SoundManager {
   constructor() {
-    // For non-positional playback
-    this.sounds = {};
-    // For positional playback using Web Audio API
-    this.buffers = {};
+    // Initialize Web Audio API context
     this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
     
-    // For footstep optimization - preload audio nodes for footsteps
-    this.footstepSources = {
-      left: [],
-      right: []
+    // Sound buffers and pools
+    this.buffers = {};
+    this.soundPools = {};
+    this.soundCategories = {
+      'weapon': { maxInstances: 3, volume: 1.0 },  // Limit weapon sounds like gunshots
+      'impact': { maxInstances: 5, volume: 0.8 },  // Hit sounds
+      'footstep': { maxInstances: 6, volume: 0.7 }, // Footstep sounds
+      'ui': { maxInstances: 3, volume: 0.6 },      // UI sounds
+      'ambient': { maxInstances: 5, volume: 0.5 }, // Background sounds
+      'voice': { maxInstances: 2, volume: 1.0 }    // Voice sounds
     };
-    this.footstepPoolSize = 3; // Number of audio nodes to cycle through
-    this.currentFootstepIndex = 0;
+    
+    // Default category mapping for common sounds
+    this.soundCategoryMap = {
+      'shot': 'weapon',
+      'aimclick': 'ui',
+      'shellejection': 'weapon',
+      'reloading': 'weapon',
+      'bellstart': 'ui',
+      'woodimpact': 'impact',
+      'fleshimpact': 'impact',
+      'leftstep': 'footstep',
+      'rightstep': 'footstep',
+      'jump': 'footstep',
+      'headshotmarker': 'ui'
+    };
+    
+    // Main mixer channels
+    this.masterGain = this.audioContext.createGain();
+    
+    // Create audio processing for better sound quality
+    this.setupAudioProcessing();
+    
+    this.categoryGains = {};
+    for (const category in this.soundCategories) {
+      this.categoryGains[category] = this.audioContext.createGain();
+      this.categoryGains[category].gain.value = this.soundCategories[category].volume;
+      this.categoryGains[category].connect(this.masterGain);
+    }
     
     // For sound cooldowns (prevent sound spam)
     this.soundCooldowns = {};
+    
+    // Track currently playing sounds by category
+    this.activeSounds = {};
+    for (const category in this.soundCategories) {
+      this.activeSounds[category] = [];
+    }
+    
+    // Set initial master volume
+    this.setMasterVolume(0.8);
+  }
+  
+  /**
+   * Sets up audio processing chain for better sound
+   */
+  setupAudioProcessing() {
+    // Create a compressor to prevent audio clipping and make overall sound fuller
+    this.compressor = this.audioContext.createDynamicsCompressor();
+    this.compressor.threshold.value = -24;    // Start compressing at -24dB
+    this.compressor.knee.value = 10;          // Smooth knee for more natural sound
+    this.compressor.ratio.value = 4;          // 4:1 compression ratio
+    this.compressor.attack.value = 0.005;     // Fast attack (5ms)
+    this.compressor.release.value = 0.1;      // Medium release (100ms)
+    
+    // Optional: Add a subtle reverb for weapon sounds
+    if (this.audioContext.createConvolver) {
+      try {
+        // Setup convolver for reverb
+        this.convolver = this.audioContext.createConvolver();
+        
+        // Create a simple impulse response for a small reverb
+        const sampleRate = this.audioContext.sampleRate;
+        const length = Math.floor(sampleRate * 0.5); // 500ms impulse response
+        const impulseBuffer = this.audioContext.createBuffer(2, length, sampleRate);
+        
+        // Fill both channels with an exponentially decaying noise
+        for (let channel = 0; channel < 2; channel++) {
+          const impulseData = impulseBuffer.getChannelData(channel);
+          for (let i = 0; i < length; i++) {
+            // Create exponentially decaying noise
+            impulseData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 3);
+          }
+        }
+        
+        // Set the impulse response
+        this.convolver.buffer = impulseBuffer;
+        
+        // Create a send gain for the reverb
+        this.reverbSend = this.audioContext.createGain();
+        this.reverbSend.gain.value = 0.1; // Very subtle reverb
+        
+        // Connect reverb to the chain
+        this.reverbSend.connect(this.convolver);
+        this.convolver.connect(this.compressor);
+        console.log("Reverb effect initialized");
+      } catch (e) {
+        console.warn("Failed to initialize reverb", e);
+        // Fallback: No reverb
+        this.reverbSend = null;
+        this.convolver = null;
+      }
+    }
+    
+    // Connect the audio chain
+    this.masterGain.connect(this.compressor);
+    this.compressor.connect(this.audioContext.destination);
+    
+    console.log("Audio processing chain configured");
+  }
+  
+  /**
+   * Sets the master volume for all sounds
+   * @param {number} value - Volume from 0 to 1
+   */
+  setMasterVolume(value) {
+    this.masterGain.gain.value = Math.max(0, Math.min(1, value));
+  }
+  
+  /**
+   * Sets the volume for a specific sound category
+   * @param {string} category - Category name
+   * @param {number} value - Volume from 0 to 1
+   */
+  setCategoryVolume(category, value) {
+    if (this.categoryGains[category]) {
+      this.categoryGains[category].gain.value = Math.max(0, Math.min(1, value));
+    }
+  }
+  
+  /**
+   * Gets the appropriate category for a sound
+   * @param {string} name - Sound name
+   * @returns {string} Category name
+   */
+  _getSoundCategory(name) {
+    return this.soundCategoryMap[name] || 'ambient';
   }
   
   /**
    * Loads an audio file and caches it.
-   * Loads both as an HTMLAudioElement (for simple playback)
-   * and as an AudioBuffer (for positional audio).
    * @param {string} name - Sound key.
    * @param {string} url - Audio file URL.
+   * @param {string} category - Optional override for the sound category
    */
-  loadSound(name, url) {
-    try {
-      // Load using HTMLAudioElement for non-positional playback
-      const audio = new Audio();
-      audio.src = url;
-      audio.load();
-      this.sounds[name] = audio;
-      
-      console.log(`Loaded sound "${name}" as HTMLAudioElement from ${url}`);
-    } catch (error) {
-      console.error(`Error loading sound "${name}" from ${url}:`, error);
+  loadSound(name, url, category = null) {
+    // If category is provided, map this sound to that category
+    if (category && this.soundCategories[category]) {
+      this.soundCategoryMap[name] = category;
     }
     
-    // Also load using fetch for positional audio
+    // Load sound using fetch for Web Audio API
     fetch(url)
       .then(response => {
         if (!response.ok) {
@@ -51,30 +167,18 @@ export class SoundManager {
         this.buffers[name] = audioBuffer;
         console.log(`Loaded sound "${name}" as AudioBuffer from ${url}`);
         
-        // Preload footstep sources if this is a footstep sound
-        if (name === 'leftstep' || name === 'rightstep') {
-          const footType = name === 'leftstep' ? 'left' : 'right';
-          console.log(`Preloading ${footType} footstep sources`);
-          // Create a pool of audio sources for footsteps
-          for (let i = 0; i < this.footstepPoolSize; i++) {
-            this.footstepSources[footType][i] = {
-              source: null,
-              gainNode: this.audioContext.createGain(),
-              panner: this.audioContext.createPanner()
-            };
-            
-            // Set up the audio chain
-            this.footstepSources[footType][i].gainNode.connect(this.audioContext.destination);
-            this.footstepSources[footType][i].panner.connect(this.footstepSources[footType][i].gainNode);
-            
-            // Configure panner for 3D audio
-            this.footstepSources[footType][i].panner.panningModel = 'HRTF';
-            this.footstepSources[footType][i].panner.distanceModel = 'inverse';
-            this.footstepSources[footType][i].panner.refDistance = 1;
-            this.footstepSources[footType][i].panner.maxDistance = 10000;
-            this.footstepSources[footType][i].panner.rolloffFactor = 1;
-          }
-        }
+        // Initialize sound pool for this sound
+        const soundCategory = this._getSoundCategory(name);
+        const poolSize = this.soundCategories[soundCategory].maxInstances;
+        
+        // Create pool for this sound
+        this.soundPools[name] = Array(poolSize).fill().map(() => ({
+          source: null,
+          gainNode: null,
+          panner: null,
+          active: false,
+          startTime: 0
+        }));
       })
       .catch(error => {
         console.error(`Error loading sound buffer "${name}" from ${url}:`, error);
@@ -82,32 +186,187 @@ export class SoundManager {
   }
   
   /**
-   * Plays a cached sound by cloning the HTMLAudioElement.
-   * @param {string} name - Sound key.
-   * @param {number} cooldown - Optional cooldown in milliseconds to prevent rapid repetition.
-   * @param {number} volume - Optional volume multiplier (0-1)
+   * Cleanups and returns an available sound object from the pool
+   * @param {string} name - Sound name
+   * @returns {Object|null} Sound object from pool or null if none available
    */
-  playSound(name, cooldown = 0, volume = 1.0) {
-    if (this.sounds[name]) {
-      // Check cooldown if specified
-      if (cooldown > 0) {
-        const now = Date.now();
-        if (this.soundCooldowns[name] && now - this.soundCooldowns[name] < cooldown) {
-          // Still in cooldown period
-          return;
-        }
-        this.soundCooldowns[name] = now;
+  _getAvailableSoundFromPool(name) {
+    if (!this.soundPools[name]) return null;
+    
+    const now = this.audioContext.currentTime;
+    let oldestSoundIndex = -1;
+    let oldestStartTime = Infinity;
+    
+    // First try to find an inactive sound
+    for (let i = 0; i < this.soundPools[name].length; i++) {
+      const sound = this.soundPools[name][i];
+      
+      // If sound is not active, use it
+      if (!sound.active) {
+        return sound;
       }
       
-      const audioClone = this.sounds[name].cloneNode();
-      // Apply volume adjustment
-      audioClone.volume = Math.max(0, Math.min(1, volume));
+      // Keep track of the oldest sound in case we need to override it
+      if (sound.startTime < oldestStartTime) {
+        oldestStartTime = sound.startTime;
+        oldestSoundIndex = i;
+      }
+    }
+    
+    // If we get here, all sounds are active, so use the oldest one
+    if (oldestSoundIndex >= 0) {
+      const sound = this.soundPools[name][oldestSoundIndex];
       
-      audioClone.play().catch(error => {
-        console.error(`Error playing sound "${name}":`, error);
-      });
-    } else {
-      console.error(`Sound "${name}" not found in cache.`);
+      // Stop the current sound if it's playing
+      if (sound.source) {
+        try {
+          sound.source.stop();
+        } catch (e) {
+          // Ignore errors if already stopped
+        }
+      }
+      
+      return sound;
+    }
+    
+    return null;
+  }
+  
+  /**
+   * Manage active sounds for a category, stopping older sounds if needed
+   * @param {string} category - Sound category
+   * @param {Object} soundObj - Sound object from pool
+   */
+  _manageActiveSoundsForCategory(category, soundObj) {
+    const maxInstances = this.soundCategories[category].maxInstances;
+    
+    // Add this sound to the active sounds for this category
+    this.activeSounds[category].push(soundObj);
+    
+    // If we have too many active sounds in this category, stop the oldest ones
+    if (this.activeSounds[category].length > maxInstances) {
+      // Sort by start time (oldest first)
+      this.activeSounds[category].sort((a, b) => a.startTime - b.startTime);
+      
+      // Stop the oldest sounds to get back to the max
+      while (this.activeSounds[category].length > maxInstances) {
+        const oldestSound = this.activeSounds[category].shift();
+        
+        if (oldestSound && oldestSound.source) {
+          try {
+            oldestSound.source.stop();
+          } catch (e) {
+            // Ignore errors if already stopped
+          }
+          oldestSound.active = false;
+        }
+      }
+    }
+  }
+  
+  /**
+   * Plays a sound with proper resource management
+   * @param {string} name - Sound key.
+   * @param {number} cooldown - Optional cooldown in milliseconds.
+   * @param {number} volume - Optional volume multiplier.
+   * @param {boolean} loop - Whether the sound should loop
+   */
+  playSound(name, cooldown = 0, volume = 1.0, loop = false) {
+    if (!this.buffers[name]) {
+      console.error(`Sound "${name}" not found in buffers.`);
+      return;
+    }
+    
+    // Check cooldown if specified
+    if (cooldown > 0) {
+      const now = Date.now();
+      if (this.soundCooldowns[name] && now - this.soundCooldowns[name] < cooldown) {
+        // Still in cooldown period
+        return;
+      }
+      this.soundCooldowns[name] = now;
+    }
+    
+    // Get sound category
+    const category = this._getSoundCategory(name);
+    
+    // Get an available sound from the pool
+    const soundObj = this._getAvailableSoundFromPool(name);
+    if (!soundObj) {
+      console.warn(`No available sound objects for ${name}`);
+      return;
+    }
+    
+    try {
+      // Clean up previous nodes if they exist
+      if (soundObj.gainNode) {
+        soundObj.gainNode.disconnect();
+      }
+      
+      // Create new audio nodes
+      soundObj.source = this.audioContext.createBufferSource();
+      soundObj.source.buffer = this.buffers[name];
+      soundObj.source.loop = loop;
+      
+      // Create gain node for individual volume control
+      soundObj.gainNode = this.audioContext.createGain();
+      soundObj.gainNode.gain.value = volume;
+      
+      // Add some sound-specific adjustments
+      if (category === 'weapon') {
+        // For weapon sounds, add a subtle highpass filter to make them sharper
+        soundObj.filter = this.audioContext.createBiquadFilter();
+        soundObj.filter.type = 'highpass';
+        soundObj.filter.frequency.value = 80; // Cut very low frequencies
+        
+        // Connect source -> filter -> gain -> category
+        soundObj.source.connect(soundObj.filter);
+        soundObj.filter.connect(soundObj.gainNode);
+        
+        // If reverb is available, send a portion of the sound to reverb
+        if (this.reverbSend && this.convolver) {
+          // Create a gain node for reverb send amount
+          soundObj.reverbAmount = this.audioContext.createGain();
+          soundObj.reverbAmount.gain.value = 0.15; // 15% reverb
+          
+          // Send from filter to reverb
+          soundObj.filter.connect(soundObj.reverbAmount);
+          soundObj.reverbAmount.connect(this.reverbSend);
+        }
+      } else {
+        // Normal connection for other sounds
+        soundObj.source.connect(soundObj.gainNode);
+      }
+      
+      // Connect to category gain
+      soundObj.gainNode.connect(this.categoryGains[category]);
+      
+      // Mark as active and track start time
+      soundObj.active = true;
+      soundObj.startTime = this.audioContext.currentTime;
+      
+      // Start playing
+      soundObj.source.start(0);
+      
+      // When the sound ends, mark it as inactive
+      soundObj.source.onended = () => {
+        soundObj.active = false;
+        // Remove from active sounds list
+        const index = this.activeSounds[category].indexOf(soundObj);
+        if (index !== -1) {
+          this.activeSounds[category].splice(index, 1);
+        }
+      };
+      
+      // Manage active sounds for this category
+      this._manageActiveSoundsForCategory(category, soundObj);
+      
+      // Return the sound object for reference
+      return soundObj;
+    } catch (error) {
+      console.error(`Error playing sound "${name}":`, error);
+      soundObj.active = false;
+      return null;
     }
   }
   
@@ -117,8 +376,11 @@ export class SoundManager {
    * @param {THREE.Vector3} position - 3D position for the sound.
    * @param {number} cooldown - Optional cooldown in milliseconds.
    * @param {number} volume - Optional volume multiplier.
+   * @param {boolean} loop - Whether the sound should loop
+   * @param {boolean} spatialize - Whether to apply 3D audio positioning (default: true)
+   * @returns {Object} - Sound object for reference
    */
-  playSoundAt(name, position, cooldown = 0, volume = 1.0) {
+  playSoundAt(name, position, cooldown = 0, volume = 1.0, loop = false, spatialize = true) {
     if (!this.buffers[name]) {
       console.error(`Positional sound "${name}" not found in buffers.`);
       return;
@@ -134,97 +396,234 @@ export class SoundManager {
       this.soundCooldowns[name] = now;
     }
     
-    try {
-      const source = this.audioContext.createBufferSource();
-      source.buffer = this.buffers[name];
-      
-      const panner = this.audioContext.createPanner();
-      panner.panningModel = 'HRTF';
-      panner.distanceModel = 'inverse';
-      panner.refDistance = 1;
-      panner.maxDistance = 10000;
-      panner.rolloffFactor = 1;
-      panner.coneInnerAngle = 360;
-      panner.coneOuterAngle = 0;
-      panner.coneOuterGain = 0;
-      panner.setPosition(position.x, position.y, position.z);
-      
-      // Add volume control gain node
-      const gainNode = this.audioContext.createGain();
-      gainNode.gain.value = volume;
-      
-      source.connect(panner);
-      panner.connect(gainNode);
-      gainNode.connect(this.audioContext.destination);
-      source.start(0);
-    } catch (error) {
-      console.error(`Error playing positional sound "${name}":`, error);
-    }
-  }
-  
-  /**
-   * Efficiently plays footstep sounds by reusing audio nodes.
-   * Optimized for frequent calls during walking.
-   * @param {string} foot - 'left' or 'right' to determine which sound to play.
-   * @param {THREE.Vector3} position - 3D position for the sound.
-   * @param {number} volume - Volume multiplier based on movement speed.
-   */
-  playFootstep(foot, position, volume = 1.0) {
-    const footType = foot === 'left' ? 'left' : 'right';
-    const soundName = foot === 'left' ? 'leftstep' : 'rightstep';
+    // Get sound category
+    const category = this._getSoundCategory(name);
     
-    if (!this.buffers[soundName]) {
-      console.error(`Footstep sound "${soundName}" not found in buffers.`);
+    // Get an available sound from the pool
+    const soundObj = this._getAvailableSoundFromPool(name);
+    if (!soundObj) {
+      console.warn(`No available sound objects for ${name}`);
       return;
     }
     
     try {
-      // Get the next footstep source from the pool
-      const sourceObj = this.footstepSources[footType][this.currentFootstepIndex];
-      this.currentFootstepIndex = (this.currentFootstepIndex + 1) % this.footstepPoolSize;
+      // Clean up previous nodes if they exist
+      if (soundObj.gainNode) {
+        soundObj.gainNode.disconnect();
+      }
+      if (soundObj.panner) {
+        soundObj.panner.disconnect();
+      }
       
-      // If there's an existing source playing, stop it
-      if (sourceObj.source !== null) {
-        try {
-          sourceObj.source.stop();
-        } catch (e) {
-          // Ignore errors if the source was already stopped
+      // Create new audio nodes
+      soundObj.source = this.audioContext.createBufferSource();
+      soundObj.source.buffer = this.buffers[name];
+      soundObj.source.loop = loop;
+      
+      // Create gain node for individual volume control
+      soundObj.gainNode = this.audioContext.createGain();
+      soundObj.gainNode.gain.value = volume;
+      
+      // For spatialized audio, create and configure a panner node
+      if (spatialize) {
+        // Create 3D panner node with improved settings
+        soundObj.panner = this.audioContext.createPanner();
+        soundObj.panner.panningModel = 'HRTF';
+        soundObj.panner.distanceModel = 'inverse';
+        
+        // Adjust reference distance based on sound type for better perception
+        if (category === 'weapon') {
+          // For weapon sounds, add a subtle highpass filter to make them sharper
+          soundObj.filter = this.audioContext.createBiquadFilter();
+          soundObj.filter.type = 'highpass';
+          soundObj.filter.frequency.value = 80; // Cut very low frequencies
+          
+          // Gunshots should sound closer and louder
+          soundObj.panner.refDistance = 2;
+          soundObj.panner.maxDistance = 10000;
+          soundObj.panner.rolloffFactor = 0.8; // Reduced rolloff for weapons
+          
+          // Connect source -> filter -> panner -> gain
+          soundObj.source.connect(soundObj.filter);
+          soundObj.filter.connect(soundObj.panner);
+          
+          // If reverb is available, send a portion of the sound to reverb
+          if (this.reverbSend && this.convolver) {
+            // Create a gain node for reverb send amount
+            soundObj.reverbAmount = this.audioContext.createGain();
+            soundObj.reverbAmount.gain.value = 0.15; // 15% reverb
+            
+            // Send from filter to reverb
+            soundObj.filter.connect(soundObj.reverbAmount);
+            soundObj.reverbAmount.connect(this.reverbSend);
+          }
+        } else if (category === 'impact') {
+          // Impact sounds should be distinct
+          soundObj.panner.refDistance = 1.5;
+          soundObj.panner.maxDistance = 5000;
+          soundObj.panner.rolloffFactor = 1;
+          
+          // Connect source -> panner
+          soundObj.source.connect(soundObj.panner);
+        } else {
+          // Default settings for other sounds
+          soundObj.panner.refDistance = 1;
+          soundObj.panner.maxDistance = 10000;
+          soundObj.panner.rolloffFactor = 1;
+          
+          // Connect source -> panner
+          soundObj.source.connect(soundObj.panner);
+        }
+        
+        // Omnidirectional cone settings
+        soundObj.panner.coneInnerAngle = 360;
+        soundObj.panner.coneOuterAngle = 0;
+        soundObj.panner.coneOuterGain = 0;
+        soundObj.panner.setPosition(position.x, position.y, position.z);
+        
+        // Connect panner -> gain
+        soundObj.panner.connect(soundObj.gainNode);
+      } else {
+        // Add similar processing for non-spatialized sounds
+        if (category === 'weapon') {
+          // For weapon sounds, add a subtle highpass filter
+          soundObj.filter = this.audioContext.createBiquadFilter();
+          soundObj.filter.type = 'highpass';
+          soundObj.filter.frequency.value = 80;
+          
+          // Connect source -> filter -> gain
+          soundObj.source.connect(soundObj.filter);
+          soundObj.filter.connect(soundObj.gainNode);
+          
+          // If reverb is available, send a portion of the sound to reverb
+          if (this.reverbSend && this.convolver) {
+            // Create a gain node for reverb send amount
+            soundObj.reverbAmount = this.audioContext.createGain();
+            soundObj.reverbAmount.gain.value = 0.15; // 15% reverb
+            
+            // Send from filter to reverb
+            soundObj.filter.connect(soundObj.reverbAmount);
+            soundObj.reverbAmount.connect(this.reverbSend);
+          }
+        } else {
+          // Non-spatialized audio connects directly to gain
+          soundObj.source.connect(soundObj.gainNode);
         }
       }
       
-      // Create a new source
-      sourceObj.source = this.audioContext.createBufferSource();
-      sourceObj.source.buffer = this.buffers[soundName];
+      // Final connection to category gain
+      soundObj.gainNode.connect(this.categoryGains[category]);
       
-      // Update position and volume
-      sourceObj.panner.setPosition(position.x, position.y, position.z);
-      sourceObj.gainNode.gain.value = volume;
+      // Mark as active and track start time
+      soundObj.active = true;
+      soundObj.startTime = this.audioContext.currentTime;
       
-      // Connect and play
-      sourceObj.source.connect(sourceObj.panner);
-      sourceObj.source.start(0);
+      // Start playing
+      soundObj.source.start(0);
+      
+      // When the sound ends, mark it as inactive
+      soundObj.source.onended = () => {
+        soundObj.active = false;
+        // Remove from active sounds list
+        const index = this.activeSounds[category].indexOf(soundObj);
+        if (index !== -1) {
+          this.activeSounds[category].splice(index, 1);
+        }
+      };
+      
+      // Manage active sounds for this category
+      this._manageActiveSoundsForCategory(category, soundObj);
+      
+      // Return the sound object for reference
+      return soundObj;
     } catch (error) {
-      console.error(`Error playing footstep sound "${soundName}":`, error);
+      console.error(`Error playing positional sound "${name}":`, error);
+      soundObj.active = false;
+      return null;
     }
   }
   
   /**
-   * Plays a sequence: after sound1 ends, sound2 plays.
-   * @param {string} sound1 - First sound key.
-   * @param {string} sound2 - Second sound key.
+   * Updates the position of the listener in 3D space
+   * @param {THREE.Vector3} position - Position of the listener
+   * @param {THREE.Vector3} front - Front direction vector
+   * @param {THREE.Vector3} up - Up direction vector
    */
-  playSoundSequence(sound1, sound2) {
-    if (this.sounds[sound1]) {
-      const audioClone = this.sounds[sound1].cloneNode();
-      audioClone.play().then(() => {
-        audioClone.addEventListener('ended', () => {
-          this.playSound(sound2);
-        });
-      }).catch(error => {
-        console.error(`Error playing sound "${sound1}":`, error);
-      });
-    } else {
-      console.error(`Sound "${sound1}" not found in cache.`);
+  updateListenerPosition(position, front, up) {
+    if (!position || !front || !up) return;
+    
+    try {
+      const listener = this.audioContext.listener;
+      
+      // Set position
+      if (listener.positionX) {
+        // Modern browsers with AudioListener object
+        listener.positionX.setValueAtTime(position.x, this.audioContext.currentTime);
+        listener.positionY.setValueAtTime(position.y, this.audioContext.currentTime);
+        listener.positionZ.setValueAtTime(position.z, this.audioContext.currentTime);
+        
+        // Set orientation (forward and up vectors)
+        listener.forwardX.setValueAtTime(front.x, this.audioContext.currentTime);
+        listener.forwardY.setValueAtTime(front.y, this.audioContext.currentTime);
+        listener.forwardZ.setValueAtTime(front.z, this.audioContext.currentTime);
+        listener.upX.setValueAtTime(up.x, this.audioContext.currentTime);
+        listener.upY.setValueAtTime(up.y, this.audioContext.currentTime);
+        listener.upZ.setValueAtTime(up.z, this.audioContext.currentTime);
+      } else {
+        // Older browsers with deprecated methods
+        listener.setPosition(position.x, position.y, position.z);
+        listener.setOrientation(front.x, front.y, front.z, up.x, up.y, up.z);
+      }
+    } catch (error) {
+      console.error('Error updating listener position:', error);
     }
+  }
+  
+  /**
+   * Stops all currently playing sounds in a category
+   * @param {string} category - Sound category to stop
+   */
+  stopCategorySounds(category) {
+    if (!this.activeSounds[category]) return;
+    
+    for (const sound of this.activeSounds[category]) {
+      if (sound.source) {
+        try {
+          sound.source.stop();
+        } catch (e) {
+          // Ignore errors if already stopped
+        }
+        sound.active = false;
+      }
+    }
+    
+    // Clear the active sounds array for this category
+    this.activeSounds[category] = [];
+  }
+  
+  /**
+   * Stops all currently playing sounds
+   */
+  stopAllSounds() {
+    for (const category in this.activeSounds) {
+      this.stopCategorySounds(category);
+    }
+  }
+  
+  /**
+   * Optimized method for footstep sounds
+   * @param {string} foot - 'left' or 'right'
+   * @param {THREE.Vector3} position - 3D position
+   * @param {number} volume - Volume
+   */
+  playFootstep(foot, position, volume = 1.0) {
+    const soundName = foot === 'left' ? 'leftstep' : 'rightstep';
+    
+    // Footsteps use a mix of non-spatial and spatial audio for better perception
+    // Play a direct sound at lower volume
+    this.playSound(soundName, 50, volume * 0.4);
+    
+    // And a spatial sound at the foot position
+    this.playSoundAt(soundName, position, 50, volume * 0.7);
   }
 }

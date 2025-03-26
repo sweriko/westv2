@@ -292,7 +292,6 @@ export class Player {
     
     // Footstep sounds logic based on movement
     const positionBeforeMovement = this.previousPosition.clone();
-    this.updateFootstepSounds(deltaTime, positionBeforeMovement);
     
     // Update camera bob (only if on ground)
     if (this.canJump) {
@@ -307,6 +306,26 @@ export class Player {
     if (now - this.lastNetworkUpdate > this.networkUpdateInterval) {
       this.lastNetworkUpdate = now;
       this.sendNetworkUpdate();
+    }
+
+    if (this.soundManager) {
+      // Update footstep sounds based on movement
+      this.updateFootstepSounds(deltaTime, positionBeforeMovement);
+      
+      // Update audio listener position to follow the player's camera
+      // Use precise camera position rather than group position for better audio
+      const cameraPosition = this.camera.position.clone();
+      
+      // Get forward direction vector from camera
+      const cameraDirection = new THREE.Vector3(0, 0, -1);
+      cameraDirection.applyQuaternion(this.camera.quaternion);
+      
+      // Get up vector from camera
+      const upVector = new THREE.Vector3(0, 1, 0);
+      upVector.applyQuaternion(this.camera.quaternion);
+      
+      // Update the audio listener position
+      this.soundManager.updateListenerPosition(cameraPosition, cameraDirection, upVector);
     }
   }
 

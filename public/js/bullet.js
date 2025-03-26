@@ -620,11 +620,41 @@ export class Bullet {
     if (position) {
       createImpactEffect(position, this.direction, scene, hitType);
       
-      // Play headshot sound if the server reports it was a headshot
-      if (hitType === 'player' && window.localPlayer && window.localPlayer.soundManager) {
-        // If hitZone data is available and it's a headshot
-        if (this.lastHitZone === 'head') {
-          window.localPlayer.soundManager.playSound("headshotmarker", 100);
+      // Play impact sound based on hit type at the impact position
+      if (window.localPlayer && window.localPlayer.soundManager) {
+        // Select appropriate impact sound based on hit type
+        let impactSound = "woodimpact"; // Default
+        
+        if (hitType === 'player') {
+          impactSound = "fleshimpact";
+          
+          // Play headshot sound if the server reports it was a headshot
+          if (this.lastHitZone === 'head') {
+            // Headshots should be clearly audible regardless of distance
+            if (this.isLocalBullet) {
+              // For local player's headshots, play non-spatialized sound for feedback
+              window.localPlayer.soundManager.playSound("headshotmarker", 100, 1.0);
+              // And a quieter spatial sound for everyone else
+              window.localPlayer.soundManager.playSoundAt("headshotmarker", position, 100, 0.5);
+            } else {
+              // For other players' headshots, use spatial audio
+              window.localPlayer.soundManager.playSoundAt("headshotmarker", position, 100, 0.8);
+            }
+          }
+        }
+        
+        // Determine if this is a local player's bullet impact
+        const isLocalPlayerBullet = this.isLocalBullet;
+        
+        // Play the impact sound with different settings based on source
+        if (isLocalPlayerBullet) {
+          // Local player impacts should have more immediate feedback
+          window.localPlayer.soundManager.playSound(impactSound, 50, 0.5);
+          // With a spatial component as well
+          window.localPlayer.soundManager.playSoundAt(impactSound, position, 50, 0.3);
+        } else {
+          // Remote player impacts use spatial audio only
+          window.localPlayer.soundManager.playSoundAt(impactSound, position, 50, 0.7);
         }
       }
     } else {
