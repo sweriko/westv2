@@ -9,7 +9,6 @@ import { createMuzzleFlash, createSmokeEffect, createImpactEffect, preloadMuzzle
 import { QuickDraw } from './quickDraw.js';
 import { updateAmmoUI, updateHealthUI } from './ui.js';
 import { PhysicsSystem } from './physics.js';
-import { Revolver } from './revolver.js';
 import { Viewmodel } from './viewmodel.js';
 
 // Check if device is mobile

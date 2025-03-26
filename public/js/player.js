@@ -1,4 +1,3 @@
-import { Revolver } from './revolver.js';
 import { Viewmodel } from './viewmodel.js';
 import { updateAmmoUI, updateHealthUI } from './ui.js';
 import { applyRecoil } from './effects.js';
@@ -63,19 +62,14 @@ export class Player {
     this.bobTransitionSpeed = 3; // Speed of transition to new bob intensity
     
     // Gun
-    this.revolver = new Revolver();
     this.viewmodel = new Viewmodel();
     this.holsterOffset = new THREE.Vector3(0.6, -0.5, -0.8);
     this.aimOffset = new THREE.Vector3(0.3, -0.3, -0.5);
     this.currentGunOffset = this.holsterOffset.clone();
     
     // Add both models to camera, but we'll only show the viewmodel
-    this.camera.add(this.revolver.group);
     this.camera.add(this.viewmodel.group);
     
-    // Hide the old revolver permanently
-    this.revolver.group.visible = false;
-
     // FOV transition smoothing
     this.currentFOV = this.defaultFOV;
     this.targetFOV = this.defaultFOV;
@@ -239,9 +233,6 @@ export class Player {
     // Smoothly interpolate the gun offset & FOV
     const targetOffset = this.isAiming && this.canAim ? this.aimOffset : this.holsterOffset;
     this.currentGunOffset.lerp(targetOffset, 0.1);
-    
-    // We no longer update the revolver position
-    // this.revolver.group.position.copy(this.currentGunOffset);
     
     // Update viewmodel animation - Ensure this is being called!
     if (this.viewmodel) {
