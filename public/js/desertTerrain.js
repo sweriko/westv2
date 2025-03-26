@@ -520,27 +520,40 @@ export class DesertTerrain {
     
     // Add cacti to the scene
     addCacti() {
-        // Create cactus trunk geometry
-        const trunkGeometry = new THREE.CylinderGeometry(3, 5, 50, 8);
-        trunkGeometry.translate(0, 25, 0);
-        
-        // Create material
+        // Create cactus materials
         const cactusMaterial = new THREE.MeshStandardMaterial({
             color: 0x2d5c2d,
             roughness: 0.8,
             metalness: 0.2,
         });
         
-        // Create instanced mesh 
-        const cactusCount = this.config.cactiCount;
-        const instancedCacti = new THREE.InstancedMesh(
-            trunkGeometry,
-            cactusMaterial,
-            cactusCount
-        );
-        instancedCacti.castShadow = true;
+        // Cactus segments to be instanced
+        const segmentGeometries = [
+            // Main trunk (shorter now)
+            this.createCactusTrunk(2.5, 4, 20, 8),
+            // Arm segment (horizontal part)
+            this.createCactusArm(1.8, 2.2, 8, 8),
+            // Arm tip (vertical part) 
+            this.createCactusTrunk(1.5, 1.8, 12, 8),
+        ];
         
-        // Position cacti
+        // Create instanced mesh for each geometry type
+        const cactusCount = this.config.cactiCount;
+        const instancedSegments = [];
+        
+        // Create instanced mesh for each segment type
+        for (let i = 0; i < segmentGeometries.length; i++) {
+            const instancedMesh = new THREE.InstancedMesh(
+                segmentGeometries[i],
+                cactusMaterial,
+                cactusCount * (i === 0 ? 1 : 2) // One trunk per cactus, two arms per cactus
+            );
+            instancedMesh.castShadow = true;
+            instancedMesh.receiveShadow = true;
+            instancedSegments.push(instancedMesh);
+        }
+        
+        // Helper matrices and vectors
         const matrix = new THREE.Matrix4();
         const position = new THREE.Vector3();
         const rotation = new THREE.Euler();
@@ -577,23 +590,74 @@ export class DesertTerrain {
             const duneHeight = this.getDirectionalDuneHeight(x, z);
             const y = baseHeight + duneHeight;
             
-            // Random scale
-            const cactusScale = 0.3 + Math.random() * 0.7;
+            // Random scale and rotation
+            const cactusScale = 0.3 + Math.random() * 0.5; // Slightly smaller scale range
+            const trunkRotation = Math.random() * Math.PI * 2;
             
-            // Set matrix for this instance
+            // Position and orient the trunk
             position.set(x, y, z);
-            rotation.set(0, Math.random() * Math.PI * 2, 0);
+            rotation.set(0, trunkRotation, 0);
             quaternion.setFromEuler(rotation);
             scale.set(cactusScale, cactusScale, cactusScale);
             
             matrix.compose(position, quaternion, scale);
-            instancedCacti.setMatrixAt(i, matrix);
+            instancedSegments[0].setMatrixAt(i, matrix);
+            
+            // Add arms to the cactus with varying heights and angles
+            for (let arm = 0; arm < 2; arm++) {
+                // Calculate arm position on the trunk
+                const armHeight = 5 + Math.random() * 8; // Lower arm position
+                const armAngle = arm * Math.PI + (Math.random() * 0.5 - 0.25);
+                const armLength = 4 + Math.random() * 3;
+                
+                // Horizontal arm segment
+                const armX = x + Math.cos(trunkRotation + armAngle) * 2 * cactusScale;
+                const armZ = z + Math.sin(trunkRotation + armAngle) * 2 * cactusScale;
+                const armY = y + armHeight * cactusScale;
+                
+                position.set(armX, armY, armZ);
+                rotation.set(Math.PI/2, trunkRotation + armAngle + Math.PI/2, 0);
+                quaternion.setFromEuler(rotation);
+                
+                matrix.compose(position, quaternion, scale);
+                instancedSegments[1].setMatrixAt(i * 2 + arm, matrix);
+                
+                // Vertical arm tip
+                const tipX = armX + Math.cos(trunkRotation + armAngle) * armLength * cactusScale;
+                const tipZ = armZ + Math.sin(trunkRotation + armAngle) * armLength * cactusScale;
+                const tipY = armY;
+                
+                position.set(tipX, tipY, tipZ);
+                rotation.set(0, trunkRotation, 0);
+                quaternion.setFromEuler(rotation);
+                
+                matrix.compose(position, quaternion, scale);
+                instancedSegments[2].setMatrixAt(i * 2 + arm, matrix);
+            }
         }
         
-        instancedCacti.instanceMatrix.needsUpdate = true;
-        this.scene.add(instancedCacti);
+        // Update matrices and add to scene
+        for (const instancedMesh of instancedSegments) {
+            instancedMesh.instanceMatrix.needsUpdate = true;
+            this.scene.add(instancedMesh);
+        }
         
-        return instancedCacti;
+        return instancedSegments;
+    }
+    
+    // Create a cactus trunk segment
+    createCactusTrunk(topRadius, bottomRadius, height, segments) {
+        const geometry = new THREE.CylinderGeometry(topRadius, bottomRadius, height, segments);
+        geometry.translate(0, height/2, 0);
+        return geometry;
+    }
+    
+    // Create a cactus arm segment (horizontal part)
+    createCactusArm(topRadius, bottomRadius, length, segments) {
+        const geometry = new THREE.CylinderGeometry(topRadius, bottomRadius, length, segments);
+        geometry.rotateZ(Math.PI/2);
+        geometry.translate(length/2, 0, 0);
+        return geometry;
     }
     
     // Generate the entire desert environment
