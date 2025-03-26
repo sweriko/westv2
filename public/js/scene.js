@@ -7,9 +7,7 @@ export let scene;
  */
 export function initScene() {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x87CEEB);
-  scene.fog = new THREE.Fog(0x87CEEB, 10, 100); // Reduced fog distance for smaller world
-
+  
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
@@ -21,6 +19,32 @@ export function initScene() {
     throw new Error("Game container not found in HTML.");
   }
   gameContainer.appendChild(renderer.domElement);
+
+  // Initialize with a default blue color
+  scene.background = new THREE.Color(0x336699);
+  
+  // Load the equirectangular texture and apply it directly
+  const textureLoader = new THREE.TextureLoader();
+  textureLoader.load('models/skybox.jpg', function(texture) {
+    console.log("Skybox texture loaded successfully");
+    
+    // Create a skybox mesh for better control and compatibility
+    const skyGeometry = new THREE.SphereGeometry(900, 64, 32);
+    // Needed for the texture to show on the inside of the sphere
+    skyGeometry.scale(-1, 1, 1);
+    
+    const skyMaterial = new THREE.MeshBasicMaterial({
+      map: texture,
+      fog: false
+    });
+    
+    const skyMesh = new THREE.Mesh(skyGeometry, skyMaterial);
+    scene.add(skyMesh);
+    console.log("Skybox mesh added to scene");
+  });
+  
+  // Keep fog but adjust it to work with skybox
+  scene.fog = new THREE.Fog(0x87CEEB, 150, 700);
 
   const camera = new THREE.PerspectiveCamera(
     75,
