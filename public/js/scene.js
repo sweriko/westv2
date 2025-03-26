@@ -46,10 +46,10 @@ export function initScene() {
 }
 
 /**
- * Creates a western town with a main street and buildings
+ * Creates a western town by loading the town.glb model
  */
 function createWesternTown() {
-  // Town dimensions
+  // Town dimensions (kept the same for compatibility)
   const TOWN_WIDTH = 60;  // Width of the town (X-axis)
   const TOWN_LENGTH = 100; // Length of the town (Z-axis)
   const STREET_WIDTH = 15; // Width of the main street
@@ -61,46 +61,92 @@ function createWesternTown() {
     streetWidth: STREET_WIDTH
   };
 
-  // Create the ground (smaller than the original 1000x1000)
-  const groundGeometry = new THREE.PlaneGeometry(TOWN_WIDTH, TOWN_LENGTH);
-  const groundMaterial = new THREE.MeshStandardMaterial({
-    color: 0xCD853F, // Sandy color
-    roughness: 0.8,
-    metalness: 0.2
+  // Load the town model
+  const loader = new THREE.GLTFLoader();
+  console.log("Loading town.glb model...");
+  loader.load('models/town.glb', (gltf) => {
+    // Add the entire model to the scene
+    scene.add(gltf.scene);
+    console.log("Town model added to scene");
+    
+    // Log all objects in the model
+    let objectCount = 0;
+    let colliderCount = 0;
+    
+    // Create colliders for objects prefixed with "collider"
+    const colliders = [];
+    
+    gltf.scene.traverse((node) => {
+      if (node.isMesh) {
+        objectCount++;
+        console.log(`Object in town model: ${node.name}, type: ${node.type}`);
+        
+        // Make sure all meshes cast and receive shadows
+        node.castShadow = true;
+        node.receiveShadow = true;
+        
+        // Add collision boxes for objects with "collider" prefix
+        if (node.name.toLowerCase().startsWith('collider')) {
+          colliderCount++;
+          console.log(`Creating collider for ${node.name}`);
+          
+          // Make the collider semi-transparent for easier identification in debug mode
+          if (node.material) {
+            // Clone the material to avoid affecting other objects with the same material
+            node.material = node.material.clone();
+            node.material.transparent = true;
+            node.material.opacity = 0.5;
+            node.material.color.set(0xff0000); // Make colliders red
+          }
+          
+          // Get world geometry
+          const bbox = new THREE.Box3().setFromObject(node);
+          const size = new THREE.Vector3();
+          bbox.getSize(size);
+          
+          // Create a physics body for this collider
+          if (window.physics) {
+            const position = new THREE.Vector3();
+            bbox.getCenter(position);
+            
+            const halfExtents = new CANNON.Vec3(size.x/2, size.y/2, size.z/2);
+            const shape = new CANNON.Box(halfExtents);
+            
+            const body = new CANNON.Body({
+              mass: 0, // Static body
+              position: new CANNON.Vec3(position.x, position.y, position.z),
+              shape: shape
+            });
+            
+            // Add to physics world
+            window.physics.world.addBody(body);
+            window.physics.bodies.push(body);
+            
+            // Store the node and body together for debugging
+            colliders.push({ node, body });
+            
+            // Hide collider mesh by default (will be toggled by debug mode)
+            node.visible = window.showTownColliders || false;
+          }
+        }
+      }
+    });
+    
+    // Store colliders for potential later use
+    window.townColliders = colliders;
+    
+    console.log(`Town model loaded with ${objectCount} objects, including ${colliderCount} colliders`);
+  }, 
+  // Progress callback
+  (progress) => {
+    if (progress.lengthComputable) {
+      const percentage = Math.round((progress.loaded / progress.total) * 100);
+      console.log(`Loading town model: ${percentage}%`);
+    }
+  },
+  (error) => {
+    console.error('Error loading town model:', error);
   });
-  const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-  ground.rotation.x = -Math.PI / 2;
-  ground.receiveShadow = true;
-  scene.add(ground);
-
-  // Create the main street
-  const streetGeometry = new THREE.PlaneGeometry(STREET_WIDTH, TOWN_LENGTH);
-  const streetMaterial = new THREE.MeshStandardMaterial({
-    color: 0xA0522D, // Brown street
-    roughness: 0.9,
-    metalness: 0.1
-  });
-  const street = new THREE.Mesh(streetGeometry, streetMaterial);
-  street.rotation.x = -Math.PI / 2;
-  street.position.y = 0.01; // Slightly above ground to prevent z-fighting
-  street.receiveShadow = true;
-  scene.add(street);
-
-  // Add buildings on both sides of the street
-  const buildingCount = 5; // Number of buildings on each side
-  const buildingSpacing = TOWN_LENGTH / (buildingCount + 1);
-  
-  // Left side buildings (negative X)
-  for (let i = 1; i <= buildingCount; i++) {
-    const offset = i * buildingSpacing - TOWN_LENGTH / 2 + buildingSpacing / 2;
-    createWesternBuilding(-STREET_WIDTH / 2 - 5, 0, offset);
-  }
-  
-  // Right side buildings (positive X)
-  for (let i = 1; i <= buildingCount; i++) {
-    const offset = i * buildingSpacing - TOWN_LENGTH / 2 + buildingSpacing / 2;
-    createWesternBuilding(STREET_WIDTH / 2 + 5, 0, offset);
-  }
 }
 
 /**

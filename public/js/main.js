@@ -44,9 +44,14 @@ let maxSmokeRings = 10; // Limit to prevent performance issues
 
 // Add a flag to track debug visualization mode
 window.showHitZoneDebug = false;
+window.showTownColliders = true; // Enable by default to help with debugging
 
 function init() {
   try {
+    // Initialize physics system first so it's available for the scene
+    physics = new PhysicsSystem();
+    window.physics = physics; // Make physics globally accessible
+
     const sceneSetup = initScene();
     camera = sceneSetup.camera;
     renderer = sceneSetup.renderer;
@@ -73,10 +78,6 @@ function init() {
     // Load headshot marker sound
     soundManager.loadSound("headshotmarker", "sounds/headshotmarker.mp3");
     
-    // Initialize physics system
-    physics = new PhysicsSystem();
-    window.physics = physics; // Make physics globally accessible
-
     // Preload all visual effects to prevent FPS drops on first use
     if (!window.isMobile) {
       console.log("Preloading visual effects...");
@@ -248,6 +249,23 @@ function init() {
             }, 50);
           }
         }
+      }
+    });
+
+    // Add a keyboard handler for showing town colliders (T key)
+    window.addEventListener('keydown', function(event) {
+      // Toggle town collider visualization with T key
+      if (event.code === 'KeyT') {
+        window.showTownColliders = !window.showTownColliders;
+        
+        // Show/hide collider meshes
+        if (window.townColliders) {
+          window.townColliders.forEach(({ node }) => {
+            node.visible = window.showTownColliders;
+          });
+        }
+        
+        console.log(`Town collider visualization: ${window.showTownColliders ? 'ENABLED' : 'DISABLED'}`);
       }
     });
 

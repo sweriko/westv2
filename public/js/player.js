@@ -128,10 +128,31 @@ export class Player {
    * Spawn the player at a random position along the main street
    */
   spawnPlayerRandomly() {
-    // Random position within a reasonable area
-    const spawnX = (Math.random() - 0.5) * 10; // Random X between -5 and 5
-    const spawnY = 1.6; // Eye level
-    const spawnZ = (Math.random() - 0.5) * 40; // Random Z between -20 and 20
+    // Try to find a valid spawn position with no collisions
+    let spawnX, spawnY, spawnZ;
+    let validSpawn = false;
+    let attempts = 0;
+    const maxAttempts = 20;
+    
+    while (!validSpawn && attempts < maxAttempts) {
+      // Random position within the main street
+      spawnX = (Math.random() - 0.5) * 10; // Random X between -5 and 5 (main street)
+      spawnY = 1.6; // Eye level
+      spawnZ = (Math.random() - 0.5) * 40; // Random Z between -20 and 20
+      
+      // Check if this position is valid (not colliding with anything)
+      const testPosition = new THREE.Vector3(spawnX, spawnY, spawnZ);
+      validSpawn = this.checkBoundaryCollision(testPosition);
+      attempts++;
+    }
+    
+    // If we couldn't find a valid position, use a safe fallback position
+    if (!validSpawn) {
+      console.warn(`Could not find valid spawn position after ${maxAttempts} attempts. Using fallback.`);
+      spawnX = 0;
+      spawnY = 1.6;
+      spawnZ = 0;
+    }
 
     this.group.position.set(spawnX, spawnY, spawnZ);
     
@@ -266,34 +287,6 @@ export class Player {
     // Handle head bob effect when moving - with improvements
     this.updateHeadBob(deltaTime);
 
-    // Gravity
-    this.velocity.y -= 20 * deltaTime;
-    
-    // Check if player is jumping
-    const wasOnGround = this.canJump;
-    const isJumping = this.velocity.y > 0 && !this.canJump;
-    
-    // Store the previous jumping state to detect when we first start jumping
-    const wasJumping = this.isJumping || false;
-    this.isJumping = isJumping;
-    
-    this.group.position.y += this.velocity.y * deltaTime;
-    if (this.group.position.y < 1.6) {
-      // Player landed
-      if (this.velocity.y < -3 && !wasOnGround) {
-        // Play landing sound if falling fast enough
-        if (this.soundManager) {
-          // Use regular footstep sound for landing, but play it directly for reliability
-          this.soundManager.playSound("leftstep", 0, 1.2);
-        }
-      }
-      
-      this.velocity.y = 0;
-      this.group.position.y = 1.6;
-      this.canJump = true;
-      this.isJumping = false;
-    }
-
     // Process movement
     this.move(deltaTime);
     
@@ -301,18 +294,6 @@ export class Player {
     const positionBeforeMovement = this.previousPosition.clone();
     this.updateFootstepSounds(deltaTime, positionBeforeMovement);
     
-    // Handle jump sound - only play when we first start jumping (not previously jumping)
-    if (isJumping && !wasJumping && this.soundManager) {
-      this.soundManager.playSound("jump", 300); // Play jump sound with 300ms cooldown
-    }
-
-    // Send periodic network updates
-    const now = performance.now();
-    if (now - this.lastNetworkUpdate > this.networkUpdateInterval) {
-      this.lastNetworkUpdate = now;
-      this.sendNetworkUpdate();
-    }
-
     // Update camera bob (only if on ground)
     if (this.canJump) {
       this.updateHeadBob(deltaTime);
@@ -320,6 +301,13 @@ export class Player {
     
     // Update aiming effects including crosshair
     this.updateAiming(deltaTime);
+    
+    // Send periodic network updates
+    const now = performance.now();
+    if (now - this.lastNetworkUpdate > this.networkUpdateInterval) {
+      this.lastNetworkUpdate = now;
+      this.sendNetworkUpdate();
+    }
   }
 
   /**
@@ -327,52 +315,99 @@ export class Player {
    * @param {number} deltaTime - Time elapsed since last frame
    */
   move(deltaTime) {
-    // Skip movement if force locked (used by quickdraw)
-    if (this.forceLockMovement || !this.canMove) {
-      return;
-    }
-    
-    // Movement - now with sprint capability
-    const moveSpeed = this.getMoveSpeed();
-    const forward = new THREE.Vector3();
-    this.camera.getWorldDirection(forward);
-    forward.y = 0;
-    forward.normalize();
+    if (this.forceLockMovement) return; // Complete override for duel mode
+    if (!this.canMove) return; // Movement lock (e.g. during Quick Draw)
 
-    const right = new THREE.Vector3();
-    right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
-    
-    // Calculate new position based on movement input
-    const newPosition = this.group.position.clone();
-    
-    if (this.moveForward) newPosition.add(forward.clone().multiplyScalar(moveSpeed * deltaTime));
-    if (this.moveBackward) newPosition.add(forward.clone().multiplyScalar(-moveSpeed * deltaTime));
-    if (this.moveLeft) newPosition.add(right.clone().multiplyScalar(-moveSpeed * deltaTime));
-    if (this.moveRight) newPosition.add(right.clone().multiplyScalar(moveSpeed * deltaTime));
+    if (this.moveForward) this.velocity.z = -this.getMoveSpeed();
+    else if (this.moveBackward) this.velocity.z = this.getMoveSpeed();
+    else this.velocity.z = 0;
 
-    // Check for boundary collisions before applying the new position
-    const canMove = this.checkBoundaryCollision(newPosition);
+    if (this.moveRight) this.velocity.x = this.getMoveSpeed();
+    else if (this.moveLeft) this.velocity.x = -this.getMoveSpeed();
+    else this.velocity.x = 0;
+
+    // Store previous position before movement for collision detection
+    this.previousPosition.copy(this.group.position);
+
+    // Handle gravity and jumping first
+    const wasOnGround = this.canJump;
+    const isJumping = this.velocity.y > 0 && !this.canJump;
     
-    if (canMove) {
-      this.group.position.copy(newPosition);
-    } else {
-      // If can't move to the new position, try to slide along the boundary
-      // This gives a better feeling than just stopping
-      if (this.moveForward || this.moveBackward) {
-        const slideX = this.group.position.clone();
-        slideX.x = newPosition.x;
-        if (this.checkBoundaryCollision(slideX)) {
-          this.group.position.copy(slideX);
+    // Store the previous jumping state to detect when we first start jumping
+    const wasJumping = this.isJumping || false;
+    this.isJumping = isJumping;
+    
+    // Apply gravity
+    this.velocity.y -= 20 * deltaTime;
+    
+    // Calculate new vertical position first
+    const newVerticalPos = this.group.position.clone();
+    newVerticalPos.y += this.velocity.y * deltaTime;
+    
+    // Check if player is standing on something or has hit ceiling
+    const playerFeetPos = this.group.position.clone();
+    playerFeetPos.y -= 1.5; // Position at feet
+    
+    const playerHeadPos = this.group.position.clone();
+    playerHeadPos.y += 0.3; // Position at head
+    
+    // Cast ray from player feet downward to check for ground
+    const isOnObject = this.checkStandingOnObject(playerFeetPos);
+    
+    // Cast ray from player head upward to check for ceiling
+    const hitCeiling = this.checkHittingCeiling(playerHeadPos);
+    
+    // Handle vertical movement
+    if (this.velocity.y <= 0 && (newVerticalPos.y <= 1.6 || isOnObject)) {
+      // Player landed on ground or object
+      if (this.velocity.y < -3 && !wasOnGround) {
+        // Play landing sound if falling fast enough
+        if (this.soundManager) {
+          this.soundManager.playSound("leftstep", 0, 1.2);
         }
       }
       
-      if (this.moveLeft || this.moveRight) {
-        const slideZ = this.group.position.clone();
-        slideZ.z = newPosition.z;
-        if (this.checkBoundaryCollision(slideZ)) {
-          this.group.position.copy(slideZ);
-        }
+      // Set to ground or object height
+      if (isOnObject && isOnObject.y > 1.6) {
+        this.group.position.y = isOnObject.y;
+      } else {
+        this.group.position.y = 1.6; // Regular ground level
       }
+      
+      this.velocity.y = 0;
+      this.canJump = true;
+      this.isJumping = false;
+    } else if (hitCeiling && this.velocity.y > 0) {
+      // Hit ceiling, stop upward momentum
+      this.velocity.y = 0;
+      this.group.position.y = hitCeiling.y - 0.3; // Adjust position to be just below ceiling
+    } else {
+      // In air, apply vertical motion
+      this.group.position.y = newVerticalPos.y;
+      this.canJump = false;
+    }
+    
+    // Apply horizontal movement to a test position (don't actually move yet)
+    const movement = new THREE.Vector3();
+    movement.x = this.velocity.x * deltaTime;
+    movement.z = this.velocity.z * deltaTime;
+    
+    // Rotate movement to match player's direction
+    movement.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.group.rotation.y);
+    
+    // Calculate desired new position
+    const newPosition = this.group.position.clone().add(movement);
+    
+    // Use our enhanced collision system with sliding
+    const finalPosition = this.handleCollisionSliding(newPosition);
+    
+    // Apply the horizontal position
+    this.group.position.x = finalPosition.x;
+    this.group.position.z = finalPosition.z;
+    
+    // Handle jump sound - only play when we first start jumping (not previously jumping)
+    if (isJumping && !wasJumping && this.soundManager) {
+      this.soundManager.playSound("jump", 300); // Play jump sound with 300ms cooldown
     }
   }
 
@@ -525,28 +560,167 @@ export class Player {
   }
 
   /**
-   * Checks if a player's position is within game boundaries.
-   * @param {THREE.Vector3} position - Position to check
-   * @returns {boolean} - True if the position is valid
+   * Checks for collision with the arena boundary or town objects
+   * @param {THREE.Vector3} position - The position to check
+   * @returns {boolean} - true if no collision, false if colliding
    */
   checkBoundaryCollision(position) {
-    // First check Quick Draw arena boundary
-    if (window.quickDraw) {
-      const inArena = window.quickDraw.isPointInArena(position);
-      const wasInArena = window.quickDraw.isPointInArena(this.previousPosition);
+    // First check arena boundary if player is in a quickDraw arena
+    if (this.quickDrawLobbyIndex >= 0 && window.quickDraw && window.quickDraw.physics) {
+      const physics = window.quickDraw.physics;
+      const arenaIndex = this.quickDrawLobbyIndex;
       
-      // If player is in a duel, they must stay inside
-      if (window.quickDraw.inDuel && !inArena && wasInArena) {
-        return false; // Can't leave arena during duel
+      if (!physics.isPointInSpecificArenaBoundary(position, arenaIndex)) {
+        return false; // Colliding with arena boundary
       }
+    }
+    
+    // Then check town border limits
+    const townWidth = window.townDimensions ? window.townDimensions.width : 60;
+    const townLength = window.townDimensions ? window.townDimensions.length : 100;
+    
+    if (
+      position.x < -townWidth / 2 || 
+      position.x > townWidth / 2 || 
+      position.z < -townLength / 2 || 
+      position.z > townLength / 2
+    ) {
+      return false; // Colliding with town border
+    }
+    
+    // Check collision with town objects/colliders
+    if (window.physics && window.physics.bodies) {
+      // Create a small sphere for collision detection
+      const playerRadius = 0.5; // Increased radius from 0.4 to prevent getting too close
       
-      // If player is not in a duel, they must stay outside
-      if (!window.quickDraw.inDuel && inArena && !wasInArena) {
-        return false; // Can't enter arena from outside (except via the portal)
+      // We'll check two points - one at "shoulder" height and one at "foot" height
+      // to make collisions more realistic
+      const shoulderPos = new THREE.Vector3(position.x, position.y - 0.5, position.z);
+      const footPos = new THREE.Vector3(position.x, position.y - 1.5, position.z);
+      
+      // Check each physics body that's not a player or arena boundary
+      for (const body of window.physics.bodies) {
+        // Skip if this is an arena boundary
+        if (body.arenaBoundary) continue;
+        
+        // Skip if mass > 0 (non-static body)
+        if (body.mass > 0) continue;
+        
+        // Currently we only handle box shapes
+        for (let i = 0; i < body.shapes.length; i++) {
+          const shape = body.shapes[i];
+          if (shape.type !== CANNON.Shape.types.BOX) continue;
+          
+          // Get the world position/rotation of this shape
+          const shapePos = new CANNON.Vec3();
+          const shapeQuat = new CANNON.Quaternion();
+          body.pointToWorldFrame(body.shapeOffsets[i], shapePos);
+          body.quaternion.mult(body.shapeOrientations[i], shapeQuat);
+          
+          // Convert to THREE.js objects for easier collision check
+          const boxPos = new THREE.Vector3(shapePos.x, shapePos.y, shapePos.z);
+          const boxSize = new THREE.Vector3(
+            shape.halfExtents.x * 2,
+            shape.halfExtents.y * 2,
+            shape.halfExtents.z * 2
+          );
+          
+          // Create box3 from position and size
+          const box = new THREE.Box3().setFromCenterAndSize(boxPos, boxSize);
+          
+          // Skip floor-like objects for horizontal collision (if player is above them)
+          // This helps with standing on roofs and floors
+          if (boxSize.y < 1.0 && position.y > boxPos.y + boxSize.y/2 + 0.1) {
+            // This is a thin box below the player - likely a floor, skip horizontal collision
+            continue;
+          }
+          
+          // Skip ceiling-like objects for horizontal collision (if player is below them)
+          if (boxSize.y < 1.0 && position.y < boxPos.y - boxSize.y/2 - 0.1) {
+            // This is a thin box above the player - likely a ceiling, skip horizontal collision
+            continue;
+          }
+          
+          // Check if player sphere intersects with box
+          const distShoulder = box.distanceToPoint(shoulderPos);
+          const distFoot = box.distanceToPoint(footPos);
+          
+          if (distShoulder < playerRadius || distFoot < playerRadius) {
+            return false; // Collision detected
+          }
+        }
       }
     }
     
     return true; // No collision
+  }
+  
+  /**
+   * Handles sliding along walls when colliding
+   * @param {THREE.Vector3} desiredPosition - Where player wants to move
+   * @returns {THREE.Vector3} - Adjusted position with sliding if needed
+   */
+  handleCollisionSliding(desiredPosition) {
+    // If no collision, return the desired position
+    if (this.checkBoundaryCollision(desiredPosition)) {
+      return desiredPosition;
+    }
+    
+    // We have a collision, try to slide along the obstacle
+    const currentPos = this.group.position.clone();
+    
+    // Calculate movement vector
+    const movement = desiredPosition.clone().sub(currentPos);
+    
+    // If movement is very small, just return current position to avoid getting stuck
+    if (movement.lengthSq() < 0.0001) {
+      return currentPos;
+    }
+    
+    // Scale down movement vector to find a non-colliding position
+    const scaledMovement = movement.clone();
+    let validPosition = false;
+    
+    // Try sliding along X and Z separately
+    const slideX = currentPos.clone();
+    slideX.x += movement.x;
+    
+    const slideZ = currentPos.clone();
+    slideZ.z += movement.z;
+    
+    // Check if either sliding direction is valid
+    const canSlideX = this.checkBoundaryCollision(slideX);
+    const canSlideZ = this.checkBoundaryCollision(slideZ);
+    
+    if (canSlideX) {
+      // X-axis movement is valid
+      return slideX;
+    } else if (canSlideZ) {
+      // Z-axis movement is valid
+      return slideZ;
+    }
+    
+    // If we're really stuck, check if we're penetrating a collider and try to push out
+    const escapeDist = 0.05; // Small escape distance
+    
+    // Try escaping in each cardinal direction
+    const escapeVectors = [
+      new THREE.Vector3(escapeDist, 0, 0),
+      new THREE.Vector3(-escapeDist, 0, 0),
+      new THREE.Vector3(0, 0, escapeDist),
+      new THREE.Vector3(0, 0, -escapeDist)
+    ];
+    
+    for (const escapeVec of escapeVectors) {
+      const escapePos = currentPos.clone().add(escapeVec);
+      if (this.checkBoundaryCollision(escapePos)) {
+        console.log("Rescued player from being stuck");
+        return escapePos;
+      }
+    }
+    
+    // If all else fails, return current position
+    return currentPos;
   }
 
   /**
@@ -866,6 +1040,154 @@ export class Player {
           crosshair.classList.add('expanded');
         }, 250); // Match animation duration
       }
+    }
+  }
+
+  /**
+   * Checks if player is standing on an object
+   * @param {THREE.Vector3} feetPosition - Position of player's feet
+   * @returns {THREE.Vector3|false} The detected ground position or false
+   */
+  checkStandingOnObject(feetPosition) {
+    // Early return if physics not initialized
+    if (!window.physics || !window.physics.bodies) {
+      return false;
+    }
+    
+    // Create a ray starting slightly above feet and going down
+    const rayStart = feetPosition.clone();
+    rayStart.y += 0.2; // Start a bit above to ensure we detect even when slightly penetrating
+    
+    const rayLength = 0.4; // Detection distance
+    
+    // Check each physics body for ground
+    for (const body of window.physics.bodies) {
+      // Skip if this is an arena boundary
+      if (body.arenaBoundary) continue;
+      
+      // Skip if mass > 0 (non-static body)
+      if (body.mass > 0) continue;
+      
+      // Currently we only handle box shapes
+      for (let i = 0; i < body.shapes.length; i++) {
+        const shape = body.shapes[i];
+        if (shape.type !== CANNON.Shape.types.BOX) continue;
+        
+        // Get the world position/rotation of this shape
+        const shapePos = new CANNON.Vec3();
+        const shapeQuat = new CANNON.Quaternion();
+        body.pointToWorldFrame(body.shapeOffsets[i], shapePos);
+        body.quaternion.mult(body.shapeOrientations[i], shapeQuat);
+        
+        // Convert to THREE.js objects
+        const boxPos = new THREE.Vector3(shapePos.x, shapePos.y, shapePos.z);
+        const boxSize = new THREE.Vector3(
+          shape.halfExtents.x * 2,
+          shape.halfExtents.y * 2,
+          shape.halfExtents.z * 2
+        );
+        
+        // Create box3 from position and size
+        const box = new THREE.Box3().setFromCenterAndSize(boxPos, boxSize);
+        
+        // Check if the ray intersects the box
+        if (Math.abs(rayStart.x - boxPos.x) <= boxSize.x/2 + 0.1 && 
+            Math.abs(rayStart.z - boxPos.z) <= boxSize.z/2 + 0.1) {
+          // We're within the X-Z bounds of the box, check Y
+          const topOfBox = boxPos.y + boxSize.y/2;
+          
+          // If the box top is between our ray start and end points
+          if (topOfBox <= rayStart.y && topOfBox >= rayStart.y - rayLength) {
+            // Return the position with the adjusted y-coordinate
+            return new THREE.Vector3(rayStart.x, topOfBox + 1.5, rayStart.z);
+          }
+        }
+      }
+    }
+    
+    return false;
+  }
+  
+  /**
+   * Checks if player's head is hitting a ceiling
+   * @param {THREE.Vector3} headPosition - Position of player's head
+   * @returns {THREE.Vector3|false} The detected ceiling position or false
+   */
+  checkHittingCeiling(headPosition) {
+    // Early return if physics not initialized
+    if (!window.physics || !window.physics.bodies) {
+      return false;
+    }
+    
+    // Create a ray starting at head and going up
+    const rayStart = headPosition.clone();
+    const rayLength = 0.3; // Detection distance
+    
+    // Check each physics body for ceiling
+    for (const body of window.physics.bodies) {
+      // Skip if this is an arena boundary
+      if (body.arenaBoundary) continue;
+      
+      // Skip if mass > 0 (non-static body)
+      if (body.mass > 0) continue;
+      
+      // Currently we only handle box shapes
+      for (let i = 0; i < body.shapes.length; i++) {
+        const shape = body.shapes[i];
+        if (shape.type !== CANNON.Shape.types.BOX) continue;
+        
+        // Get the world position/rotation of this shape
+        const shapePos = new CANNON.Vec3();
+        const shapeQuat = new CANNON.Quaternion();
+        body.pointToWorldFrame(body.shapeOffsets[i], shapePos);
+        body.quaternion.mult(body.shapeOrientations[i], shapeQuat);
+        
+        // Convert to THREE.js objects
+        const boxPos = new THREE.Vector3(shapePos.x, shapePos.y, shapePos.z);
+        const boxSize = new THREE.Vector3(
+          shape.halfExtents.x * 2,
+          shape.halfExtents.y * 2,
+          shape.halfExtents.z * 2
+        );
+        
+        // Create box3 from position and size
+        const box = new THREE.Box3().setFromCenterAndSize(boxPos, boxSize);
+        
+        // Check if the ray intersects the box
+        if (Math.abs(rayStart.x - boxPos.x) <= boxSize.x/2 + 0.1 && 
+            Math.abs(rayStart.z - boxPos.z) <= boxSize.z/2 + 0.1) {
+          // We're within the X-Z bounds of the box, check Y
+          const bottomOfBox = boxPos.y - boxSize.y/2;
+          
+          // If the box bottom is between our ray start and end points
+          if (bottomOfBox >= rayStart.y && bottomOfBox <= rayStart.y + rayLength) {
+            // Return the position with the adjusted y-coordinate
+            return new THREE.Vector3(rayStart.x, bottomOfBox, rayStart.z);
+          }
+        }
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * Make the player jump.
+   */
+  jump() {
+    if (this.canJump && !this.forceLockMovement && this.canMove) {
+      this.velocity.y = this.isSprinting ? 8 * this.sprintJumpBoost : 8;
+      this.canJump = false;
+      this.isJumping = true;
+      
+      // Play jump sound with delay to match animation timing
+      if (this.soundManager) {
+        // Play jump sound with cooldown
+        this.soundManager.playSound("jump", 50);
+      }
+      
+      // Log for debugging
+      console.log("Player jumped", this.velocity.y);
     }
   }
 }
