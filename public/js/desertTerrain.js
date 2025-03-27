@@ -121,6 +121,20 @@ export class DesertTerrain {
                 new THREE.Color(0xc19e65), // Darker/shadow areas
                 new THREE.Color(0xf7e0b5)  // Highlight areas
             ],
+            distanceBlur: {
+                enabled: true,
+                startDistance: desertSize * 0.35, // Start blurring at 35% distance from center
+                endDistance: desertSize * 0.5,    // Maximum blur at edge
+                skyboxColor: new THREE.Color(0xaad6f5), // Light blue to match skybox horizon
+                atmosphericHaze: true,            // Enable atmospheric haze on dunes
+                hazeStartDistance: desertSize * 0.15, // Start atmospheric effect closer
+                hazeFactor: 0.6                  // Strength of the atmospheric effect
+            },
+            dunes: {
+                smoothing: true,          // Enable dune edge smoothing
+                smoothingFactor: 0.7,     // How much to smooth dune edges (0-1)
+                ridgeSharpness: 0.4       // Reduced ridge sharpness (0-1)
+            },
             townBuffer: townSize * 1.2 // Buffer distance around town where terrain is flat
         };
         
@@ -159,14 +173,27 @@ export class DesertTerrain {
             rotZ * this.config.noiseScale.secondaryDunes
         ) * this.config.heightScale.secondaryDunes;
         
-        // Add ridge details
+        // Add ridge details with reduced sharpness
         const ridges = this.ridgeNoise.noise(
             rotX * this.config.noiseScale.ridges,
             rotZ * this.config.noiseScale.ridges
         );
         
-        // Create sharper ridges with absolute value transform
-        const ridgeHeight = (Math.abs(ridges * 2 - 1)) * this.config.heightScale.ridges;
+        // Create smoother ridges if smoothing is enabled
+        let ridgeHeight;
+        if (this.config.dunes.smoothing) {
+            // Use a smoother curve for ridge calculation
+            const smoothedRidge = (Math.abs(ridges * 2 - 1));
+            // Apply smoothing factor
+            const smoothingPower = 1.0 + this.config.dunes.smoothingFactor * 2.0;
+            ridgeHeight = Math.pow(smoothedRidge, smoothingPower) * this.config.heightScale.ridges;
+            
+            // Further reduce sharp edges by applying a gentler curve
+            ridgeHeight *= this.config.dunes.ridgeSharpness;
+        } else {
+            // Original ridge calculation
+            ridgeHeight = (Math.abs(ridges * 2 - 1)) * this.config.heightScale.ridges;
+        }
         
         return duneHeight + secondaryHeight + ridgeHeight;
     }
@@ -226,6 +253,9 @@ export class DesertTerrain {
         const edgeFadeStart = this.config.size * 0.4; // Start fading at 40% from center
         const edgeFadeEnd = this.config.size * 0.5;   // Complete fade at edge
         
+        // Create buffer for vertex height adjustments (for sand waves)
+        const heightAtEdge = this.config.size * 0.03;  // Raise edges slightly to blend with sky better
+        
         // Apply noise to create terrain
         for (let i = 0; i < vertices.length; i += 3) {
             const x = vertices[i];
@@ -240,8 +270,20 @@ export class DesertTerrain {
             // Base terrain
             let height = this.baseNoise.noise(x * this.config.noiseScale.base, z * this.config.noiseScale.base) * this.config.heightScale.base;
             
-            // Add directional dunes
-            const duneHeight = this.getDirectionalDuneHeight(x, z);
+            // Add directional dunes with smoothing
+            let duneHeight = this.getDirectionalDuneHeight(x, z);
+            
+            // Smooth transitions between dunes for more natural silhouettes
+            if (this.config.dunes.smoothing) {
+                // Apply additional smoothing to dune transitions
+                const smoothingNoise = this.baseNoise.noise(
+                    x * this.config.noiseScale.dunes * 2,
+                    z * this.config.noiseScale.dunes * 2
+                );
+                
+                // Use noise to slightly adjust dune height in a natural way
+                duneHeight *= (0.85 + smoothingNoise * 0.3);
+            }
             
             // Apply town blend factor to terrain height
             height += duneHeight * townBlend;
@@ -350,6 +392,44 @@ export class DesertTerrain {
             colors[colorIdx] = finalColor.r;
             colors[colorIdx + 1] = finalColor.g;
             colors[colorIdx + 2] = finalColor.b;
+            
+            // Apply atmospheric haze effect to dune edges and higher areas
+            if (this.config.distanceBlur.atmosphericHaze && distFromCenter > this.config.distanceBlur.hazeStartDistance) {
+                // Calculate haze factor based on distance and height
+                const distanceFactor = Math.min(1.0, (distFromCenter - this.config.distanceBlur.hazeStartDistance) / 
+                                   (this.config.distanceBlur.endDistance - this.config.distanceBlur.hazeStartDistance));
+                
+                // More haze on higher terrain (silhouettes against sky)
+                const heightFactor = Math.min(1.0, height / (this.config.heightScale.dunes * 0.5));
+                
+                // Combine factors with configurable intensity
+                const hazeFactor = distanceFactor * heightFactor * this.config.distanceBlur.hazeFactor;
+                
+                // Apply more intense sky color blending to higher dunes
+                const skyColorBlend = this.config.distanceBlur.skyboxColor.clone();
+                
+                // Apply haze color blend
+                colors[colorIdx] = finalColor.r * (1 - hazeFactor) + skyColorBlend.r * hazeFactor;
+                colors[colorIdx + 1] = finalColor.g * (1 - hazeFactor) + skyColorBlend.g * hazeFactor;
+                colors[colorIdx + 2] = finalColor.b * (1 - hazeFactor) + skyColorBlend.b * hazeFactor;
+            }
+            
+            // Apply distance blur/fog effect by blending with skybox color at edges
+            if (this.config.distanceBlur.enabled && distFromCenter > this.config.distanceBlur.startDistance) {
+                const blurFactor = Math.min(1.0, (distFromCenter - this.config.distanceBlur.startDistance) / 
+                                       (this.config.distanceBlur.endDistance - this.config.distanceBlur.startDistance));
+                
+                // Apply stronger color blend for more dramatic effect
+                colors[colorIdx] = colors[colorIdx] * (1 - blurFactor) + this.config.distanceBlur.skyboxColor.r * blurFactor;
+                colors[colorIdx + 1] = colors[colorIdx + 1] * (1 - blurFactor) + this.config.distanceBlur.skyboxColor.g * blurFactor;
+                colors[colorIdx + 2] = colors[colorIdx + 2] * (1 - blurFactor) + this.config.distanceBlur.skyboxColor.b * blurFactor;
+                
+                // Gradually raise the terrain at edges to create a smooth blend with sky
+                if (distFromCenter > this.config.distanceBlur.startDistance) {
+                    const heightBlendFactor = Math.pow(blurFactor, 2.0); // Stronger curve for height adjustment
+                    vertices[i + 1] += heightAtEdge * heightBlendFactor;
+                }
+            }
         }
         
         // Add colors to geometry
@@ -367,8 +447,9 @@ export class DesertTerrain {
         });
         
         // Ensure no environment reflections
-        // Ensure the material doesn't react to skybox
         sandMaterial.envMap = null;
+        
+        // No custom shader modifications - rely on the built-in fog system and vertex colors
         
         // Create terrain mesh
         this.terrainMesh = new THREE.Mesh(geometry, sandMaterial);
