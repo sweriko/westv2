@@ -325,7 +325,6 @@ export function createSmokeEffect(position, direction, scene, isPreloading = fal
  * The particle velocities have been reduced so that they stay near the impact point.
  *
  * Additionally, this function now plays an impact sound:
- * - If hitType is 'ground', "woodimpact.mp3" is played.
  * - If hitType is 'player', "fleshimpact.mp3" is played at the impact position.
  *
  * @param {THREE.Vector3} position - Impact position.
@@ -334,15 +333,18 @@ export function createSmokeEffect(position, direction, scene, isPreloading = fal
  * @param {string} hitType - Type of impact: 'player', 'npc', or 'ground'.
  */
 export function createImpactEffect(position, direction, scene, hitType) {
+  // Skip ground impact effects completely
+  if (hitType === 'ground') {
+    return;
+  }
+
   const effectGroup = new THREE.Group();
   effectGroup.position.copy(position);
   scene.add(effectGroup);
   
   // Play impact sound based on hit type using positional audio
   if (window.localPlayer && window.localPlayer.soundManager) {
-    if (hitType === 'ground') {
-      window.localPlayer.soundManager.playSoundAt("woodimpact", position);
-    } else if (hitType === 'player') {
+    if (hitType === 'player') {
       // Calculate distance to local player to avoid playing impact on own body
       const localPlayerPos = window.localPlayer.group.position;
       const distToLocalPlayer = Math.sqrt(
@@ -357,8 +359,8 @@ export function createImpactEffect(position, direction, scene, hitType) {
     }
   }
 
-  // Choose color: red for body impacts, brown for ground.
-  const color = (hitType === 'ground') ? 0x8B4513 : 0xFF0000;
+  // Choose color: red for body impacts
+  const color = 0xFF0000;
 
   const particleCount = 15;
   const particles = [];
@@ -392,9 +394,6 @@ export function createImpactEffect(position, direction, scene, hitType) {
       if (p.life > 0) {
         p.mesh.position.add(p.velocity);
         p.mesh.material.opacity = Math.max(1 - t, 0);
-        if (hitType === 'ground') {
-          p.velocity.y -= 0.005; // gravity effect on ground splatter
-        }
         p.life--;
       }
     }

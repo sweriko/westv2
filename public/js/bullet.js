@@ -110,28 +110,28 @@ export class Bullet {
         // Case 1: Player in duel and their bullet trying to exit
         if (playerInDuel && isLocalPlayerBullet && !bulletInArena) {
           console.log("Bullet hit arena boundary (exiting) - destroying it");
-          createImpactEffect(endPos, this.direction, scene, 'ground');
+          // Skip creating impact effect for boundary
           return { active: false, hit: { type: 'arena', position: endPos } };
         }
         
         // Case 2: Player outside trying to shoot in
         if (!playerInDuel && isLocalPlayerBullet && bulletInArena) {
           console.log("Bullet from outside entering arena - destroying it");
-          createImpactEffect(endPos, this.direction, scene, 'ground');
+          // Skip creating impact effect for boundary
           return { active: false, hit: { type: 'arena', position: endPos } };
         }
         
         // Case 3: Bullet from duel player hitting boundary from inside
         if (playerInDuel && !isLocalPlayerBullet && !bulletInArena) {
           console.log("Bullet from other duel player hitting boundary (exiting) - destroying it");
-          createImpactEffect(endPos, this.direction, scene, 'ground');
+          // Skip creating impact effect for boundary
           return { active: false, hit: { type: 'arena', position: endPos } };
         }
         
         // Case 4: Bullet from outside player hitting boundary from outside
         if (!playerInDuel && !isLocalPlayerBullet && bulletInArena) {
           console.log("Bullet from outside player hitting boundary (entering) - destroying it");
-          createImpactEffect(endPos, this.direction, scene, 'ground');
+          // Skip creating impact effect for boundary
           return { active: false, hit: { type: 'arena', position: endPos } };
         }
       }
@@ -241,7 +241,7 @@ export class Bullet {
 
     // 3) Check collision with ground
     if (this.mesh.position.y <= 0.1) {
-      createImpactEffect(endPos, this.direction, scene, 'ground');
+      // Skip creating ground impact effect
       return { active: false, hit: { type: 'ground', position: endPos } };
     }
 
@@ -616,6 +616,11 @@ export class Bullet {
    * @returns {Object} - Result object with active=false
    */
   handleServerImpact(hitType, targetId, position, scene) {
+    // Skip creating ground impact effect
+    if (hitType === 'ground' || hitType === 'arena' || hitType === 'boundary') {
+      return { active: false, hit: { type: hitType, targetId, position } };
+    }
+    
     // Create visual effect based on hit type
     if (position) {
       createImpactEffect(position, this.direction, scene, hitType);
@@ -623,7 +628,7 @@ export class Bullet {
       // Play impact sound based on hit type at the impact position
       if (window.localPlayer && window.localPlayer.soundManager) {
         // Select appropriate impact sound based on hit type
-        let impactSound = "woodimpact"; // Default
+        let impactSound = null; // No default sound for ground/other impacts
         
         if (hitType === 'player') {
           impactSound = "fleshimpact";
@@ -647,12 +652,12 @@ export class Bullet {
         const isLocalPlayerBullet = this.isLocalBullet;
         
         // Play the impact sound with different settings based on source
-        if (isLocalPlayerBullet) {
+        if (impactSound && isLocalPlayerBullet) {
           // Local player impacts should have more immediate feedback
           window.localPlayer.soundManager.playSound(impactSound, 50, 0.5);
           // With a spatial component as well
           window.localPlayer.soundManager.playSoundAt(impactSound, position, 50, 0.3);
-        } else {
+        } else if (impactSound) {
           // Remote player impacts use spatial audio only
           window.localPlayer.soundManager.playSoundAt(impactSound, position, 50, 0.7);
         }

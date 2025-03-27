@@ -1270,7 +1270,14 @@ function generateQuickDrawStreetPositions() {
   const streetMaxX = 8;
   const streetMinZ = -30;  // Keep Z bounds the same
   const streetMaxZ = 30;
-  const yPosition = 1.0;   // Standard ground level
+  
+  // CRITICAL FIX: Set correct player eye level height 
+  // The client expects player feet at y=0, with eye level at 1.6 to 2.7 units above that
+  // This was causing players to spawn half-sunk into the ground
+  const groundLevel = 0.0;  // Ground level is always at 0
+  const eyeLevel = 3.5;     // Must be high enough to ensure feet are above ground
+  
+  console.log(`[DEBUG] QuickDraw duel - Setting player eye level to ${eyeLevel} (feet at ${eyeLevel-2.72})`);
   
   // Generate a random position within the street bounds
   const midX = streetMinX + Math.random() * (streetMaxX - streetMinX);
@@ -1284,13 +1291,13 @@ function generateQuickDrawStreetPositions() {
   // Create two positions 10 meters apart along this direction
   const position1 = {
     x: midX - dirX * 5, // 5 meters in one direction from midpoint
-    y: yPosition,
+    y: eyeLevel,        // Position at eye level
     z: midZ - dirZ * 5
   };
   
   const position2 = {
     x: midX + dirX * 5, // 5 meters in the opposite direction
-    y: yPosition,
+    y: eyeLevel,        // Position at eye level
     z: midZ + dirZ * 5
   };
   
@@ -1308,28 +1315,9 @@ function generateQuickDrawStreetPositions() {
   
   // Log explicit debug information with degree conversion
   console.log(`[DEBUG] Duel positions:`);
-  console.log(`  Player1: (${position1.x.toFixed(2)}, ${position1.z.toFixed(2)}) facing ${rotation1.toFixed(4)} radians (${(rotation1 * 180 / Math.PI).toFixed(1)}°)`);
-  console.log(`  Player2: (${position2.x.toFixed(2)}, ${position2.z.toFixed(2)}) facing ${rotation2.toFixed(4)} radians (${(rotation2 * 180 / Math.PI).toFixed(1)}°)`);
+  console.log(`  Player1: (${position1.x.toFixed(2)}, ${position1.y.toFixed(2)}, ${position1.z.toFixed(2)}) facing ${rotation1.toFixed(4)} radians (${(rotation1 * 180 / Math.PI).toFixed(1)}°)`);
+  console.log(`  Player2: (${position2.x.toFixed(2)}, ${position2.y.toFixed(2)}, ${position2.z.toFixed(2)}) facing ${rotation2.toFixed(4)} radians (${(rotation2 * 180 / Math.PI).toFixed(1)}°)`);
   console.log(`  Direction vector: (${dx.toFixed(2)}, ${dz.toFixed(2)}), length: ${Math.sqrt(dx*dx + dz*dz).toFixed(2)}`);
-  
-  // Debug visualization - create boundary boxes visible to clients
-  const boxWidth = streetMaxX - streetMinX;
-  const boxLength = streetMaxZ - streetMinZ;
-  
-  // Send debug visualization data to all players for temporary rendering
-  broadcastToAll({
-    type: 'debugBoxVisualization',
-    box: {
-      x: (streetMinX + streetMaxX) / 2, // center X
-      y: yPosition,                     // ground level
-      z: (streetMinZ + streetMaxZ) / 2, // center Z
-      width: boxWidth,
-      height: 0.1,                      // thin box
-      length: boxLength
-    },
-    color: 0xFF0000,  // red color
-    duration: 30000   // 30 seconds display time
-  });
   
   return {
     position1: position1,

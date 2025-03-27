@@ -882,12 +882,19 @@ export class QuickDraw {
         
         // Teleport player to the start position
         if (message.startPosition) {
-            // First move to new position
+            // First move to new position, ensuring player feet are on ground
+            // The player's eye level is at group.position, and feet are 2.72 units below
+            const eyeLevel = message.startPosition.y;
+            
             this.localPlayer.group.position.set(
                 message.startPosition.x,
-                message.startPosition.y,
+                eyeLevel, // Use server-provided eye level directly
                 message.startPosition.z
             );
+            
+            // Debug log the player height
+            console.log(`Player position set to: (${message.startPosition.x.toFixed(2)}, ${eyeLevel.toFixed(2)}, ${message.startPosition.z.toFixed(2)})`);
+            console.log(`Feet should be at y=${(eyeLevel-2.72).toFixed(2)}`);
             
             // Set rotation to face the opponent
             if (message.startRotation !== undefined) {
