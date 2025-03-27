@@ -2,6 +2,11 @@
 export let scene;
 import { DesertTerrain } from './desertTerrain.js';
 
+// Adding skybox references for animation
+let skyMesh;
+let groundMesh;
+const SKYBOX_ROTATION_SPEED = 0.00001; // Much slower rotation speed
+
 /**
  * Initializes the Three.js scene, camera, and renderer.
  * @returns {Object} - Contains the camera and renderer.
@@ -24,25 +29,8 @@ export function initScene() {
   // Initialize with a desert sand color instead of blue
   scene.background = new THREE.Color(0xe6c288);
   
-  // Load the equirectangular texture and apply it directly
-  const textureLoader = new THREE.TextureLoader();
-  textureLoader.load('models/skybox.jpg', function(texture) {
-    console.log("Skybox texture loaded successfully");
-    
-    // Create a skybox mesh for better control and compatibility
-    const skyGeometry = new THREE.SphereGeometry(900, 64, 32);
-    // Needed for the texture to show on the inside of the sphere
-    skyGeometry.scale(-1, 1, 1);
-    
-    const skyMaterial = new THREE.MeshBasicMaterial({
-      map: texture,
-      fog: false
-    });
-    
-    const skyMesh = new THREE.Mesh(skyGeometry, skyMaterial);
-    scene.add(skyMesh);
-    console.log("Skybox mesh added to scene");
-  });
+  // Load the two skybox parts - ground and sky
+  loadTwoPartSkybox();
   
   // Change fog color to match desert colors instead of blue
   const desertFogColor = new THREE.Color(0xe6c288); // Desert sand color
@@ -75,6 +63,52 @@ export function initScene() {
   createDesertTerrain();
 
   return { camera, renderer };
+}
+
+/**
+ * Loads the two-part skybox with separate ground and animated sky
+ */
+function loadTwoPartSkybox() {
+  const textureLoader = new THREE.TextureLoader();
+  const skyboxRadius = 900;
+  
+  // Load sky part (with transparency for bottom half)
+  textureLoader.load('models/skypart.png', function(skyTexture) {
+    console.log("Sky texture loaded successfully");
+    
+    // Create sky mesh with LARGER radius (1.01x)
+    const skyGeometry = new THREE.SphereGeometry(skyboxRadius * 1.01, 64, 32);
+    skyGeometry.scale(-1, 1, 1);
+    
+    const skyMaterial = new THREE.MeshBasicMaterial({
+      map: skyTexture,
+      transparent: true,
+      fog: false
+    });
+    
+    skyMesh = new THREE.Mesh(skyGeometry, skyMaterial);
+    scene.add(skyMesh);
+    console.log("Sky part added to scene");
+  });
+  
+  // Load ground part (with transparency for top half)
+  textureLoader.load('models/groundpart.png', function(groundTexture) {
+    console.log("Ground texture loaded successfully");
+    
+    // Create ground mesh with normal radius
+    const groundGeometry = new THREE.SphereGeometry(skyboxRadius, 64, 32);
+    groundGeometry.scale(-1, 1, 1);
+    
+    const groundMaterial = new THREE.MeshBasicMaterial({
+      map: groundTexture,
+      transparent: true,
+      fog: false
+    });
+    
+    groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
+    scene.add(groundMesh);
+    console.log("Ground part added to scene");
+  });
 }
 
 /**
@@ -318,16 +352,22 @@ function createWesternBuilding(x, y, z) {
 }
 
 /**
- * Updates the FPS counter.
+ * Updates the FPS counter and handles animation
  * @param {THREE.WebGLRenderer} renderer - The renderer.
  * @param {THREE.Camera} camera - The camera.
- * @param {number} deltaTime - Time elapsed since last frame.
+ * @param {number} deltaTime - Time since last frame in seconds.
  */
 export function updateFPS(renderer, camera, deltaTime) {
+  // Rotate the sky part of the skybox
+  if (skyMesh) {
+    skyMesh.rotation.y += SKYBOX_ROTATION_SPEED * deltaTime * 1000; // Convert to milliseconds
+  }
+  
+  // Update FPS counter
   const fpsCounter = document.getElementById('fps-counter');
-  if (fpsCounter) {
-    const currentFPS = deltaTime > 0 ? Math.round(1 / deltaTime) : 0;
-    fpsCounter.textContent = `FPS: ${currentFPS}`;
+  if (fpsCounter && deltaTime > 0) {
+    const fps = Math.round(1 / deltaTime);
+    fpsCounter.textContent = `FPS: ${fps}`;
   }
 }
 
