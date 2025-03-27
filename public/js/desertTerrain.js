@@ -91,7 +91,7 @@ export class DesertTerrain {
         this.config = {
             size: desertSize, // Size based on town dimensions
             resolution: 196, // Resolution of the terrain (vertices per side)
-            cactiCount: 60, // Number of cacti to place
+            cactiCount: 120, // Number of cacti to place (increased from 60)
             noiseScale: {
                 base: 0.0003,
                 dunes: 0.0008,
@@ -100,17 +100,17 @@ export class DesertTerrain {
                 detail: 0.01,
                 flat: 0.0003,
                 // Enhanced micro-detail scales for more prominent sand ripples
-                microRipples: 0.05, // Reduced from 0.08 for larger ripples
+                microRipples: 0.04, // Adjusted for better groove definition
                 sandGrains: 0.3
             },
             heightScale: {
                 base: 15,
-                dunes: 70,
-                secondaryDunes: 30,
-                ridges: 15,
+                dunes: 40, // Reduced from 70 for lower dune heights
+                secondaryDunes: 20, // Reduced from 30
+                ridges: 10, // Reduced from 15
                 detail: 8,
                 // Increased height adjustments for more pronounced micro-detail
-                microRipples: 1.5, // Increased from 0.6 for more visible ripples
+                microRipples: 2.0, // Increased for more visible grooves
                 sandGrains: 0.3  // Slightly increased from 0.2
             },
             duneDirection: Math.PI * 0.25, // Wind direction
@@ -357,21 +357,18 @@ export class DesertTerrain {
         geometry.computeVertexNormals();
         
         // Create sand material with textures
-        const sandMaterial = new THREE.MeshStandardMaterial({
+        const sandMaterial = new THREE.MeshPhongMaterial({
             vertexColors: true,
-            roughness: 0.98, // Keep high roughness to avoid shininess
-            metalness: 0.0,  // Keep zero metalness
-            flatShading: false,
-            fog: true,
+            shininess: 0,
+            specular: new THREE.Color(0x000000),
             normalMap: normalMapTexture,
-            roughnessMap: roughnessTexture,
-            normalScale: new THREE.Vector2(1.0, 1.0), // Increased from 0.6 to enhance normal map effect
-            emissive: new THREE.Color(0x271000),
-            emissiveIntensity: 0.05,
-            envMapIntensity: 0.1, // Keep low to avoid shininess
-            bumpMap: normalMapTexture, // Add bump map using the normal map for extra detail
-            bumpScale: 0.3 // Subtle bump effect for additional texture
+            normalScale: new THREE.Vector2(1.2, 1.2),
+            fog: true
         });
+        
+        // Ensure no environment reflections
+        // Ensure the material doesn't react to skybox
+        sandMaterial.envMap = null;
         
         // Create terrain mesh
         this.terrainMesh = new THREE.Mesh(geometry, sandMaterial);
@@ -395,7 +392,7 @@ export class DesertTerrain {
     createSandNormalMap() {
         const size = 1024;
         const data = new Uint8Array(size * size * 4);
-        const normalStrength = 40; // Increased from 25 for stronger normal effect
+        const normalStrength = 40; // Increased from 30 to restore groove visibility
         
         // Generate sand ripple and grain patterns using noise
         for (let y = 0; y < size; y++) {
@@ -412,9 +409,9 @@ export class DesertTerrain {
                 
                 // Enhanced ripple pattern - more pronounced
                 const ripples = this.microRipplesNoise.noise(
-                    windAlignedX * 40, // Reduced from 80 for larger ripples
-                    windAlignedY * 15  // Reduced from 30 for more pronounced elongation
-                ) * 1.5; // Amplified ripple effect
+                    windAlignedX * 35,
+                    windAlignedY * 12
+                ) * 1.8;
                 
                 // Fine sand grain texture
                 const grains = this.sandGrainsNoise.noise(nx * 200, ny * 200) * 0.2;
@@ -422,8 +419,8 @@ export class DesertTerrain {
                 // Medium-scale variations
                 const mediumVar = this.detailNoise.noise(nx * 40, ny * 40) * 0.5;
                 
-                // Combine layers - emphasize ripples more
-                const combined = ripples * 0.8 + grains * 0.4 + mediumVar * 0.3;
+                // Combine layers - emphasize ripples more but with balanced intensity
+                const combined = ripples * 0.8 + grains * 0.3 + mediumVar * 0.2; // Adjusted weights to better show grooves
                 
                 // Convert to normal map values
                 // Calculate local derivatives for normal
@@ -473,34 +470,23 @@ export class DesertTerrain {
                 const ny = y / size;
                 
                 // Multi-layer noise for varying roughness
-                const baseRoughness = 220; // Slightly reduced from 230 to allow more variation
+                const baseRoughness = 245; // High base roughness
                 
                 // Wind direction-aligned roughness variation (simulates sand accumulation)
                 const windDirection = this.config.duneDirection;
                 const alignedX = nx * Math.cos(windDirection) + ny * Math.sin(windDirection);
                 const alignedY = -nx * Math.sin(windDirection) + ny * Math.cos(windDirection);
                 
-                // More pronounced wind ripples with stronger contrast
-                const windPattern = this.microRipplesNoise.noise(alignedX * 30, alignedY * 8) * 2.0;
+                // More pronounced wind ripples with stronger contrast for roughness variation
+                const windPattern = this.microRipplesNoise.noise(alignedX * 30, alignedY * 8);
                 
-                // Secondary smaller ripples
-                const smallRipples = this.microRipplesNoise.noise(alignedX * 60, alignedY * 12) * 0.8;
+                // Fine grain roughness detail
+                const fineGrains = this.sandGrainsNoise.noise(nx * 300, ny * 300) * 5;
                 
-                // Combine fine grain detail
-                const fineGrains = this.sandGrainsNoise.noise(nx * 300, ny * 300) * 15;
-                
-                // Medium grain detail
-                const mediumGrains = this.detailNoise.noise(nx * 50, ny * 50) * 10;
-                
-                // Make sure ripple crests have different roughness than troughs
-                // to enhance the visual appearance of the ripples
-                const windRoughness = windPattern * 20;
-                const smallRippleRoughness = smallRipples * 10;
-                
-                // Calculate final roughness value
-                // Higher value = rougher = less specular highlight
-                const roughness = Math.min(255, Math.max(180, 
-                    baseRoughness + windRoughness + smallRippleRoughness + fineGrains + mediumGrains
+                // Calculate final roughness value - higher in troughs, slightly lower on crests
+                // This variation helps with visual appearance while keeping overall roughness high
+                const roughness = Math.min(255, Math.max(230, 
+                    baseRoughness + (windPattern < 0 ? 10 : -5) + fineGrains
                 ));
                 
                 // Store the value
@@ -512,7 +498,7 @@ export class DesertTerrain {
         const texture = new THREE.DataTexture(data, size, size, THREE.RedFormat);
         texture.wrapS = THREE.RepeatWrapping;
         texture.wrapT = THREE.RepeatWrapping;
-        texture.repeat.set(20, 20); // Adjusted for better scaling with normal map
+        texture.repeat.set(20, 20);
         texture.needsUpdate = true;
         
         return texture;
