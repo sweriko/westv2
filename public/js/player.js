@@ -26,7 +26,7 @@ export class Player {
     this.spawnPlayerRandomly();
     
     this.scene.add(this.group);
-    this.camera.position.set(0, 0, 0);
+    this.camera.position.set(0, -0.7, 0);
     this.group.add(this.camera);
 
     this.id = null; // will be set by networkManager.onInit
@@ -56,7 +56,7 @@ export class Player {
     this.aimFOV = 65;
     
     // Camera effects for sprinting - with smoothing parameters
-    this.defaultCameraHeight = 0;
+    this.defaultCameraHeight = -0.7;
     this.bobPhase = 0; // Phase accumulator for bob effect
     this.bobIntensity = 0; // Current intensity of bobbing (interpolates)
     this.targetBobIntensity = 0; // Target bobbing intensity
@@ -64,8 +64,8 @@ export class Player {
     
     // Gun
     this.viewmodel = new Viewmodel();
-    this.holsterOffset = new THREE.Vector3(0.6, -0.5, -0.8);
-    this.aimOffset = new THREE.Vector3(0.3, -0.3, -0.5);
+    this.holsterOffset = new THREE.Vector3(0.6, -1.1, -0.8);
+    this.aimOffset = new THREE.Vector3(0.3, -0.9, -0.5);
     this.currentGunOffset = this.holsterOffset.clone();
     
     // Add both models to camera, but we'll only show the viewmodel
@@ -138,7 +138,7 @@ export class Player {
     while (!validSpawn && attempts < maxAttempts) {
       // Random position within the main street
       spawnX = (Math.random() - 0.5) * 10; // Random X between -5 and 5 (main street)
-      spawnY = 1.6; // Eye level
+      spawnY = 2.72; // Eye level
       spawnZ = (Math.random() - 0.5) * 40; // Random Z between -20 and 20
       
       // Check if this position is valid (not colliding with anything)
@@ -151,7 +151,7 @@ export class Player {
     if (!validSpawn) {
       console.warn(`Could not find valid spawn position after ${maxAttempts} attempts. Using fallback.`);
       spawnX = 0;
-      spawnY = 1.6;
+      spawnY = 2.72; // Consistent eye level
       spawnZ = 0;
     }
 
@@ -227,6 +227,9 @@ export class Player {
     // Store previous position before movement for collision detection
     this.previousPosition.copy(this.group.position);
     
+    // Platform stability check - prevent falling through platforms 
+    this.stabilizePlatformPosition();
+    
     // Anti-cheat: Handle server reconciliation
     if (this.isReconciling) {
       // Calculate distance to server position
@@ -285,9 +288,6 @@ export class Player {
       this.camera.updateProjectionMatrix();
     }
 
-    // Handle head bob effect when moving - with improvements
-    this.updateHeadBob(deltaTime);
-
     // Process movement
     this.move(deltaTime);
     
@@ -295,9 +295,8 @@ export class Player {
     const positionBeforeMovement = this.previousPosition.clone();
     
     // Update camera bob (only if on ground)
-    if (this.canJump) {
-      this.updateHeadBob(deltaTime);
-    }
+    // Always update the head bob regardless of whether we're on ground
+    this.updateHeadBob(deltaTime);
     
     // Update aiming effects including crosshair
     this.updateAiming(deltaTime);
@@ -350,7 +349,7 @@ export class Player {
     this.previousPosition.copy(this.group.position);
 
     // Store previous info for comparing changes
-    const wasOnGround = this.group.position.y <= 1.6 || this.isOnObject;
+    const wasOnGround = this.group.position.y <= 2.72 || this.isOnObject;
     const wasJumping = this.isJumping;
     
     // Calculate new vertical position with gravity
@@ -364,7 +363,7 @@ export class Player {
     // Check if player will land on an object (like a crate)
     const feetPos = new THREE.Vector3(
       this.group.position.x,
-      this.group.position.y - 1.6, // Adjust for player height
+      this.group.position.y - 2.72, // Adjust for player height
       this.group.position.z
     );
     const isOnObject = this.checkStandingOnObject(feetPos);
@@ -384,7 +383,7 @@ export class Player {
     const hitCeiling = this.checkCeilingCollision(headPos);
     
     // Handle vertical movement
-    if (this.velocity.y <= 0 && (newVerticalPos.y <= 1.6 + terrainHeight || isOnObject)) {
+    if (this.velocity.y <= 0 && (newVerticalPos.y <= 2.72 + terrainHeight || isOnObject)) {
       // Player landed on ground or object
       if (this.velocity.y < -3 && !wasOnGround) {
         // Play landing sound if falling fast enough
@@ -394,10 +393,10 @@ export class Player {
       }
       
       // Set to ground or object height
-      if (isOnObject && isOnObject.y > 1.6 + terrainHeight) {
+      if (isOnObject && isOnObject.y > 2.72 + terrainHeight) {
         this.group.position.y = isOnObject.y;
       } else {
-        this.group.position.y = 1.6 + terrainHeight; // Regular ground level + terrain
+        this.group.position.y = 2.72 + terrainHeight; // Regular ground level + terrain
       }
       
       this.velocity.y = 0;
@@ -423,6 +422,23 @@ export class Player {
     
     // Calculate desired new position
     const newPosition = this.group.position.clone().add(movement);
+    
+    // Auto-step detection - check if there's a small step in front of us that we can climb
+    const stepHeight = 0.9; // Increased for higher steps
+    const stepPosition = this.checkForStep(newPosition, stepHeight);
+    if (stepPosition) {
+      // Found a step we can climb - adjust our position to step up onto it
+      // Smooth the transition by interpolating current height and target height
+      const stepUpLerpFactor = 0.5; // Controls how quickly we step up
+      this.group.position.y = THREE.MathUtils.lerp(
+        this.group.position.y,
+        stepPosition.y,
+        stepUpLerpFactor
+      );
+      this.velocity.y = 0; // Reset vertical velocity
+      this.canJump = true; // Always can jump on top of a step
+      this.isJumping = false;
+    }
     
     // Use our enhanced collision system with sliding
     const finalPosition = this.handleCollisionSliding(newPosition);
@@ -510,8 +526,8 @@ export class Player {
   updateHeadBob(deltaTime) {
     // Update target bobbing intensity based on movement
     if (this.isMoving() && this.canJump) {
-      // Very subtle bobbing values
-      this.targetBobIntensity = this.isSprinting ? 0.02 : 0.01;
+      // Very subtle bobbing values for higher camera position
+      this.targetBobIntensity = this.isSprinting ? 0.022 : 0.011;
     } else {
       this.targetBobIntensity = 0;
     }
@@ -534,7 +550,7 @@ export class Player {
       // Much smaller horizontal component
       const horizontalBob = Math.cos(this.bobPhase) * this.bobIntensity * 0.3;
       
-      // Apply to camera position smoothly
+      // Apply to camera position smoothly - ensure we're using defaultCameraHeight
       this.camera.position.y = THREE.MathUtils.lerp(
         this.camera.position.y,
         this.defaultCameraHeight + verticalBob,
@@ -617,7 +633,7 @@ export class Player {
     // Check collision with town objects/colliders
     if (window.physics && window.physics.bodies) {
       // Create a small sphere for collision detection
-      const playerRadius = 0.5; // Increased radius from 0.4 to prevent getting too close
+      const playerRadius = 0.68; // Increased radius from 0.4 to prevent getting too close
       
       // We'll check two points - one at "shoulder" height and one at "foot" height
       // to make collisions more realistic
@@ -1121,15 +1137,15 @@ export class Player {
         const box = new THREE.Box3().setFromCenterAndSize(boxPos, boxSize);
         
         // Check if the ray intersects the box
-        if (Math.abs(rayStart.x - boxPos.x) <= boxSize.x/2 + 0.1 && 
-            Math.abs(rayStart.z - boxPos.z) <= boxSize.z/2 + 0.1) {
+        if (Math.abs(rayStart.x - boxPos.x) <= boxSize.x/2 + 0.5 && 
+            Math.abs(rayStart.z - boxPos.z) <= boxSize.z/2 + 0.5) {
           // We're within the X-Z bounds of the box, check Y
           const topOfBox = boxPos.y + boxSize.y/2;
           
           // If the box top is between our ray start and end points
           if (topOfBox <= rayStart.y && topOfBox >= rayStart.y - rayLength) {
             // Return the position with the adjusted y-coordinate
-            return new THREE.Vector3(rayStart.x, topOfBox + 1.5, rayStart.z);
+            return new THREE.Vector3(rayStart.x, topOfBox + 2.72, rayStart.z);
           }
         }
       }
@@ -1184,8 +1200,8 @@ export class Player {
         const box = new THREE.Box3().setFromCenterAndSize(boxPos, boxSize);
         
         // Check if the ray intersects the box
-        if (Math.abs(rayStart.x - boxPos.x) <= boxSize.x/2 + 0.1 && 
-            Math.abs(rayStart.z - boxPos.z) <= boxSize.z/2 + 0.1) {
+        if (Math.abs(rayStart.x - boxPos.x) <= boxSize.x/2 + 0.5 && 
+            Math.abs(rayStart.z - boxPos.z) <= boxSize.z/2 + 0.5) {
           // We're within the X-Z bounds of the box, check Y
           const bottomOfBox = boxPos.y - boxSize.y/2;
           
@@ -1202,9 +1218,102 @@ export class Player {
   }
 
   /**
+   * Prevents the player from falling through platforms by performing additional checks
+   */
+  stabilizePlatformPosition() {
+    // If we're on the ground or jumping, no need for stabilization
+    if (this.canJump || this.velocity.y > 0) return;
+    
+    // Cast a ray directly below the player to detect platforms we might be falling through
+    const feetPos = new THREE.Vector3(
+      this.group.position.x,
+      this.group.position.y - 2.62, // Slightly higher than feet for early detection
+      this.group.position.z
+    );
+    
+    // Check if there's an object below
+    const platformBelow = this.checkDirectlyBelow(feetPos, 1.0);
+    
+    // If we found a platform and we're falling, snap to it
+    if (platformBelow && this.velocity.y < 0) {
+      this.group.position.y = platformBelow.y;
+      this.velocity.y = -0.01; // Very small downward force
+      this.canJump = true;
+      this.isJumping = false;
+    }
+  }
+  
+  /**
+   * Checks for a platform directly below the player with a short ray
+   * @param {THREE.Vector3} position - Starting position for ray
+   * @param {number} maxDistance - Maximum distance to check below
+   * @returns {THREE.Vector3|false} Position on top of platform or false
+   */
+  checkDirectlyBelow(position, maxDistance) {
+    // Early return if physics not initialized
+    if (!window.physics) return false;
+    
+    // Get all physics bodies
+    const bodies = window.physics.bodies;
+    
+    // Check each physics body
+    for (const body of bodies) {
+      // Skip irrelevant bodies
+      if (body.isGround || body.arenaBoundary || body.mass > 0) continue;
+      
+      // Check each shape
+      for (let i = 0; i < body.shapes.length; i++) {
+        const shape = body.shapes[i];
+        if (shape.type !== CANNON.Shape.types.BOX) continue;
+        
+        // Get shape properties
+        const shapePos = new CANNON.Vec3();
+        body.pointToWorldFrame(body.shapeOffsets[i], shapePos);
+        
+        // Convert to THREE.js
+        const boxPos = new THREE.Vector3(shapePos.x, shapePos.y, shapePos.z);
+        const boxSize = new THREE.Vector3(
+          shape.halfExtents.x * 2,
+          shape.halfExtents.y * 2,
+          shape.halfExtents.z * 2
+        );
+        
+        // Check if we're above the box horizontally (with margin)
+        const margin = 0.6; // Wide margin for safety
+        if (Math.abs(position.x - boxPos.x) <= boxSize.x/2 + margin && 
+            Math.abs(position.z - boxPos.z) <= boxSize.z/2 + margin) {
+          
+          // Get top of box
+          const topOfBox = boxPos.y + boxSize.y/2;
+          
+          // If we're within maxDistance above the box
+          if (position.y >= topOfBox && position.y - topOfBox <= maxDistance) {
+            return new THREE.Vector3(this.group.position.x, topOfBox + 2.72, this.group.position.z);
+          }
+        }
+      }
+    }
+    
+    return false;
+  }
+
+  /**
    * Make the player jump.
    */
   jump() {
+    // Double check for platforms first - ensures we can always jump on platforms
+    if (!this.canJump) {
+      const feetPos = new THREE.Vector3(
+        this.group.position.x,
+        this.group.position.y - 2.72,
+        this.group.position.z
+      );
+      
+      if (this.checkStandingOnObject(feetPos)) {
+        this.canJump = true;
+      }
+    }
+    
     if (this.canJump && !this.forceLockMovement && this.canMove) {
       this.velocity.y = this.isSprinting ? 8 * this.sprintJumpBoost : 8;
       this.canJump = false;
@@ -1219,5 +1328,101 @@ export class Player {
       // Log for debugging
       console.log("Player jumped", this.velocity.y);
     }
+  }
+
+  /**
+   * Checks if there's a small step or platform in front of the player that can be automatically climbed
+   * @param {THREE.Vector3} targetPosition - The desired position to move to
+   * @param {number} maxStepHeight - Maximum height difference allowed for auto-stepping
+   * @returns {THREE.Vector3|false} The adjusted position with the correct height, or false
+   */
+  checkForStep(targetPosition, maxStepHeight) {
+    // Early return if physics not initialized
+    if (!window.physics) return false;
+    
+    // Calculate movement direction (normalized)
+    const moveDir = new THREE.Vector3()
+      .subVectors(targetPosition, this.group.position)
+      .normalize();
+    
+    // Ignore if no horizontal movement
+    if (Math.abs(moveDir.x) < 0.001 && Math.abs(moveDir.z) < 0.001) return false;
+    
+    // Cast multiple rays in the movement direction with different offsets
+    const rayOffsets = [
+      {x: 0, z: 0},            // Center of movement
+      {x: moveDir.z*0.4, z: -moveDir.x*0.4},  // Perpendicular right
+      {x: -moveDir.z*0.4, z: moveDir.x*0.4},  // Perpendicular left
+      {x: moveDir.x*0.5, z: moveDir.z*0.5},   // Forward offset
+      {x: moveDir.x*0.8, z: moveDir.z*0.8},   // Further forward
+      {x: moveDir.x*1.0, z: moveDir.z*1.0},   // Even further forward
+      {x: moveDir.x*1.2, z: moveDir.z*1.2}    // Maximum forward detection
+    ];
+    
+    // Get all physics bodies
+    const bodies = window.physics.bodies;
+    
+    let highestStep = null;
+    let highestStepY = this.group.position.y - 10; // Start very low
+    
+    // Check each ray starting point
+    for (const offset of rayOffsets) {
+      // Create ray start position with offset
+      const rayStart = new THREE.Vector3(
+        targetPosition.x + offset.x, 
+        this.group.position.y - 2.62, // Slightly above feet level
+        targetPosition.z + offset.z
+      );
+      
+      // Check each body with this ray
+      for (const body of bodies) {
+        // Skip if this is an arena boundary or moving object
+        if (body.arenaBoundary || body.mass > 0) continue;
+        
+        // Currently we only handle box shapes
+        for (let i = 0; i < body.shapes.length; i++) {
+          const shape = body.shapes[i];
+          if (shape.type !== CANNON.Shape.types.BOX) continue;
+          
+          // Get the world position/rotation of this shape
+          const shapePos = new CANNON.Vec3();
+          body.pointToWorldFrame(body.shapeOffsets[i], shapePos);
+          
+          // Convert to THREE.js objects
+          const boxPos = new THREE.Vector3(shapePos.x, shapePos.y, shapePos.z);
+          const boxSize = new THREE.Vector3(
+            shape.halfExtents.x * 2,
+            shape.halfExtents.y * 2,
+            shape.halfExtents.z * 2
+          );
+          
+          // Use much larger margin for step detection (especially for building entrances)
+          const margin = 1.0; // Increased from 0.8 for better detection
+          if (Math.abs(rayStart.x - boxPos.x) <= boxSize.x/2 + margin && 
+              Math.abs(rayStart.z - boxPos.z) <= boxSize.z/2 + margin) {
+            
+            // Get the top of the box
+            const topOfBox = boxPos.y + boxSize.y/2;
+            
+            // Check if it's a valid step height:
+            // 1. The step must be higher than our current feet position
+            // 2. But not too high to climb automatically
+            const feetY = this.group.position.y - 2.72;
+            const heightDiff = topOfBox - feetY;
+            
+            if (heightDiff > 0.05 && heightDiff <= maxStepHeight) {
+              // Keep track of the highest valid step
+              if (topOfBox > highestStepY) {
+                highestStepY = topOfBox;
+                highestStep = new THREE.Vector3(targetPosition.x, topOfBox + 2.72, targetPosition.z);
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // Return the highest step found, or false if none
+    return highestStep;
   }
 }

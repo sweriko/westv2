@@ -210,7 +210,7 @@ export class PhysicsSystem {
    * @param {number} height - Player height
    * @returns {CANNON.Body} - The created physics body
    */
-  createPlayerBody(position, radius = 0.3, height = 1.8) {
+  createPlayerBody(position, radius = 0.51, height = 3.06) {
     // Create a capsule shape (cylinder with spheres at ends)
     const playerBody = new CANNON.Body({
       mass: 70, // Player mass in kg

@@ -92,7 +92,7 @@ export class ThirdPersonModel {
     this.group = new THREE.Group();
 
     this.collisionBox = new THREE.Box3();
-    this.hitboxSize = { width: 0.6, height: 1.8, depth: 0.6 };
+    this.hitboxSize = { width: 1.02, height: 3.06, depth: 1.02 };
     
     // Hit zones for damage calculations
     this.headHitbox = new THREE.Box3();
@@ -100,9 +100,9 @@ export class ThirdPersonModel {
     this.limbsHitbox = new THREE.Box3();
     
     // Define hit zone relative sizes
-    this.headSize = { width: 0.25, height: 0.25, depth: 0.25 };
-    this.bodySize = { width: 0.5, height: 0.6, depth: 0.3 };
-    this.limbsSize = { width: 0.6, height: 1.8, depth: 0.6 }; // Full character size
+    this.headSize = { width: 0.425, height: 0.425, depth: 0.425 };
+    this.bodySize = { width: 0.85, height: 1.02, depth: 0.51 };
+    this.limbsSize = { width: 1.02, height: 3.06, depth: 1.02 }; // Full character size
 
     // Health
     this.health = 100;
@@ -137,7 +137,7 @@ export class ThirdPersonModel {
     this.minAnimationCooldown = 0.2; // Reduced from 0.5 seconds
     
     // Position adjustment to prevent sinking
-    this.groundOffset = 0.1; // Lift model slightly above ground
+    this.groundOffset = 0; // Reduced from 0.1 to make feet touch the ground
     
     // Load the player model
     this.loadPlayerModel();
@@ -160,11 +160,11 @@ export class ThirdPersonModel {
         try {
           this.playerModel = gltf.scene;
           
-          // Position at origin with ground offset to prevent sinking
-          this.playerModel.position.set(0, this.groundOffset, 0);
+          // Position at origin with no offset to make feet touch the ground
+          this.playerModel.position.set(0, 0, 0);
           
-          // Set scale - slightly reduced to ensure correct size
-          this.playerModel.scale.set(0.85, 0.85, 0.85);
+          // Set scale - increased by 70%
+          this.playerModel.scale.set(1.445, 1.445, 1.445);
           
           // Rotate model to face the right direction (might need adjustment)
           this.playerModel.rotation.y = Math.PI; // Rotate 180 degrees
@@ -557,7 +557,7 @@ export class ThirdPersonModel {
       // Position the model on the ground, with a small offset to prevent sinking
       const newPos = new THREE.Vector3(
         playerData.position.x,
-        playerData.position.y - 1.6 + this.groundOffset, // Apply eye-level correction + ground offset
+        playerData.position.y - 2.72, // Adjusted for 70% taller player model (1.6 * 1.7)
         playerData.position.z
       );
       
