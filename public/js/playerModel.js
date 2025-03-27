@@ -99,10 +99,14 @@ export class ThirdPersonModel {
     this.bodyHitbox = new THREE.Box3();
     this.limbsHitbox = new THREE.Box3();
     
-    // Define hit zone relative sizes
-    this.headSize = { width: 0.425, height: 0.425, depth: 0.425 };
-    this.bodySize = { width: 0.85, height: 1.02, depth: 0.51 };
+    // Define hit zone relative sizes - adjusted for better accuracy
+    this.headSize = { width: 0.45, height: 0.45, depth: 0.45 }; // Slightly smaller head hitbox
+    this.bodySize = { width: 0.8, height: 0.95, depth: 0.55 }; // Narrower and much shorter body
     this.limbsSize = { width: 1.02, height: 3.06, depth: 1.02 }; // Full character size
+    
+    // Vertical offsets for positioning hitboxes more accurately
+    this.headOffset = 0.45; // Further increased to move head lower
+    this.bodyOffset = 0.25; // Adjusted to prevent overlap with head
 
     // Health
     this.health = 100;
@@ -379,13 +383,14 @@ export class ThirdPersonModel {
       )
     ]);
     
-    // Update hit zones
+    // Update hit zones with exact positioning
     
-    // Head hitbox (top of the model)
+    // Head hitbox (top of the model but offset downward)
     const headHalfWidth = this.headSize.width / 2;
     const headHalfDepth = this.headSize.depth / 2;
     const headHeight = this.headSize.height;
-    const headY = this.group.position.y + this.hitboxSize.height - headHeight;
+    // Position head at the top of the model with offset
+    const headY = this.group.position.y + this.hitboxSize.height - headHeight - this.headOffset;
     
     this.headHitbox.setFromPoints([
       new THREE.Vector3(
@@ -395,7 +400,7 @@ export class ThirdPersonModel {
       ),
       new THREE.Vector3(
         this.group.position.x + headHalfWidth,
-        this.group.position.y + this.hitboxSize.height,
+        headY + headHeight,
         this.group.position.z + headHalfDepth
       )
     ]);
@@ -404,7 +409,9 @@ export class ThirdPersonModel {
     const bodyHalfWidth = this.bodySize.width / 2;
     const bodyHalfDepth = this.bodySize.depth / 2;
     const bodyHeight = this.bodySize.height;
-    const bodyBottom = this.group.position.y + this.hitboxSize.height - headHeight - bodyHeight;
+    // Adjust body position to be just below the head with offset
+    const topOfBody = headY; // Body starts where head ends
+    const bodyBottom = topOfBody - bodyHeight - this.bodyOffset; // Apply the body offset
     
     this.bodyHitbox.setFromPoints([
       new THREE.Vector3(
@@ -414,13 +421,86 @@ export class ThirdPersonModel {
       ),
       new THREE.Vector3(
         this.group.position.x + bodyHalfWidth,
-        this.group.position.y + this.hitboxSize.height - headHeight,
+        topOfBody,
         this.group.position.z + bodyHalfDepth
       )
     ]);
     
-    // Limbs hitbox (everything else - full model area)
-    this.limbsHitbox.copy(this.collisionBox);
+    // Limbs hitbox is everything not covered by head and body
+    // Create a specific limbs hitbox for arms and legs with precise sizes
+    
+    // Define precise limb dimensions
+    const legWidth = this.bodySize.width * 0.4; // Legs are narrower than body
+    const armWidth = this.bodySize.width * 0.15; // Make arms thinner
+    const armExtension = 0.35; // Extend arms further out
+    const armHeight = bodyHeight * 0.7; // Make arms taller (70% of body height)
+    
+    // Left leg hitbox
+    const leftLegHitbox = new THREE.Box3();
+    leftLegHitbox.setFromPoints([
+      new THREE.Vector3(
+        this.group.position.x - bodyHalfWidth/2 - legWidth/2,
+        this.group.position.y,
+        this.group.position.z - bodyHalfDepth
+      ),
+      new THREE.Vector3(
+        this.group.position.x - bodyHalfWidth/2 + legWidth/2,
+        bodyBottom,
+        this.group.position.z + bodyHalfDepth
+      )
+    ]);
+    
+    // Right leg hitbox
+    const rightLegHitbox = new THREE.Box3();
+    rightLegHitbox.setFromPoints([
+      new THREE.Vector3(
+        this.group.position.x + bodyHalfWidth/2 - legWidth/2,
+        this.group.position.y,
+        this.group.position.z - bodyHalfDepth
+      ),
+      new THREE.Vector3(
+        this.group.position.x + bodyHalfWidth/2 + legWidth/2,
+        bodyBottom,
+        this.group.position.z + bodyHalfDepth
+      )
+    ]);
+    
+    // Left arm hitbox - positioned to not overlap with body
+    const leftArmHitbox = new THREE.Box3();
+    leftArmHitbox.setFromPoints([
+      new THREE.Vector3(
+        this.group.position.x - bodyHalfWidth - armExtension, // Start outside body
+        bodyBottom + bodyHeight * 0.15, // Start lower (15% up)
+        this.group.position.z - bodyHalfDepth/1.5 // Narrower depth
+      ),
+      new THREE.Vector3(
+        this.group.position.x - bodyHalfWidth, // End exactly at body edge
+        bodyBottom + bodyHeight * 0.85, // End higher (85% up)
+        this.group.position.z + bodyHalfDepth/1.5 // Narrower depth
+      )
+    ]);
+    
+    // Right arm hitbox - positioned to not overlap with body
+    const rightArmHitbox = new THREE.Box3();
+    rightArmHitbox.setFromPoints([
+      new THREE.Vector3(
+        this.group.position.x + bodyHalfWidth, // Start exactly at body edge
+        bodyBottom + bodyHeight * 0.15, // Start lower
+        this.group.position.z - bodyHalfDepth/1.5 // Narrower depth
+      ),
+      new THREE.Vector3(
+        this.group.position.x + bodyHalfWidth + armExtension, // End outside body
+        bodyBottom + bodyHeight * 0.85, // End higher
+        this.group.position.z + bodyHalfDepth/1.5 // Narrower depth
+      )
+    ]);
+    
+    // Combine the leg and arm hitboxes for the limbs hitbox
+    this.limbsHitbox.makeEmpty();
+    this.limbsHitbox.union(leftLegHitbox);
+    this.limbsHitbox.union(rightLegHitbox);
+    this.limbsHitbox.union(leftArmHitbox);
+    this.limbsHitbox.union(rightArmHitbox);
   }
 
   /**
@@ -454,6 +534,127 @@ export class ThirdPersonModel {
     
     // No hit
     return null;
+  }
+
+  /**
+   * Check if a bullet hit this player model and determine which zone was hit
+   * @param {THREE.Vector3} bulletPos - Position of the bullet
+   * @return {object} - Hit result with zone and damage information
+   */
+  checkBulletHit(bulletPos) {
+    // Add a small tolerance to prevent edge cases and near-miss detections
+    const PRECISION_EPSILON = 0.01;
+    
+    // First check if bullet is clearly within the overall collision box with precision adjustment
+    // This prevents false positives at the edge of the collision box
+    const strictCollisionBox = this.collisionBox.clone();
+    strictCollisionBox.min.add(new THREE.Vector3(PRECISION_EPSILON, PRECISION_EPSILON, PRECISION_EPSILON));
+    strictCollisionBox.max.sub(new THREE.Vector3(PRECISION_EPSILON, PRECISION_EPSILON, PRECISION_EPSILON));
+    
+    if (!strictCollisionBox.containsPoint(bulletPos)) {
+      return { hit: false, zone: null, damage: 0 };
+    }
+    
+    // Test hitboxes in priority order (head > body > limbs)
+    // A bullet can only count as hitting ONE hitbox to prevent double-counting
+    
+    // 1. Head check (highest damage) - most important, so check first
+    const strictHeadBox = this.headHitbox.clone();
+    strictHeadBox.min.add(new THREE.Vector3(PRECISION_EPSILON, PRECISION_EPSILON, PRECISION_EPSILON));
+    strictHeadBox.max.sub(new THREE.Vector3(PRECISION_EPSILON, PRECISION_EPSILON, PRECISION_EPSILON));
+    
+    if (strictHeadBox.containsPoint(bulletPos)) {
+      return { hit: true, zone: 'head', damage: 100 };
+    }
+    
+    // 2. Body check (medium damage)
+    const strictBodyBox = this.bodyHitbox.clone();
+    strictBodyBox.min.add(new THREE.Vector3(PRECISION_EPSILON, PRECISION_EPSILON, PRECISION_EPSILON));
+    strictBodyBox.max.sub(new THREE.Vector3(PRECISION_EPSILON, PRECISION_EPSILON, PRECISION_EPSILON));
+    
+    if (strictBodyBox.containsPoint(bulletPos)) {
+      return { hit: true, zone: 'body', damage: 40 };
+    }
+    
+    // 3. Limbs check - we need to check each limb individually to prevent overlap issues
+    
+    // Create strict boxes for each individual limb
+    const leftLegHitbox = new THREE.Box3();
+    leftLegHitbox.setFromPoints([
+      new THREE.Vector3(
+        this.group.position.x - this.bodySize.width/4 - this.bodySize.width * 0.2,
+        this.group.position.y + PRECISION_EPSILON,
+        this.group.position.z - this.bodySize.depth/2 + PRECISION_EPSILON
+      ),
+      new THREE.Vector3(
+        this.group.position.x - this.bodySize.width/4 + this.bodySize.width * 0.2,
+        this.bodyHitbox.min.y - PRECISION_EPSILON,
+        this.group.position.z + this.bodySize.depth/2 - PRECISION_EPSILON
+      )
+    ]);
+    
+    const rightLegHitbox = new THREE.Box3();
+    rightLegHitbox.setFromPoints([
+      new THREE.Vector3(
+        this.group.position.x + this.bodySize.width/4 - this.bodySize.width * 0.2,
+        this.group.position.y + PRECISION_EPSILON,
+        this.group.position.z - this.bodySize.depth/2 + PRECISION_EPSILON
+      ),
+      new THREE.Vector3(
+        this.group.position.x + this.bodySize.width/4 + this.bodySize.width * 0.2,
+        this.bodyHitbox.min.y - PRECISION_EPSILON,
+        this.group.position.z + this.bodySize.depth/2 - PRECISION_EPSILON
+      )
+    ]);
+    
+    const leftArmHitbox = new THREE.Box3();
+    leftArmHitbox.setFromPoints([
+      new THREE.Vector3(
+        this.group.position.x - this.bodySize.width/2 - this.bodySize.width * 0.175,
+        this.bodyHitbox.min.y + this.bodySize.height * 0.15 + PRECISION_EPSILON,
+        this.group.position.z - this.bodySize.depth/3 + PRECISION_EPSILON
+      ),
+      new THREE.Vector3(
+        this.group.position.x - this.bodySize.width/2 + PRECISION_EPSILON,
+        this.bodyHitbox.min.y + this.bodySize.height * 0.85 - PRECISION_EPSILON,
+        this.group.position.z + this.bodySize.depth/3 - PRECISION_EPSILON
+      )
+    ]);
+    
+    const rightArmHitbox = new THREE.Box3();
+    rightArmHitbox.setFromPoints([
+      new THREE.Vector3(
+        this.group.position.x + this.bodySize.width/2 - PRECISION_EPSILON,
+        this.bodyHitbox.min.y + this.bodySize.height * 0.15 + PRECISION_EPSILON,
+        this.group.position.z - this.bodySize.depth/3 + PRECISION_EPSILON
+      ),
+      new THREE.Vector3(
+        this.group.position.x + this.bodySize.width/2 + this.bodySize.width * 0.175,
+        this.bodyHitbox.min.y + this.bodySize.height * 0.85 - PRECISION_EPSILON,
+        this.group.position.z + this.bodySize.depth/3 - PRECISION_EPSILON
+      )
+    ]);
+    
+    // Check each limb individually
+    if (leftLegHitbox.containsPoint(bulletPos)) {
+      return { hit: true, zone: 'limbs', damage: 20 };
+    }
+    
+    if (rightLegHitbox.containsPoint(bulletPos)) {
+      return { hit: true, zone: 'limbs', damage: 20 };
+    }
+    
+    if (leftArmHitbox.containsPoint(bulletPos)) {
+      return { hit: true, zone: 'limbs', damage: 20 };
+    }
+    
+    if (rightArmHitbox.containsPoint(bulletPos)) {
+      return { hit: true, zone: 'limbs', damage: 20 };
+    }
+    
+    // If we're here, the bullet is inside the overall collision box but not in any specific zone
+    // We consider this a grazing hit with no damage
+    return { hit: false, zone: null, damage: 0 };
   }
 
   /**
@@ -706,75 +907,111 @@ export class ThirdPersonModel {
   /**
    * Creates visual helpers for the hit zones (for debugging)
    * Call this method to see the hit zones visually
+   * @param {boolean} forceVisible - Override default visibility setting
    */
-  createHitZoneVisualizers() {
-    const hitZoneVisible = false; // Set to true to make hit zones visible during development
+  createHitZoneVisualizers(forceVisible = null) {
+    const hitZoneVisible = forceVisible !== null ? forceVisible : false;
     
     if (!hitZoneVisible) return;
     
     // Clean up any existing helpers
     if (this.headHelper) this.group.remove(this.headHelper);
     if (this.bodyHelper) this.group.remove(this.bodyHelper);
+    if (this.leftLegHelper) this.group.remove(this.leftLegHelper);
+    if (this.rightLegHelper) this.group.remove(this.rightLegHelper);
+    
+    // Remove arm helpers and limbs helper if they exist
+    if (this.leftArmHelper) this.group.remove(this.leftArmHelper);
+    if (this.rightArmHelper) this.group.remove(this.rightArmHelper);
     if (this.limbsHelper) this.group.remove(this.limbsHelper);
     
-    // Create head hitbox helper
+    // Materials for different hitboxes
+    const headMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff0000, // Red for head
+      wireframe: true,
+      transparent: true,
+      opacity: 0.8
+    });
+    
+    const bodyMaterial = new THREE.MeshBasicMaterial({
+      color: 0x00ff00, // Green for body
+      wireframe: true,
+      transparent: true,
+      opacity: 0.8
+    });
+    
+    const legMaterial = new THREE.MeshBasicMaterial({
+      color: 0x8800ff, // Purple for legs
+      wireframe: true,
+      transparent: true,
+      opacity: 0.7
+    });
+    
+    // Head helper - adjusted with offset
     const headGeometry = new THREE.BoxGeometry(
       this.headSize.width,
       this.headSize.height,
       this.headSize.depth
     );
-    const headMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff0000, // Red for head
-      wireframe: true,
-      transparent: true,
-      opacity: 0.5
-    });
     this.headHelper = new THREE.Mesh(headGeometry, headMaterial);
     this.headHelper.position.set(
       0,
-      this.hitboxSize.height - this.headSize.height/2,
+      this.hitboxSize.height - this.headSize.height/2 - this.headOffset,
       0
     );
     this.group.add(this.headHelper);
     
-    // Create body hitbox helper
+    // Body helper with offset
     const bodyGeometry = new THREE.BoxGeometry(
       this.bodySize.width,
       this.bodySize.height,
       this.bodySize.depth
     );
-    const bodyMaterial = new THREE.MeshBasicMaterial({
-      color: 0x00ff00, // Green for body
-      wireframe: true,
-      transparent: true,
-      opacity: 0.5
-    });
     this.bodyHelper = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    
+    // Position body below head with offset
+    const headBottom = this.hitboxSize.height - this.headSize.height - this.headOffset;
+    const bodyTop = headBottom;
+    const bodyBottom = bodyTop - this.bodySize.height - this.bodyOffset;
+    const bodyCenter = (bodyTop + bodyBottom) / 2;
+    
     this.bodyHelper.position.set(
       0,
-      this.hitboxSize.height - this.headSize.height - this.bodySize.height/2,
+      bodyCenter,
       0
     );
     this.group.add(this.bodyHelper);
     
-    // Create limbs hitbox helper
-    const limbsGeometry = new THREE.BoxGeometry(
-      this.limbsSize.width,
-      this.limbsSize.height,
-      this.limbsSize.depth
+    // Create precise limb helpers matching our collision detection
+    // Define precise limb dimensions - same as in updateCollisionBox
+    const legWidth = this.bodySize.width * 0.4;
+    
+    // Left leg helper
+    const leftLegGeometry = new THREE.BoxGeometry(
+      legWidth,
+      bodyBottom, // Height from ground to bottom of body
+      this.bodySize.depth
     );
-    const limbsMaterial = new THREE.MeshBasicMaterial({
-      color: 0x0000ff, // Blue for limbs
-      wireframe: true,
-      transparent: true,
-      opacity: 0.3
-    });
-    this.limbsHelper = new THREE.Mesh(limbsGeometry, limbsMaterial);
-    this.limbsHelper.position.set(
-      0,
-      this.limbsSize.height/2,
+    this.leftLegHelper = new THREE.Mesh(leftLegGeometry, legMaterial);
+    this.leftLegHelper.position.set(
+      -this.bodySize.width/4, // Center of left leg
+      bodyBottom/2, // Middle of leg
       0
     );
-    this.group.add(this.limbsHelper);
+    this.group.add(this.leftLegHelper);
+    
+    // Right leg helper
+    const rightLegGeometry = new THREE.BoxGeometry(
+      legWidth,
+      bodyBottom,
+      this.bodySize.depth
+    );
+    this.rightLegHelper = new THREE.Mesh(rightLegGeometry, legMaterial);
+    this.rightLegHelper.position.set(
+      this.bodySize.width/4, // Center of right leg
+      bodyBottom/2,
+      0
+    );
+    this.group.add(this.rightLegHelper);
   }
 }

@@ -5,10 +5,11 @@ import { Player } from './player.js';
 import { networkManager } from './network.js';
 import { MultiplayerManager } from './multiplayerManager.js';
 import { Bullet } from './bullet.js';
+import { ThirdPersonModel } from './playerModel.js';
+import { PhysicsSystem } from './physics.js';
 import { createMuzzleFlash, createSmokeEffect, createImpactEffect, preloadMuzzleFlash, preloadSmokeEffect, SmokeRingEffect } from './effects.js';
 import { QuickDraw } from './quickDraw.js';
 import { updateAmmoUI, updateHealthUI } from './ui.js';
-import { PhysicsSystem } from './physics.js';
 import { Viewmodel } from './viewmodel.js';
 
 // Check if device is mobile
@@ -253,48 +254,6 @@ function init() {
       }
     };
 
-    // Debug toggle for physics visualization (press P)
-    window.addEventListener('keydown', (event) => {
-      if (event.code === 'KeyP') {
-        if (physics) {
-          const isDebugMode = !physics.debugMode;
-          physics.setDebugMode(isDebugMode);
-          console.log(`Physics debug mode: ${isDebugMode ? 'ENABLED' : 'DISABLED'}`);
-          
-          // Set the global debug flag
-          window.showHitZoneDebug = isDebugMode;
-          
-          // If turning on debug mode, update hit zone debug for all existing players
-          if (isDebugMode) {
-            // Create debug boxes for remote players and local player with a delay
-            // (to allow for physics debug state to be fully set)
-            setTimeout(() => {
-              // First trigger hit zone debugging on the local player
-              if (localPlayer) {
-                const dummyBullet = new Bullet(
-                  new THREE.Vector3(0, 0, 0),
-                  new THREE.Vector3(0, 1, 0)
-                );
-                dummyBullet.checkPlayerHitZones(localPlayer, new THREE.Vector3(0, 0, 0));
-              }
-              
-              // Then create debug boxes for all remote players
-              for (const [playerId, remotePlayer] of remotePlayers.entries()) {
-                // Force a collision check to create debug boxes
-                const dummyBullet = new Bullet(
-                  new THREE.Vector3(0, 0, 0),
-                  new THREE.Vector3(0, 1, 0)
-                );
-                dummyBullet.checkPlayerHitZones(remotePlayer, new THREE.Vector3(0, 0, 0));
-              }
-              
-              console.log("Hit zone debug boxes created for all players");
-            }, 50);
-          }
-        }
-      }
-    });
-
     // Add a keyboard handler for showing town colliders (T key)
     window.addEventListener('keydown', function(event) {
       // Toggle town collider visualization with T key
@@ -310,7 +269,70 @@ function init() {
         
         console.log(`Town collider visualization: ${window.showTownColliders ? 'ENABLED' : 'DISABLED'}`);
       }
+      
+      // Toggle debug mode with P key
+      if (event.code === 'KeyP') {
+        window.debugMode = !window.debugMode;
+        
+        // Synchronize physics debug mode with window debug mode
+        if (physics) {
+          physics.setDebugMode(window.debugMode);
+        }
+        
+        // Set the hit zone debug flag
+        window.showHitZoneDebug = window.debugMode;
+        
+        console.log(`Debug mode: ${window.debugMode ? 'ENABLED' : 'DISABLED'}`);
+        
+        // Update debug visualization
+        updateDebugVisualization();
+        
+        // If turning on debug mode, update hit zone debug for all existing players with a delay
+        if (window.debugMode) {
+          setTimeout(() => {
+            // First trigger hit zone debugging on the local player
+            if (localPlayer && localPlayer.model && typeof localPlayer.model.createHitZoneVisualizers === 'function') {
+              // Use the new method for visualization
+              localPlayer.model.createHitZoneVisualizers(true);
+            }
+            
+            // Then create debug boxes for all remote players
+            for (const [playerId, remotePlayer] of remotePlayers.entries()) {
+              if (remotePlayer && typeof remotePlayer.createHitZoneVisualizers === 'function') {
+                // Use the new method
+                remotePlayer.createHitZoneVisualizers(true);
+              }
+            }
+            
+            console.log("Hit zone debug boxes created for all players");
+          }, 50);
+        }
+      }
     });
+
+    // Make Bullet constructor globally available for hit zone debug creation
+    window.Bullet = Bullet;
+    
+    // Install the improved hitbox system (after Bullet is globally available)
+    initImprovedHitboxSystem();
+    
+    // Add debug command to console for troubleshooting
+    window.printHitboxDebugInfo = function() {
+      console.log("--- Hitbox System Debug Info ---");
+      if (window.playersMap) {
+        console.log(`Players map size: ${window.playersMap.size}`);
+        window.playersMap.forEach((model, id) => {
+          console.log(`Player ${id}:`, {
+            hasCheckBulletHit: typeof model.checkBulletHit === 'function',
+            headHitbox: model.headHitbox ? 'present' : 'missing',
+            bodyHitbox: model.bodyHitbox ? 'present' : 'missing',
+            limbsHitbox: model.limbsHitbox ? 'present' : 'missing'
+          });
+        });
+      } else {
+        console.log("Players map not found");
+      }
+    };
 
     // Start the animation loop
     animate(0);
@@ -590,7 +612,6 @@ function updatePlayersMap() {
   }
 }
 
-
 function showGameInstructions() {
   const instructions = document.createElement('div');
   instructions.id = 'instructions';
@@ -660,6 +681,79 @@ function showGameInstructions() {
   }
 }
 
+/**
+ * Updates debug visualization for all players.
+ * Called when debug mode is toggled.
+ */
+function updateDebugVisualization() {
+  // Local player visualization
+  if (localPlayer && localPlayer.model) {
+    if (typeof localPlayer.model.createHitZoneVisualizers === 'function') {
+      localPlayer.model.createHitZoneVisualizers(window.debugMode);
+    }
+    
+    // Clean up old helpers if debug mode is off
+    if (!window.debugMode) {
+      const helpers = ["headHelper", "bodyHelper", "leftLegHelper", "rightLegHelper"];
+      
+      helpers.forEach(helper => {
+        if (localPlayer.model[helper]) {
+          localPlayer.model.group.remove(localPlayer.model[helper]);
+          localPlayer.model[helper] = null;
+        }
+      });
+    }
+  }
+  
+  // Remote players visualization
+  if (remotePlayers && remotePlayers.size > 0) {
+    remotePlayers.forEach((model, id) => {
+      if (model && typeof model.createHitZoneVisualizers === 'function') {
+        model.createHitZoneVisualizers(window.debugMode);
+        
+        // Clean up old helpers if debug mode is off
+        if (!window.debugMode) {
+          const helpers = ["headHelper", "bodyHelper", "leftLegHelper", "rightLegHelper"];
+          
+          helpers.forEach(helper => {
+            if (model[helper]) {
+              model.group.remove(model[helper]);
+              model[helper] = null;
+            }
+          });
+        }
+      }
+    });
+  }
+  
+  // Also check the playersMap (which might contain additional players)
+  if (window.playersMap) {
+    window.playersMap.forEach((model, id) => {
+      if (model && typeof model.createHitZoneVisualizers === 'function' &&
+          !remotePlayers.has(id)) { // Only process if not already processed above
+        model.createHitZoneVisualizers(window.debugMode);
+        
+        // Clean up old helpers if debug mode is off
+        if (!window.debugMode) {
+          const helpers = ["headHelper", "bodyHelper", "leftLegHelper", "rightLegHelper"];
+          
+          helpers.forEach(helper => {
+            if (model[helper]) {
+              model.group.remove(model[helper]);
+              model[helper] = null;
+            }
+          });
+        }
+      }
+    });
+  }
+  
+  // Sync physics debug state
+  if (physics) {
+    physics.setDebugMode(window.debugMode);
+  }
+}
+
 // Handle window unload to cleanup game mode resources
 window.addEventListener('beforeunload', () => {
   if (quickDraw) {
@@ -677,7 +771,70 @@ window.addEventListener('beforeunload', () => {
   smokeRings = [];
 });
 
-// Make Bullet constructor globally available for hit zone debug creation
-window.Bullet = Bullet;
+/**
+ * Initializes the improved hitbox detection system.
+ * This completely overwrites the old checkPlayerHitZones method in Bullet.prototype.
+ */
+function initImprovedHitboxSystem() {
+  if (!window.Bullet || !window.Bullet.prototype) {
+    console.error("Cannot install improved hitbox system - Bullet class not available");
+    return false;
+  }
+
+  // Store a reference to the original method for backup
+  const originalCheckPlayerHitZones = window.Bullet.prototype.checkPlayerHitZones;
+
+  // Replace the checkPlayerHitZones method with our improved version
+  window.Bullet.prototype.checkPlayerHitZones = function(playerObj, bulletPos) {
+    // Better local player detection (handle both Player objects and models)
+    if (playerObj === localPlayer) {
+      if (localPlayer.model && typeof localPlayer.model.checkBulletHit === 'function') {
+        return localPlayer.model.checkBulletHit(bulletPos);
+      }
+    }
+    
+    // For ThirdPersonModel players, use their built-in hit detection
+    if (playerObj && typeof playerObj.checkBulletHit === 'function') {
+      return playerObj.checkBulletHit(bulletPos);
+    }
+    
+    // For remote players in the players map
+    if (window.playersMap && playerObj.id) {
+      const playerModel = window.playersMap.get(playerObj.id);
+      if (playerModel && typeof playerModel.checkBulletHit === 'function') {
+        return playerModel.checkBulletHit(bulletPos);
+      }
+    }
+    
+    // Local player might have a model reference
+    if (playerObj.model && typeof playerObj.model.checkBulletHit === 'function') {
+      return playerObj.model.checkBulletHit(bulletPos);
+    }
+    
+    // Special case for QuickDraw mode
+    if (window.quickDraw && window.quickDraw.inDuel) {
+      const opponentId = window.quickDraw.duelOpponentId;
+      if (opponentId && window.playersMap) {
+        const opponentModel = window.playersMap.get(opponentId.toString());
+        if (opponentModel && typeof opponentModel.checkBulletHit === 'function') {
+          return opponentModel.checkBulletHit(bulletPos);
+        }
+      }
+    }
+    
+    // Last resort: fall back to original implementation
+    console.warn("Using fallback hit detection for player", playerObj);
+    return originalCheckPlayerHitZones.call(this, playerObj, bulletPos);
+  };
+
+  // We also need to disable the old hitzone debug visualization
+  // This will prevent the old hitboxes from appearing during gameplay
+  window.Bullet.prototype.createHitZoneDebugBoxes = function() {
+    // Do nothing - this effectively disables the old debug boxes
+  };
+
+  console.log("✅ Improved hitbox system successfully installed");
+  return true;
+}
 
 init();

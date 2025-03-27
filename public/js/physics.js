@@ -521,13 +521,26 @@ export class PhysicsSystem {
     
     // Create debug boxes for all existing player models
     if (window.playersMap) {
-      for (const [playerId, playerModel] of window.playersMap) {
-        const dummyBullet = new Bullet(
-          new THREE.Vector3(0, 0, 0),
-          new THREE.Vector3(0, 1, 0)
-        );
-        dummyBullet.checkPlayerHitZones(playerModel, new THREE.Vector3(0, 0, 0));
+      for (const [playerId, playerModel] of window.playersMap.entries()) {
+        if (playerModel && typeof playerModel.createHitZoneVisualizers === 'function') {
+          // Use the new direct visualization method with forced visibility
+          playerModel.createHitZoneVisualizers(true);
+        } else {
+          console.warn(`Player ${playerId} doesn't support improved hit zones`);
+          // We no longer use the old fallback method
+        }
       }
+    }
+    
+    // Also check the local player's model if available
+    if (window.localPlayer && window.localPlayer.model && 
+        typeof window.localPlayer.model.createHitZoneVisualizers === 'function') {
+      window.localPlayer.model.createHitZoneVisualizers(true);
+    }
+    
+    // Print debug info to console
+    if (typeof window.printHitboxDebugInfo === 'function') {
+      window.printHitboxDebugInfo();
     }
   }
   
