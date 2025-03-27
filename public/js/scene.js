@@ -127,7 +127,7 @@ function createWesternTown() {
             // Clone the material to avoid affecting other objects with the same material
             node.material = node.material.clone();
             node.material.transparent = true;
-            node.material.opacity = 0.5;
+            node.material.opacity = 0.0;
             node.material.color.set(0xff0000); // Make colliders red
           }
           
@@ -158,7 +158,7 @@ function createWesternTown() {
             colliders.push({ node, body });
             
             // Hide collider mesh by default (will be toggled by debug mode)
-            node.visible = window.showTownColliders || false;
+            node.visible = false;
           }
         }
       }
