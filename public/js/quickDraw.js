@@ -292,12 +292,15 @@ export class QuickDraw {
             }
         };
         
-        this.networkManager.sendQuickDrawShoot = (opponentId) => {
+        this.networkManager.sendQuickDrawShoot = (opponentId, arenaIndex, hitZone = 'body', damage = 40) => {
             if (this.networkManager.socket && this.networkManager.socket.readyState === WebSocket.OPEN) {
-                console.log(`Sending Quick Draw hit notification to server: player ${this.localPlayer.id} hit player ${opponentId}`);
+                console.log(`Sending Quick Draw hit notification to server: player ${this.localPlayer.id} hit player ${opponentId} in the ${hitZone} for ${damage} damage`);
                 this.networkManager.socket.send(JSON.stringify({
                     type: 'quickDrawShoot',
-                    opponentId: opponentId
+                    opponentId: opponentId,
+                    arenaIndex: arenaIndex,
+                    hitZone: hitZone,
+                    damage: damage
                 }));
             }
         };

@@ -516,6 +516,13 @@ function handlePlayerHit(playerId, data) {
     return sendErrorToPlayer(playerId, "Invalid hit: players in different game modes", false);
   }
   
+  // If this is a hit in a QuickDraw duel, let the QuickDraw system handle it
+  // This prevents the general hit system from interfering with QuickDraw duels
+  if (bothInQuickDraw) {
+    console.log(`Hit in QuickDraw duel detected - deferring to QuickDraw hit system`);
+    return;
+  }
+  
   // Get hit data
   const hitZone = data.hitData && data.hitData.hitZone ? data.hitData.hitZone : 'body';
   const damage = data.hitData && data.hitData.damage ? data.hitData.damage : 40;
@@ -556,8 +563,8 @@ function handlePlayerHit(playerId, data) {
     damage: finalDamage
   });
   
-  // Check for player death
-  if (targetPlayer.health <= 0) {
+  // Only handle regular player death (not QuickDraw duels)
+  if (targetPlayer.health <= 0 && !targetInQuickDraw) {
     handlePlayerDeath(targetId, playerId);
   }
 }
@@ -600,12 +607,11 @@ function handlePlayerDeath(playerId, killedById) {
   
   console.log(`Player ${playerId} was killed by player ${killedById}`);
   
-  // If player is in Quick Draw duel, end the duel
-  if (player.inQuickDrawDuel && player.quickDrawDuelId) {
-    const duel = quickDrawDuels.get(player.quickDrawDuelId);
-    if (duel) {
-      endQuickDrawDuel(player.quickDrawDuelId, killedById);
-    }
+  // Skip handling if player is in QuickDraw duel
+  // QuickDraw duels handle their own death/end conditions
+  if (player.inQuickDrawDuel) {
+    console.log(`Player ${playerId} is in a QuickDraw duel - skipping regular death handling`);
+    return;
   }
   
   // Respawn the player
@@ -1126,6 +1132,8 @@ function handleQuickDrawShoot(playerId, targetId, arenaIndex, hitZone = 'body', 
         finalDamage = 100; // One-shot kill for headshots
     } else if (hitZone === 'limbs') {
         finalDamage = Math.round(damage * 0.6); // Reduced damage for limb shots
+    } else if (hitZone === 'body') {
+        finalDamage = 40; // Standard body shot damage
     }
     
     // Apply damage to target
@@ -1134,7 +1142,11 @@ function handleQuickDrawShoot(playerId, targetId, arenaIndex, hitZone = 'body', 
         return;
     }
     
-    targetPlayer.health = Math.max(0, targetPlayer.health - finalDamage);
+    // Calculate new health after damage
+    const newHealth = Math.max(0, targetPlayer.health - finalDamage);
+    targetPlayer.health = newHealth;
+    
+    console.log(`Player ${targetId} hit for ${finalDamage} damage, health now ${targetPlayer.health}`);
     
     // Send health update to both players
     if (targetPlayer.ws && targetPlayer.ws.readyState === WebSocket.OPEN) {
@@ -1157,10 +1169,9 @@ function handleQuickDrawShoot(playerId, targetId, arenaIndex, hitZone = 'body', 
         }));
     }
     
-    console.log(`Player ${targetId} hit for ${finalDamage} damage, health now ${targetPlayer.health}`);
-    
-    // Check if target is dead (0 health)
-    if (targetPlayer.health <= 0) {
+    // Only end the duel if target's health is 0 or less
+    if (newHealth <= 0) {
+        console.log(`Player ${targetId} defeated in duel - health reduced to 0`);
         // End the duel with shooter as winner
         endQuickDrawDuel(duelId, playerId);
     }
