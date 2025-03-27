@@ -1040,20 +1040,24 @@ export class Player {
       // Set opacity based on movement
       const opacity = isMoving ? 0.7 : 0.8;
       
-      // Update all SVG elements with the appropriate color
-      const strokeColor = this.health < 30 
+      // Update colors differently for paths and circle
+      const circleColor = this.health < 30 
         ? `rgba(255, ${Math.floor(255 * (this.health/30))}, ${Math.floor(255 * (this.health/60))}, ${opacity})`
         : `rgba(255, 255, 255, ${opacity})`;
       
-      // Apply color to all SVG paths and circle
+      // Use black for paths (arrows)
+      const pathColor = `rgba(0, 0, 0, ${opacity})`;
+      
+      // Apply black color to all SVG paths (the arrows)
       const pathElements = crosshair.querySelectorAll('path');
       pathElements.forEach(el => {
-        el.setAttribute('stroke', strokeColor);
+        el.setAttribute('stroke', pathColor);
       });
       
+      // Apply white color to the center dot
       const circleElement = crosshair.querySelector('circle');
       if (circleElement) {
-        circleElement.setAttribute('fill', strokeColor);
+        circleElement.setAttribute('fill', circleColor);
       }
       
       // Apply expansion animation class if not already applied
