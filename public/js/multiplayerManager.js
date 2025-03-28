@@ -18,6 +18,12 @@ export class MultiplayerManager {
     // This map is passed in from main.js; we mutate it
     this.remotePlayers = remotePlayersMap;
 
+    // Map to track username labels
+    this.playerLabels = new Map(); // playerId -> { sprite, div }
+    
+    // Create a container for the username labels
+    this.createLabelContainer();
+
     // Callback that main.js uses to know we changed remotePlayers
     this.onRemotePlayersUpdated = null;
 
@@ -25,6 +31,22 @@ export class MultiplayerManager {
 
     // Initialize network handlers
     this.initNetwork();
+  }
+  
+  createLabelContainer() {
+    // Create a container for all player labels if it doesn't exist
+    if (!document.getElementById('player-labels-container')) {
+      const container = document.createElement('div');
+      container.id = 'player-labels-container';
+      container.style.position = 'absolute';
+      container.style.top = '0';
+      container.style.left = '0';
+      container.style.width = '100%';
+      container.style.height = '100%';
+      container.style.pointerEvents = 'none';
+      container.style.overflow = 'hidden';
+      document.body.appendChild(container);
+    }
   }
   
   initNetwork() {
@@ -229,7 +251,7 @@ export class MultiplayerManager {
     
     try {
       // Create a particle system for the hit marker
-      const geometry = new THREE.BufferGeometry();
+      const geometry = new window.THREE.BufferGeometry();
       const vertices = [];
       
       // Create particles in a small sphere
@@ -246,16 +268,16 @@ export class MultiplayerManager {
         vertices.push(x, y, z);
       }
       
-      geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      geometry.setAttribute('position', new window.THREE.Float32BufferAttribute(vertices, 3));
       
-      const material = new THREE.PointsMaterial({
+      const material = new window.THREE.PointsMaterial({
         color: color,
         size: 0.05,
         transparent: true,
         opacity: 1
       });
       
-      const particles = new THREE.Points(geometry, material);
+      const particles = new window.THREE.Points(geometry, material);
       particles.position.copy(position);
       window.scene.add(particles);
       
@@ -289,38 +311,140 @@ export class MultiplayerManager {
   }
 
   addPlayer(playerId, data) {
-    if (!playerId || !data) return;
+    const playerModel = new ThirdPersonModel(this.scene, playerId);
+    playerModel.update(data);
+    this.remotePlayers.set(playerId, playerModel);
     
-    console.log(`Adding remote player ${playerId}`);
-    const model = new ThirdPersonModel(this.scene, playerId);
-    model.update(data);
-    this.remotePlayers.set(playerId, model);
+    // Create a username label for this player
+    this.createPlayerLabel(playerId, data.username || `Player ${playerId}`);
+    
+    return playerModel;
+  }
+
+  createPlayerLabel(playerId, username) {
+    // Create DOM label
+    const label = document.createElement('div');
+    label.className = 'player-username-label';
+    label.textContent = username;
+    label.style.position = 'absolute';
+    label.style.padding = '2px 8px';
+    label.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    label.style.color = 'white';
+    label.style.borderRadius = '4px';
+    label.style.fontSize = '14px';
+    label.style.fontWeight = 'bold';
+    label.style.textAlign = 'center';
+    label.style.transition = 'opacity 0.3s';
+    label.style.zIndex = '5';
+    label.style.pointerEvents = 'none';
+    label.style.transform = 'translate(-50%, -100%)';
+    label.style.textShadow = '1px 1px 2px rgba(0, 0, 0, 0.8)';
+    
+    // Add to DOM
+    const container = document.getElementById('player-labels-container');
+    if (container) {
+      container.appendChild(label);
+    } else {
+      document.body.appendChild(label);
+    }
+    
+    // Store reference
+    this.playerLabels.set(playerId, { div: label });
   }
 
   removePlayer(playerId) {
-    if (!playerId) return;
-    
-    console.log(`Removing remote player ${playerId}`);
-    const model = this.remotePlayers.get(playerId);
-    if (model) {
-      model.remove();
+    const playerModel = this.remotePlayers.get(playerId);
+    if (playerModel) {
+      playerModel.dispose();
       this.remotePlayers.delete(playerId);
+    }
+    
+    // Remove username label
+    this.removePlayerLabel(playerId);
+  }
+  
+  removePlayerLabel(playerId) {
+    const labelInfo = this.playerLabels.get(playerId);
+    if (labelInfo && labelInfo.div) {
+      if (labelInfo.div.parentNode) {
+        labelInfo.div.parentNode.removeChild(labelInfo.div);
+      }
+      this.playerLabels.delete(playerId);
     }
   }
 
   update(deltaTime) {
-    // Animate each remote player's movement
-    for (const [playerId, remoteModel] of this.remotePlayers.entries()) {
-      if (remoteModel && typeof remoteModel.animateMovement === 'function') {
-        // The animateMovement method now handles all animations internally
-        remoteModel.animateMovement(deltaTime);
+    // Update all player models
+    for (const [playerId, playerModel] of this.remotePlayers.entries()) {
+      playerModel.animateMovement(deltaTime);
+      
+      // Update player label positions
+      this.updateLabelPosition(playerId, playerModel);
+    }
+  }
+  
+  updateLabelPosition(playerId, playerModel) {
+    const labelInfo = this.playerLabels.get(playerId);
+    if (!labelInfo || !labelInfo.div) return;
+    
+    const label = labelInfo.div;
+    
+    // Get player position
+    if (playerModel) {
+      // Use model property if available, otherwise fall back to group
+      const modelObj = playerModel.playerModel || playerModel.model || playerModel.group;
+      
+      if (!modelObj) {
+        label.style.display = 'none';
+        return;
       }
+      
+      const playerPos = new window.THREE.Vector3();
+      modelObj.getWorldPosition(playerPos);
+      
+      // Add height offset to position the label above the player's head
+      playerPos.y += 2.2;
+      
+      // Convert 3D position to screen coordinates
+      const camera = window.camera || (window.localPlayer && window.localPlayer.camera);
+      if (!camera) return;
+      
+      // Project position to screen space
+      const widthHalf = window.innerWidth / 2;
+      const heightHalf = window.innerHeight / 2;
+      
+      // Clone position to avoid modifying the original
+      const projectedPos = playerPos.clone();
+      projectedPos.project(camera);
+      
+      // Convert to screen coordinates
+      const x = (projectedPos.x * widthHalf) + widthHalf;
+      const y = -(projectedPos.y * heightHalf) + heightHalf;
+      
+      // Check if player is behind camera
+      if (projectedPos.z > 1) {
+        label.style.display = 'none';
+        return;
+      }
+      
+      // Update label position
+      label.style.display = 'block';
+      label.style.left = `${x}px`;
+      label.style.top = `${y}px`;
+      
+      // Distance fading (fade out when too far)
+      const distance = playerPos.distanceTo(camera.position);
+      const maxDistance = 30;
+      const opacity = 1 - Math.min(Math.max(0, (distance - 15) / maxDistance), 0.9);
+      label.style.opacity = opacity.toString();
+    } else {
+      label.style.display = 'none';
     }
   }
 
   notifyPlayersUpdated() {
     if (typeof this.onRemotePlayersUpdated === 'function') {
-      this.onRemotePlayersUpdated();
+      this.onRemotePlayersUpdated(this.remotePlayers);
     }
   }
 }

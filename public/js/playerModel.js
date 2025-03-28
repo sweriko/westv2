@@ -849,6 +849,13 @@ export class ThirdPersonModel {
       }
     });
   }
+  
+  /**
+   * Alias for remove() for compatibility with the new code
+   */
+  dispose() {
+    this.remove();
+  }
 
   /**
    * Provides visual feedback (temporary red flash) when the model is hit.

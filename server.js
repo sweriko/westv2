@@ -30,6 +30,10 @@ const sessions = new Set();   // tracks sessionIds to prevent duplicate connecti
 let nextPlayerId = 1;
 console.log("Player tracking variables initialized");
 
+// New: Track persistent player identities
+const playerIdentities = new Map(); // clientId -> { username, playerId, lastSeen }
+console.log("Player identity tracking initialized");
+
 // Position history tracking to reduce unnecessary corrections
 const playerPositionHistory = new Map(); // playerId -> array of recent positions
 const POSITION_HISTORY_SIZE = 10; // Number of positions to track per player
@@ -71,9 +75,11 @@ const playerSequences = new Map(); // playerId -> last sequence number
 
 // On new connection
 wss.on('connection', (ws, req) => {
-  // Parse sessionId from query string
+  // Parse parameters from query string
   const parameters = url.parse(req.url, true).query;
   const sessionId = parameters.sessionId;
+  const clientId = parameters.clientId;
+  const username = parameters.username;
 
   // If we already have this sessionId, reject as duplicate
   if (sessionId && sessions.has(sessionId)) {
@@ -91,12 +97,24 @@ wss.on('connection', (ws, req) => {
   }
 
   const playerId = nextPlayerId++;
-  console.log(`Player ${playerId} connected (sessionId: ${sessionId || 'none'})`);
+  console.log(`Player ${playerId} connected (sessionId: ${sessionId || 'none'}, username: ${username || 'Anonymous'})`);
+
+  // Store player identity information if provided
+  if (clientId) {
+    playerIdentities.set(clientId, {
+      username: username || 'Anonymous',
+      playerId,
+      lastSeen: Date.now()
+    });
+    console.log(`Associated player ${playerId} with clientId ${clientId} and username ${username || 'Anonymous'}`);
+  }
 
   // Create initial player data with health and QuickDraw info
   players.set(playerId, {
     ws,
     sessionId,
+    clientId,
+    username: username || 'Anonymous',
     position: { x: 0, y: 1.6, z: 0 },
     rotation: { y: 0 },
     isAiming: false,
@@ -143,6 +161,7 @@ wss.on('connection', (ws, req) => {
         isShooting: p.isShooting,
         isReloading: p.isReloading,
         health: p.health,
+        username: p.username,
         quickDrawLobbyIndex: p.quickDrawLobbyIndex
       }))
   }));
@@ -154,6 +173,7 @@ wss.on('connection', (ws, req) => {
     position: players.get(playerId).position,
     rotation: players.get(playerId).rotation,
     health: players.get(playerId).health,
+    username: players.get(playerId).username,
     quickDrawLobbyIndex: players.get(playerId).quickDrawLobbyIndex
   });
 
@@ -331,6 +351,7 @@ function handlePlayerUpdate(playerId, data) {
     isShooting: player.isShooting,
     isReloading: player.isReloading,
     health: player.health,
+    username: player.username,
     quickDrawLobbyIndex: player.quickDrawLobbyIndex
   });
 }
@@ -855,11 +876,11 @@ function broadcastToOthers(excludeId, data) {
 
 // Broadcast to all players
 function broadcastToAll(data) {
-  for (const [pid, pl] of players.entries()) {
-    if (pl.ws.readyState === WebSocket.OPEN) {
-      pl.ws.send(JSON.stringify(data));
+  players.forEach((player, id) => {
+    if (player.ws.readyState === WebSocket.OPEN) {
+      player.ws.send(JSON.stringify(data));
     }
-  }
+  });
 }
 
 /**

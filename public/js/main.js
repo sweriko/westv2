@@ -11,6 +11,7 @@ import { createMuzzleFlash, createSmokeEffect, createImpactEffect, preloadMuzzle
 import { QuickDraw } from './quickDraw.js';
 import { updateAmmoUI, updateHealthUI } from './ui.js';
 import { Viewmodel } from './viewmodel.js';
+import { initPlayerIdentity } from './playerIdentity.js';
 
 // Check if device is mobile
 function isMobileDevice() {
@@ -48,8 +49,15 @@ window.showHitZoneDebug = false;
 window.showTownColliders = true; // Enable by default to help with debugging
 
 // Initialize the application
-function init() {
+async function init() {
   try {
+    // Initialize player identity before anything else
+    const playerIdentity = await initPlayerIdentity();
+    console.log(`Welcome back, ${playerIdentity.username}! Player ID: ${playerIdentity.id}`);
+    
+    // Expose player identity to window for easy access from other modules
+    window.playerIdentity = playerIdentity;
+    
     // Set debug mode flag
     window.debugMode = false; // Set to true to enable verbose console logging
     
@@ -837,4 +845,18 @@ function initImprovedHitboxSystem() {
   return true;
 }
 
-init();
+// Call init() to start the application
+init().catch(err => {
+  console.error('Error during initialization:', err);
+  // Show error to user
+  const errorElement = document.createElement('div');
+  errorElement.style.position = 'fixed';
+  errorElement.style.top = '10px';
+  errorElement.style.left = '10px';
+  errorElement.style.color = 'red';
+  errorElement.style.backgroundColor = 'rgba(0,0,0,0.7)';
+  errorElement.style.padding = '10px';
+  errorElement.style.borderRadius = '5px';
+  errorElement.textContent = 'Failed to initialize the game. Please refresh the page.';
+  document.body.appendChild(errorElement);
+});

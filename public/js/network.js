@@ -63,9 +63,19 @@ export class NetworkManager {
   connect() {
     this._cleanupSocket();
 
+    // Get persistent player identity information
+    const playerIdentity = window.playerIdentity || {};
+    
+    // Create query parameters for the WebSocket connection
+    const params = new URLSearchParams({
+      sessionId: this.sessionId,
+      clientId: playerIdentity.id || '',
+      username: playerIdentity.username || ''
+    });
+
     // Determine correct ws:// or wss:// based on current protocol
     const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-    const wsUrl = `${protocol}${window.location.host}?sessionId=${this.sessionId}`;
+    const wsUrl = `${protocol}${window.location.host}?${params.toString()}`;
 
     console.log('Attempting to connect to:', wsUrl);
     this.socket = new WebSocket(wsUrl);
