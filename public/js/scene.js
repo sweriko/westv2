@@ -27,13 +27,13 @@ export function initScene() {
   gameContainer.appendChild(renderer.domElement);
 
   // Initialize with a desert sand color instead of blue
-  scene.background = new THREE.Color(0xe6c288);
+  scene.background = new THREE.Color(0xec9e5c);
   
   // Load the two skybox parts - ground and sky
   loadTwoPartSkybox();
   
   // Change fog color to match desert colors instead of blue
-  const desertFogColor = new THREE.Color(0xe6c288); // Desert sand color
+  const desertFogColor = new THREE.Color(0xec9e5c); // Desert sand color
   scene.fog = new THREE.Fog(desertFogColor, 250, 900); // Increased fog distances
 
   const camera = new THREE.PerspectiveCamera(

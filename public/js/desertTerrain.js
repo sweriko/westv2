@@ -115,11 +115,11 @@ export class DesertTerrain {
             },
             duneDirection: Math.PI * 0.25, // Wind direction
             sandColors: [
-                new THREE.Color(0xe6c288), // Base sand color
-                new THREE.Color(0xd9b276), // Slightly darker
-                new THREE.Color(0xf2d6a2), // Slightly lighter
-                new THREE.Color(0xc19e65), // Darker/shadow areas
-                new THREE.Color(0xf7e0b5)  // Highlight areas
+                new THREE.Color(0xec9e5c), // Base sand color
+                new THREE.Color(0xd4884a), // Slightly darker
+                new THREE.Color(0xf7b777), // Slightly lighter
+                new THREE.Color(0xb7703e), // Darker/shadow areas
+                new THREE.Color(0xffc890)  // Highlight areas
             ],
             distanceBlur: {
                 enabled: true,
