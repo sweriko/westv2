@@ -7,6 +7,7 @@
 
 import { PhysicsSystem } from './physics.js';
 import { createOptimizedSmokeEffect } from './input.js';
+import { updateHealthUI } from './ui.js';
 
 export class QuickDraw {
     constructor(scene, localPlayer, networkManager, soundManager) {
@@ -350,19 +351,70 @@ export class QuickDraw {
                         this.endDuel(message.winnerId);
                         break;
                     case 'playerHealthUpdate':
-                        if (this.inDuel) {
+                        // Only handle playerHealthUpdate if we're in a duel and haven't already processed it
+                        // The general hit handler in network.js may also process health updates from 'hit' messages
+                        if (this.inDuel && message._quickdraw_processed !== true) {
+                            // Initialize health update tracking if it doesn't exist
+                            if (!this.healthUpdateTracking) {
+                                this.healthUpdateTracking = new Map();
+                            }
+                            
+                            // Create a unique ID for this health update to prevent duplicates
+                            const updateId = `${message.playerId}_${message.health}_${message.hitBy}_${Date.now()}`;
+                            
+                            // Check if we've seen a very similar update recently
+                            let isDuplicate = false;
+                            const now = Date.now();
+                            
+                            // Check each recent update to see if this is likely a duplicate
+                            for (const [id, timestamp] of this.healthUpdateTracking.entries()) {
+                                // Remove old entries (older than 500ms)
+                                if (now - timestamp > 500) {
+                                    this.healthUpdateTracking.delete(id);
+                                    continue;
+                                }
+                                
+                                // If the ID contains the same player and health, likely a duplicate
+                                if (id.includes(`${message.playerId}_${message.health}_`)) {
+                                    console.log(`[QuickDraw] Detected duplicate health update: ${updateId}`);
+                                    isDuplicate = true;
+                                    break;
+                                }
+                            }
+                            
+                            // Skip if it's a duplicate
+                            if (isDuplicate) {
+                                return;
+                            }
+                            
+                            // Track this update
+                            this.healthUpdateTracking.set(updateId, now);
+                            
+                            // Mark this message as processed to prevent double-handling
+                            message._quickdraw_processed = true;
+                            
                             // Update own health if it's us
                             if (message.playerId === this.localPlayer.id) {
+                                // Update both the local player's health and the health bar
+                                this.localPlayer.health = message.health;
                                 this.updateHealthBar(message.health);
                                 
                                 // Show hit feedback if damaged
                                 if (message.damage > 0) {
                                     this.showHitFeedback(message.damage);
                                 }
+                                
+                                // Also update the main UI health display
+                                if (typeof updateHealthUI === 'function') {
+                                    updateHealthUI(this.localPlayer);
+                                }
+                                
+                                console.log(`[QuickDraw] Health updated: ${message.health}`);
                             }
                             // Update opponent's health if needed (could be extended for UI)
                             else if (message.playerId === this.duelOpponentId) {
                                 // Could update opponent health bar if we had one
+                                console.log(`[QuickDraw] Opponent health updated: ${message.health}`);
                             }
                         }
                         break;
@@ -913,9 +965,17 @@ export class QuickDraw {
             }
         }
         
+        // Reset player health to full at the start of the duel
+        this.localPlayer.health = 100;
+        
         // Show health bar with full health
         this.updateHealthBar(100);
         this.healthBarContainer.style.display = 'block';
+        
+        // Update the main UI health display too
+        if (typeof updateHealthUI === 'function') {
+            updateHealthUI(this.localPlayer);
+        }
         
         // Update status indicator and show match found message
         this.updateStatusIndicator();
@@ -1259,9 +1319,15 @@ export class QuickDraw {
                 this.localPlayer.group.rotation.y = this.originalRotation;
             }
             
+            // Reset player health - ensure it's properly set to 100 again
+            this.localPlayer.health = 100;
+            // Also update the main UI health display
+            if (typeof updateHealthUI === 'function') {
+                updateHealthUI(this.localPlayer);
+            }
+            
             // Update UI
             this.updateStatusIndicator();
-            
         }, 3000);
     }
 

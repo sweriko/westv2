@@ -237,8 +237,18 @@ export class NetworkManager {
       // This client was hit by another player
       case 'hit':
         console.log(`I was hit by player ${message.sourceId} in the ${message.hitZone || 'body'} for ${message.hitData?.damage || 20} damage`);
-        if (this.onPlayerHit) {
+        
+        // Check if this is a QuickDraw duel hit - if so, let QuickDraw system handle it
+        const isQuickDrawDuel = window.quickDraw && window.quickDraw.inDuel && 
+                               window.quickDraw.duelOpponentId === Number(message.sourceId);
+        
+        if (!isQuickDrawDuel && this.onPlayerHit) {
+          // Only handle non-QuickDraw hits here
           this.onPlayerHit(message.sourceId, message.hitData, message.health, message.hitZone);
+        } else if (isQuickDrawDuel) {
+          console.log(`[Network] Deferring hit handling to QuickDraw system`);
+          // Mark the message so QuickDraw knows this came from network.js
+          message._from_network = true;
         }
         break;
 

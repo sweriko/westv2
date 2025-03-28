@@ -200,6 +200,35 @@ export class Bullet {
           
           // Anti-cheat: For local bullets, send hit to server and let server decide
           if (this.isLocalBullet && window.networkManager) {
+            // Track recent hits to prevent accidentally sending multiple hit notifications
+            if (!window.hitDebounce) {
+              window.hitDebounce = new Map();
+            }
+            
+            // Generate a unique key for this hit (player ID + hit zone + approximate position)
+            const hitKey = `${playerId}_${hitResult.zone}_${Math.round(endPos.x)}_${Math.round(endPos.y)}_${Math.round(endPos.z)}`;
+            const now = performance.now();
+            const lastHitTime = window.hitDebounce.get(hitKey) || 0;
+            const debounceTime = 500; // 500ms debounce time
+
+            if (now - lastHitTime < debounceTime) {
+              console.log(`Debouncing duplicate hit detection: ${hitKey}`);
+              return { 
+                active: false, 
+                hit: { 
+                  type: 'player', 
+                  playerId, 
+                  bulletId: this.bulletId,
+                  zone: hitResult.zone,
+                  damage: hitResult.damage,
+                  debounced: true
+                } 
+              };
+            }
+            
+            // Update the last hit time for this target
+            window.hitDebounce.set(hitKey, now);
+            
             window.networkManager.sendPlayerHit(playerId, {
               position: { x: endPos.x, y: endPos.y, z: endPos.z },
               sourcePlayerId: this.sourcePlayerId,
@@ -215,13 +244,17 @@ export class Bullet {
                 
                 console.log(`Quick Draw hit detected! Player ${this.sourcePlayerId} hit player ${playerId} in the ${hitResult.zone} for ${hitResult.damage} damage`);
                 
-                // Send special Quick Draw hit notification with hit zone information
+                // We don't need to send both a playerHit and a quickDrawShoot - just use one
+                // The previous playerHit is enough for the server to handle this hit
+                // Commenting out the additional QuickDraw notification to prevent double-hits
+                /*
                 window.networkManager.sendQuickDrawShoot(
                   playerId, 
                   window.quickDraw.activeArenaIndex,
                   hitResult.zone,
                   hitResult.damage
                 );
+                */
             }
           }
           

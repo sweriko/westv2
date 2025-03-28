@@ -69,6 +69,17 @@ export class MultiplayerManager {
     // Anti-cheat: Player got hit (local player) - server validated
     networkManager.onPlayerHit = (sourceId, hitData, newHealth, hitZone) => {
       console.log(`I was hit by player ${sourceId} in the ${hitZone || 'body'}!`);
+      
+      // Skip processing if this is a QuickDraw duel hit - QuickDraw will handle it separately
+      const isQuickDrawDuel = window.quickDraw && window.quickDraw.inDuel && 
+                              window.quickDraw.duelOpponentId === Number(sourceId);
+      
+      if (isQuickDrawDuel) {
+        console.log(`[MultiplayerManager] Deferring hit handling to QuickDraw system`);
+        return;
+      }
+      
+      // This is a regular hit, not in QuickDraw mode
       this.showHitFeedback();
       
       // Play headshot sound if appropriate
@@ -114,6 +125,16 @@ export class MultiplayerManager {
     // Anti-cheat: Broadcast that some player was hit (server validated)
     networkManager.onPlayerHitBroadcast = (targetId, sourceId, hitPos, newHealth, hitZone) => {
       console.log(`Player ${targetId} was hit by ${sourceId} in the ${hitZone || 'body'}`);
+      
+      // Skip processing if this is a QuickDraw duel hit
+      const isQuickDrawHit = window.quickDraw && window.quickDraw.inDuel && 
+                            (window.quickDraw.duelOpponentId === Number(targetId) || 
+                             window.localPlayer.id === Number(targetId));
+      
+      if (isQuickDrawHit) {
+        console.log(`[MultiplayerManager] Skipping hit broadcast for QuickDraw duel`);
+        return;
+      }
       
       // Convert targetId to integer if it's a string
       const playerId = typeof targetId === 'string' ? parseInt(targetId, 10) : targetId;

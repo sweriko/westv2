@@ -216,7 +216,7 @@ wss.on('connection', (ws, req) => {
           break;
 
         case 'playerHit':
-          handlePlayerHit(playerId, data);
+          handlePlayerHit(playerId, data.targetId, data.hitData, data.bulletId);
           break;
 
         case 'reload':
@@ -491,80 +491,122 @@ function handlePlayerReload(playerId, data) {
 }
 
 // Anti-cheat: Handle player hit validation
-function handlePlayerHit(playerId, data) {
-  if (!data.targetId) return;
+function handlePlayerHit(playerId, targetId, hitData, bulletId) {
+  console.log(`Player ${playerId} claims hit on player ${targetId}`);
   
-  const targetId = parseInt(data.targetId);
-  const sourcePlayer = players.get(playerId);
-  const targetPlayer = players.get(targetId);
-  
-  if (!sourcePlayer || !targetPlayer) return;
-  
-  // Validate that players are in compatible game modes
-  const sourceInQuickDraw = sourcePlayer.inQuickDrawDuel;
-  const targetInQuickDraw = targetPlayer.inQuickDrawDuel;
-  
-  // Verify that players are either both in QuickDraw or both in regular mode
-  const bothInQuickDraw = sourceInQuickDraw && targetInQuickDraw && 
-                         sourcePlayer.quickDrawDuelId === targetPlayer.quickDrawDuelId;
-  const bothInRegularMode = !sourceInQuickDraw && !targetInQuickDraw;
-  
-  if (!(bothInQuickDraw || bothInRegularMode)) {
-    console.log(`Rejecting hit claim from player ${playerId} on ${targetId}: incompatible game modes`);
-    console.log(`Source: QuickDraw=${sourceInQuickDraw}`);
-    console.log(`Target: QuickDraw=${targetInQuickDraw}`);
-    return sendErrorToPlayer(playerId, "Invalid hit: players in different game modes", false);
-  }
-  
-  // If this is a hit in a QuickDraw duel, let the QuickDraw system handle it
-  // This prevents the general hit system from interfering with QuickDraw duels
-  if (bothInQuickDraw) {
-    console.log(`Hit in QuickDraw duel detected - deferring to QuickDraw hit system`);
+  // Basic validation
+  if (!players.has(playerId) || !players.has(targetId)) {
+    console.log(`Hit claim invalid - player ${playerId} or target ${targetId} not found`);
     return;
   }
   
-  // Get hit data
-  const hitZone = data.hitData && data.hitData.hitZone ? data.hitData.hitZone : 'body';
-  const damage = data.hitData && data.hitData.damage ? data.hitData.damage : 40;
+  const player = players.get(playerId);
+  const target = players.get(targetId);
   
-  // Validate hit zone and damage
-  let finalDamage = damage;
-  if (hitZone === 'head') {
-    finalDamage = 100; // Headshot is always lethal
-  } else if (hitZone === 'body') {
-    finalDamage = 40; // Body shot deals 40 damage
-  } else if (hitZone === 'limbs') {
-    finalDamage = 20; // Limb shot deals 20 damage
+  // Check if bullet ID is valid, if provided
+  if (bulletId && !activeBullets.has(bulletId)) {
+    console.log(`Invalid bullet ID: ${bulletId}`);
+    return sendErrorToPlayer(playerId, "Invalid bullet ID", false);
   }
   
-  // Apply hit effects: reduce health
-  targetPlayer.health = Math.max(targetPlayer.health - finalDamage, 0);
+  // Track hit timestamps to prevent double-counting hits
+  // Initialize hit tracking structure if not already present
+  if (!player.recentHits) {
+    player.recentHits = new Map();
+  }
   
-  // Inform the target
-  if (targetPlayer.ws.readyState === WebSocket.OPEN) {
-    targetPlayer.ws.send(JSON.stringify({
+  // Check for duplicate/too frequent hits on the same target
+  const now = Date.now();
+  const lastHitTime = player.recentHits.get(targetId) || 0;
+  const hitDebounceTime = 300; // 300ms minimum between hits on same target
+  
+  if (now - lastHitTime < hitDebounceTime) {
+    console.log(`Hit debounced: Player ${playerId} hit ${targetId} too quickly after last hit (${now - lastHitTime}ms)`);
+    return; // Silently ignore too-frequent hits
+  }
+  
+  // Update last hit time for this target
+  player.recentHits.set(targetId, now);
+  
+  // ADDED: Check if this is a quickdraw duel hit
+  // If the players are in a quickdraw duel, handle it using the quickdraw logic
+  if (player.inQuickDrawDuel && target.inQuickDrawDuel && player.quickDrawDuelId === target.quickDrawDuelId) {
+    const duel = quickDrawDuels.get(player.quickDrawDuelId);
+    if (duel && duel.state === 'draw') {
+      console.log(`Handling hit as part of QuickDraw duel ${player.quickDrawDuelId}`);
+      // Calculate damage based on hit zone
+      let finalDamage = 40; // Default body shot
+      
+      if (hitData.hitZone === 'head') {
+        finalDamage = 100; // One-shot kill for headshots
+      } else if (hitData.hitZone === 'limbs') {
+        finalDamage = Math.round(40 * 0.6); // Reduced damage for limb shots
+      } else if (hitData.hitZone === 'body') {
+        finalDamage = 40; // Standard body shot damage
+      }
+      
+      // Use the quickdraw handler with the appropriate damage and hit zone
+      handleQuickDrawShoot(playerId, targetId, undefined, hitData.hitZone, finalDamage);
+      return;
+    }
+  }
+  
+  // Rest of original hit handling for non-quickdraw hits
+  // Get bullet data if available
+  let bullet = null;
+  if (bulletId && activeBullets.has(bulletId)) {
+    bullet = activeBullets.get(bulletId);
+  }
+  
+  // Calculate damage based on hit zone (if available)
+  let damage = GAME_CONSTANTS.DAMAGE_PER_HIT;
+  if (hitData.hitZone === 'head') {
+    damage = 100; // One-shot kill for headshots
+  } else if (hitData.hitZone === 'body') {
+    damage = 40; // Standard body shot
+  } else if (hitData.hitZone === 'limbs') {
+    damage = 20; // Reduced damage for limbs
+  }
+  
+  // Apply damage to target
+  target.health = Math.max(0, target.health - damage);
+  
+  // Notify both target and shooter
+  if (target.ws && target.ws.readyState === WebSocket.OPEN) {
+    target.ws.send(JSON.stringify({
       type: 'hit',
       sourceId: playerId,
-      hitData: data.hitData,
-      health: targetPlayer.health,
-      hitZone: hitZone
+      hitData: hitData,
+      hitZone: hitData.hitZone,
+      health: target.health
     }));
   }
   
-  // Broadcast the hit to everyone
-  broadcastToAll({
+  if (player.ws && player.ws.readyState === WebSocket.OPEN) {
+    player.ws.send(JSON.stringify({
+      type: 'playerHit',
+      targetId: targetId,
+      sourceId: playerId,
+      hitPosition: hitData.position,
+      health: target.health,
+      hitZone: hitData.hitZone,
+      damage: damage
+    }));
+  }
+  
+  // Broadcast hit to other players for visual effects
+  broadcastToOthers([playerId, targetId], {
     type: 'playerHit',
     targetId: targetId,
     sourceId: playerId,
-    hitPosition: data.hitData ? data.hitData.position : null,
-    health: targetPlayer.health,
-    bulletId: data.bulletId,
-    hitZone: hitZone,
-    damage: finalDamage
+    hitPosition: hitData.position,
+    health: target.health,
+    hitZone: hitData.hitZone,
+    damage: damage
   });
   
-  // Only handle regular player death (not QuickDraw duels)
-  if (targetPlayer.health <= 0 && !targetInQuickDraw) {
+  // Check if target has been defeated
+  if (target.health <= 0) {
     handlePlayerDeath(targetId, playerId);
   }
 }
@@ -1123,8 +1165,26 @@ function handleQuickDrawShoot(playerId, targetId, arenaIndex, hitZone = 'body', 
         return;
     }
     
+    // Add hit debouncing to prevent double counting - track the last hit time
+    // Initialize the lastHitTime map on the duel object if it doesn't exist
+    if (!duel.lastHitTime) {
+        duel.lastHitTime = new Map();
+    }
+    
+    const now = Date.now();
+    const lastHitTime = duel.lastHitTime.get(targetId) || 0;
+    const hitDebounceTime = 300; // 300ms minimum time between hits
+    
+    if (now - lastHitTime < hitDebounceTime) {
+        console.log(`Quick Draw shoot debounced: Too soon after last hit (${now - lastHitTime}ms)`);
+        return; // Ignore rapid-fire hit reports that are too close together
+    }
+    
+    // Update the last hit time for this target
+    duel.lastHitTime.set(targetId, now);
+    
     // Calculate reaction time
-    const reactionTime = Date.now() - duel.drawTime;
+    const reactionTime = now - duel.drawTime;
     
     // Calculate damage based on hit zone
     let finalDamage = damage;
@@ -1139,31 +1199,42 @@ function handleQuickDrawShoot(playerId, targetId, arenaIndex, hitZone = 'body', 
     // Apply damage to target
     const targetPlayer = players.get(targetId);
     if (!targetPlayer) {
+        console.log(`Target player ${targetId} not found`);
         return;
     }
     
+    // Get current health before applying damage
+    const currentHealth = targetPlayer.health || 100;
+    
     // Calculate new health after damage
-    const newHealth = Math.max(0, targetPlayer.health - finalDamage);
+    const newHealth = Math.max(0, currentHealth - finalDamage);
+    
+    // Debug info for health calculation
+    console.log(`[DEBUG] Health calculation: ${currentHealth} - ${finalDamage} = ${newHealth}`);
+    
+    // Store the new health
     targetPlayer.health = newHealth;
     
     console.log(`Player ${targetId} hit for ${finalDamage} damage, health now ${targetPlayer.health}`);
     
     // Send health update to both players
     if (targetPlayer.ws && targetPlayer.ws.readyState === WebSocket.OPEN) {
+        console.log(`Sending health update to target: ${targetId} - health: ${newHealth}`);
         targetPlayer.ws.send(JSON.stringify({
             type: 'playerHealthUpdate',
             playerId: targetId,
-            health: targetPlayer.health,
+            health: newHealth,
             damage: finalDamage,
             hitBy: playerId
         }));
     }
     
     if (playerData.ws && playerData.ws.readyState === WebSocket.OPEN) {
+        console.log(`Sending health update to shooter: ${playerId} - target health: ${newHealth}`);
         playerData.ws.send(JSON.stringify({
             type: 'playerHealthUpdate',
             playerId: targetId, 
-            health: targetPlayer.health,
+            health: newHealth,
             damage: finalDamage,
             hitBy: playerId
         }));
@@ -1174,6 +1245,8 @@ function handleQuickDrawShoot(playerId, targetId, arenaIndex, hitZone = 'body', 
         console.log(`Player ${targetId} defeated in duel - health reduced to 0`);
         // End the duel with shooter as winner
         endQuickDrawDuel(duelId, playerId);
+    } else {
+        console.log(`Player ${targetId} was hit but still has ${newHealth} health - duel continues`);
     }
 }
 
