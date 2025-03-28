@@ -79,6 +79,59 @@ export class Viewmodel {
    * @private
    */
   _loadModel() {
+    // Check if we have a preloaded viewmodel
+    if (window.preloadedModels && (window.preloadedModels.viewmodel || window.preloadedModels.viewmodel_clone)) {
+      console.log("Using preloaded viewmodel");
+      try {
+        // Use the clone version to avoid reference issues
+        const preloadedModel = window.preloadedModels.viewmodel_clone || window.preloadedModels.viewmodel;
+        const gltf = {
+          scene: preloadedModel.scene.clone(),
+          animations: preloadedModel.animations
+        };
+        
+        this.model = gltf.scene;
+        this.group.add(this.model);
+        
+        // Setup animations
+        this.mixer = new THREE.AnimationMixer(this.model);
+        
+        console.log('Viewmodel animations loaded:');
+        if (gltf.animations && gltf.animations.length) {
+          gltf.animations.forEach(clip => {
+            console.log(`- Animation: "${clip.name}" (Duration: ${clip.duration.toFixed(2)}s)`);
+            
+            // Create action but don't play it yet
+            const action = this.mixer.clipAction(clip);
+            this.animations[clip.name] = action;
+            
+            // We'll configure each action when we need to play it
+            action.clampWhenFinished = false;
+            action.loop = THREE.LoopOnce;
+            action.enabled = false;
+          });
+          
+          // Set up idle to loop by default
+          this._configureIdleAnimation();
+          
+          // Start with idle animation
+          this.playIdle();
+        } else {
+          console.warn('No animations found in preloaded viewmodel!');
+        }
+        
+        console.log('Viewmodel loaded successfully from preload');
+        this.isLoaded = true;
+        
+        // Create a muzzle flash anchor
+        this._createMuzzleFlashAnchor();
+        return; // Exit early since we've handled the model
+      } catch (e) {
+        console.error('Error using preloaded viewmodel:', e);
+        // Fall through to regular loading method if preloaded model fails
+      }
+    }
+    
     const loader = new THREE.GLTFLoader();
     loader.load(
       'models/viewmodel.glb',

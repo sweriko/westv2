@@ -72,9 +72,14 @@ function loadTwoPartSkybox() {
   const textureLoader = new THREE.TextureLoader();
   const skyboxRadius = 900;
   
-  // Load sky part (with transparency for bottom half)
-  textureLoader.load('models/skypart.png', function(skyTexture) {
-    console.log("Sky texture loaded successfully");
+  // Check if we're running after preloading during name entry
+  if (window.contentPreloaded) {
+    console.log("Using preloaded skybox textures");
+  }
+  
+  // Function to create sky part with a texture
+  function createSkyPart(skyTexture) {
+    console.log("Creating sky part with texture");
     
     // Create sky mesh with LARGER radius (1.01x)
     const skyGeometry = new THREE.SphereGeometry(skyboxRadius * 1.01, 64, 32);
@@ -89,11 +94,11 @@ function loadTwoPartSkybox() {
     skyMesh = new THREE.Mesh(skyGeometry, skyMaterial);
     scene.add(skyMesh);
     console.log("Sky part added to scene");
-  });
+  }
   
-  // Load ground part (with transparency for top half)
-  textureLoader.load('models/groundpart.png', function(groundTexture) {
-    console.log("Ground texture loaded successfully");
+  // Function to create ground part with a texture
+  function createGroundPart(groundTexture) {
+    console.log("Creating ground part with texture");
     
     // Create ground mesh with normal radius
     const groundGeometry = new THREE.SphereGeometry(skyboxRadius, 64, 32);
@@ -108,7 +113,30 @@ function loadTwoPartSkybox() {
     groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
     scene.add(groundMesh);
     console.log("Ground part added to scene");
-  });
+  }
+  
+  // Check if we have preloaded textures
+  if (window.preloadedTextures && window.preloadedTextures.skypart) {
+    console.log("Using preloaded skypart texture");
+    createSkyPart(window.preloadedTextures.skypart);
+  } else {
+    // Load sky part (with transparency for bottom half)
+    textureLoader.load('models/skypart.png', function(skyTexture) {
+      console.log("Sky texture loaded successfully");
+      createSkyPart(skyTexture);
+    });
+  }
+  
+  if (window.preloadedTextures && window.preloadedTextures.groundpart) {
+    console.log("Using preloaded groundpart texture");
+    createGroundPart(window.preloadedTextures.groundpart);
+  } else {
+    // Load ground part (with transparency for top half)
+    textureLoader.load('models/groundpart.png', function(groundTexture) {
+      console.log("Ground texture loaded successfully");
+      createGroundPart(groundTexture);
+    });
+  }
 }
 
 /**
@@ -127,10 +155,8 @@ function createWesternTown() {
     streetWidth: STREET_WIDTH
   };
 
-  // Load the town model
-  const loader = new THREE.GLTFLoader();
-  console.log("Loading town.glb model...");
-  loader.load('models/town.glb', (gltf) => {
+  // Function to process the town model
+  function processTownModel(gltf) {
     // Add the entire model to the scene
     scene.add(gltf.scene);
     console.log("Town model added to scene");
@@ -202,17 +228,32 @@ function createWesternTown() {
     window.townColliders = colliders;
     
     console.log(`Town model loaded with ${objectCount} objects, including ${colliderCount} colliders`);
-  }, 
-  // Progress callback
-  (progress) => {
-    if (progress.lengthComputable) {
-      const percentage = Math.round((progress.loaded / progress.total) * 100);
-      console.log(`Loading town model: ${percentage}%`);
-    }
-  },
-  (error) => {
-    console.error('Error loading town model:', error);
-  });
+  }
+  
+  // Check if we have a preloaded town model
+  if (window.preloadedModels && window.preloadedModels.town) {
+    console.log("Using preloaded town model");
+    // Clone the model to avoid reference issues
+    const clonedScene = window.preloadedModels.town.scene.clone();
+    processTownModel({scene: clonedScene});
+  } else {
+    // Load the town model
+    const loader = new THREE.GLTFLoader();
+    console.log("Loading town.glb model..." + (window.contentPreloaded ? " (should be cached from preload)" : ""));
+    loader.load('models/town.glb', 
+      (gltf) => processTownModel(gltf), 
+      // Progress callback
+      (progress) => {
+        if (progress.lengthComputable) {
+          const percentage = Math.round((progress.loaded / progress.total) * 100);
+          console.log(`Loading town model: ${percentage}%`);
+        }
+      },
+      (error) => {
+        console.error('Error loading town model:', error);
+      }
+    );
+  }
 }
 
 /**

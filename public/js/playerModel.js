@@ -154,6 +154,67 @@ export class ThirdPersonModel {
   }
 
   loadPlayerModel() {
+    // Check if we have a preloaded player model
+    if (window.preloadedModels && (window.preloadedModels.playermodel || window.preloadedModels.playermodel_clone)) {
+      console.log("Using preloaded playermodel");
+      try {
+        // Use the clone version to avoid reference issues
+        const preloadedModel = window.preloadedModels.playermodel_clone || window.preloadedModels.playermodel;
+        const gltf = {
+          scene: preloadedModel.scene.clone(),
+          animations: preloadedModel.animations
+        };
+        
+        this.playerModel = gltf.scene;
+        
+        // Position at origin with no offset to make feet touch the ground
+        this.playerModel.position.set(0, 0, 0);
+        
+        // Set scale - increased by 70%
+        this.playerModel.scale.set(1.445, 1.445, 1.445);
+        
+        // Rotate model to face the right direction (might need adjustment)
+        this.playerModel.rotation.y = Math.PI; // Rotate 180 degrees
+    
+        // Add the model to the group
+        this.group.add(this.playerModel);
+        
+        // Set up meshes correctly
+        this.playerModel.traverse(child => {
+          if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+            child.userData.isPlayerMesh = true;
+            
+            // Ensure materials are set up correctly
+            if (child.material) {
+              child.material.side = THREE.DoubleSide;
+              
+              // If this is a skinned mesh, ensure skinning is enabled
+              if (child.isSkinnedMesh) {
+                child.material.skinning = true;
+              }
+              
+              child.material.needsUpdate = true;
+            }
+          }
+        });
+        
+        // Set up animations - do this after model is loaded
+        if (gltf.animations && gltf.animations.length > 0) {
+          // Initialize animations immediately
+          this.setupAnimations(gltf.animations);
+        }
+        
+        // Initialize hit zone visualizers
+        this.createHitZoneVisualizers();
+        return; // Exit early since we've handled the model
+      } catch (e) {
+        console.error('Error using preloaded player model:', e);
+        // Fall through to regular loading method if preloaded model fails
+      }
+    }
+    
     // Create loader instance
     const loader = new THREE.GLTFLoader();
     

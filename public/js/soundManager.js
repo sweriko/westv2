@@ -186,6 +186,67 @@ export class SoundManager {
   }
   
   /**
+   * Registers a sound as preloaded - used when sounds were preloaded during the name entry
+   * @param {string} name - Sound key to register
+   * @param {string} category - Optional override for the sound category
+   */
+  registerPreloadedSound(name, category = null) {
+    // If category is provided, map this sound to that category
+    if (category && this.soundCategories[category]) {
+      this.soundCategoryMap[name] = category;
+    }
+    
+    // Detect URL based on name
+    const url = `sounds/${name}.mp3`;
+    
+    // When a sound is played, it will be lazy-loaded on first play
+    console.log(`Registered preloaded sound "${name}" (will be loaded on first play)`);
+    
+    // Initialize sound pool for this sound
+    const soundCategory = this._getSoundCategory(name);
+    const poolSize = this.soundCategories[soundCategory].maxInstances;
+    
+    // Create pool for this sound
+    this.soundPools[name] = Array(poolSize).fill().map(() => ({
+      source: null,
+      gainNode: null,
+      panner: null,
+      active: false,
+      startTime: 0
+    }));
+  }
+  
+  /**
+   * Adds a preloaded audio buffer directly to the SoundManager
+   * @param {string} name - Sound name
+   * @param {AudioBuffer} buffer - Preloaded audio buffer
+   * @param {string} category - Optional category override 
+   */
+  addPreloadedBuffer(name, buffer, category = null) {
+    // If category is provided, map this sound to that category
+    if (category && this.soundCategories[category]) {
+      this.soundCategoryMap[name] = category;
+    }
+    
+    // Store the buffer directly
+    this.buffers[name] = buffer;
+    console.log(`Added preloaded audio buffer for "${name}"`);
+    
+    // Initialize sound pool for this sound
+    const soundCategory = this._getSoundCategory(name);
+    const poolSize = this.soundCategories[soundCategory].maxInstances;
+    
+    // Create pool for this sound
+    this.soundPools[name] = Array(poolSize).fill().map(() => ({
+      source: null,
+      gainNode: null,
+      panner: null,
+      active: false,
+      startTime: 0
+    }));
+  }
+  
+  /**
    * Cleanups and returns an available sound object from the pool
    * @param {string} name - Sound name
    * @returns {Object|null} Sound object from pool or null if none available
@@ -265,109 +326,139 @@ export class SoundManager {
   }
   
   /**
-   * Plays a sound with proper resource management
-   * @param {string} name - Sound key.
-   * @param {number} cooldown - Optional cooldown in milliseconds.
-   * @param {number} volume - Optional volume multiplier.
+   * Plays a sound with optional volume control
+   * @param {string} name - The name of the sound to play
+   * @param {number} cooldown - Minimum time between sound plays (ms)
+   * @param {number} volume - Volume multiplier for this sound (0-1)
    * @param {boolean} loop - Whether the sound should loop
+   * @returns {Object|null} Sound object for further control or null if not played
    */
   playSound(name, cooldown = 0, volume = 1.0, loop = false) {
-    if (!this.buffers[name]) {
-      console.error(`Sound "${name}" not found in buffers.`);
-      return;
+    // Check if sound exists and is not on cooldown
+    if (!this.soundPools[name]) {
+      console.warn(`Sound "${name}" not found in sound pool`);
+      return null;
     }
     
-    // Check cooldown if specified
+    // Check if on cooldown
     if (cooldown > 0) {
       const now = Date.now();
-      if (this.soundCooldowns[name] && now - this.soundCooldowns[name] < cooldown) {
-        // Still in cooldown period
-        return;
+      const lastPlayed = this.soundCooldowns[name] || 0;
+      if (now - lastPlayed < cooldown) {
+        return null;
       }
       this.soundCooldowns[name] = now;
     }
     
+    // Check if sound buffer is loaded
+    if (!this.buffers[name]) {
+      // If this is a registered preloaded sound, load it now
+      if (this.soundPools[name]) {
+        console.log(`Lazy loading sound "${name}" on first play`);
+        // Determine URL from name
+        const url = `sounds/${name}.mp3`;
+        
+        // Return a promise that resolves when the sound is loaded and played
+        return new Promise((resolve, reject) => {
+          fetch(url)
+            .then(response => {
+              if (!response.ok) {
+                throw new Error(`Network response failed for sound ${name}: ${response.status} ${response.statusText}`);
+              }
+              return response.arrayBuffer();
+            })
+            .then(arrayBuffer => this.audioContext.decodeAudioData(arrayBuffer))
+            .then(audioBuffer => {
+              this.buffers[name] = audioBuffer;
+              console.log(`Lazy loaded sound "${name}" as AudioBuffer`);
+              
+              // Now play the sound and resolve the promise
+              const sound = this._playSoundFromBuffer(name, volume, loop);
+              resolve(sound);
+            })
+            .catch(error => {
+              console.error(`Error lazy loading sound "${name}":`, error);
+              reject(error);
+            });
+        });
+      } else {
+        console.warn(`Sound "${name}" buffer not loaded yet`);
+        return null;
+      }
+    }
+    
+    return this._playSoundFromBuffer(name, volume, loop);
+  }
+  
+  /**
+   * Internal method to play a sound from an already loaded buffer
+   * @private
+   * @param {string} name - Sound name
+   * @param {number} volume - Volume multiplier
+   * @param {boolean} loop - Whether to loop
+   * @returns {Object} Sound object
+   */
+  _playSoundFromBuffer(name, volume = 1.0, loop = false) {
     // Get sound category
     const category = this._getSoundCategory(name);
     
-    // Get an available sound from the pool
+    // Get a sound object from the pool
     const soundObj = this._getAvailableSoundFromPool(name);
-    if (!soundObj) {
-      console.warn(`No available sound objects for ${name}`);
-      return;
-    }
     
-    try {
-      // Clean up previous nodes if they exist
-      if (soundObj.gainNode) {
-        soundObj.gainNode.disconnect();
-      }
-      
-      // Create new audio nodes
-      soundObj.source = this.audioContext.createBufferSource();
-      soundObj.source.buffer = this.buffers[name];
-      soundObj.source.loop = loop;
-      
-      // Create gain node for individual volume control
-      soundObj.gainNode = this.audioContext.createGain();
-      soundObj.gainNode.gain.value = volume;
-      
-      // Add some sound-specific adjustments
-      if (category === 'weapon') {
-        // For weapon sounds, add a subtle highpass filter to make them sharper
-        soundObj.filter = this.audioContext.createBiquadFilter();
-        soundObj.filter.type = 'highpass';
-        soundObj.filter.frequency.value = 80; // Cut very low frequencies
-        
-        // Connect source -> filter -> gain -> category
-        soundObj.source.connect(soundObj.filter);
-        soundObj.filter.connect(soundObj.gainNode);
-        
-        // If reverb is available, send a portion of the sound to reverb
-        if (this.reverbSend && this.convolver) {
-          // Create a gain node for reverb send amount
-          soundObj.reverbAmount = this.audioContext.createGain();
-          soundObj.reverbAmount.gain.value = 0.15; // 15% reverb
-          
-          // Send from filter to reverb
-          soundObj.filter.connect(soundObj.reverbAmount);
-          soundObj.reverbAmount.connect(this.reverbSend);
-        }
-      } else {
-        // Normal connection for other sounds
-        soundObj.source.connect(soundObj.gainNode);
-      }
-      
-      // Connect to category gain
-      soundObj.gainNode.connect(this.categoryGains[category]);
-      
-      // Mark as active and track start time
-      soundObj.active = true;
-      soundObj.startTime = this.audioContext.currentTime;
-      
-      // Start playing
-      soundObj.source.start(0);
-      
-      // When the sound ends, mark it as inactive
-      soundObj.source.onended = () => {
-        soundObj.active = false;
-        // Remove from active sounds list
-        const index = this.activeSounds[category].indexOf(soundObj);
-        if (index !== -1) {
-          this.activeSounds[category].splice(index, 1);
-        }
-      };
-      
-      // Manage active sounds for this category
-      this._manageActiveSoundsForCategory(category, soundObj);
-      
-      // Return the sound object for reference
-      return soundObj;
-    } catch (error) {
-      console.error(`Error playing sound "${name}":`, error);
-      soundObj.active = false;
+    if (!soundObj) {
+      console.warn(`No available sound in pool for "${name}"`);
       return null;
     }
+    
+    // Create a sound source
+    const source = this.audioContext.createBufferSource();
+    source.buffer = this.buffers[name];
+    source.loop = loop;
+    
+    // Create a gain node for volume control
+    const gainNode = this.audioContext.createGain();
+    gainNode.gain.value = Math.min(1.0, Math.max(0, volume)); // Clamp volume
+    
+    // Connect source to gain, and gain to the appropriate category gain
+    source.connect(gainNode);
+    
+    // Connect to the reverb send if available and this is a weapon sound
+    if (this.reverbSend && category === 'weapon') {
+      gainNode.connect(this.reverbSend);
+    }
+    
+    // Connect to the correct category gain
+    gainNode.connect(this.categoryGains[category]);
+    
+    // Make sure we resume the audio context if suspended
+    if (this.audioContext.state === 'suspended') {
+      this.audioContext.resume();
+    }
+    
+    // Track the sound for category management
+    this._manageActiveSoundsForCategory(category, soundObj);
+    
+    // Start playing and save references
+    source.start(0);
+    soundObj.source = source;
+    soundObj.gainNode = gainNode;
+    soundObj.active = true;
+    soundObj.startTime = this.audioContext.currentTime;
+    
+    // Setup cleanup when the sound ends
+    source.onended = () => {
+      soundObj.active = false;
+      soundObj.source = null;
+      
+      // Remove from active sounds
+      const categorySounds = this.activeSounds[category];
+      const index = categorySounds.indexOf(soundObj);
+      if (index !== -1) {
+        categorySounds.splice(index, 1);
+      }
+    };
+    
+    return soundObj;
   }
   
   /**

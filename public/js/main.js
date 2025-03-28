@@ -55,6 +55,32 @@ async function init() {
     const playerIdentity = await initPlayerIdentity();
     console.log(`Welcome back, ${playerIdentity.username}! Player ID: ${playerIdentity.id}`);
     
+    // Track whether content was already preloaded during name entry
+    window.contentPreloaded = playerIdentity.username && !localStorage.getItem('wildWestFirstTimeLoad');
+    if (!window.contentPreloaded) {
+      localStorage.setItem('wildWestFirstTimeLoad', 'true');
+    }
+    
+    // Clean up preview scene if it exists
+    if (window.previewScene) {
+      console.log("Cleaning up preview scene...");
+      if (window.previewScene.renderer) {
+        window.previewScene.renderer.dispose();
+      }
+      
+      // Remove animation loop
+      window.previewSceneActive = false;
+      
+      // Remove the canvas element
+      const oldCanvas = window.previewScene.renderer.domElement;
+      if (oldCanvas && oldCanvas.parentNode) {
+        oldCanvas.parentNode.removeChild(oldCanvas);
+      }
+      
+      // Clear reference to prevent memory leaks
+      window.previewScene = null;
+    }
+    
     // Expose player identity to window for easy access from other modules
     window.playerIdentity = playerIdentity;
     
@@ -75,27 +101,48 @@ async function init() {
     window.physics = physics; // Make physics globally accessible
 
     const soundManager = new SoundManager();
-    // Load shot sounds
-    soundManager.loadSound("shot", "sounds/shot.mp3");
-    soundManager.loadSound("aimclick", "sounds/aimclick.mp3");
-    soundManager.loadSound("shellejection", "sounds/shellejection.mp3");
-    soundManager.loadSound("reloading", "sounds/reloading.mp3");
-    // Load the bell start sound for Quick Draw start signal
-    soundManager.loadSound("bellstart", "sounds/bellstart.mp3");
-    // Load impact sounds
-    soundManager.loadSound("woodimpact", "sounds/woodimpact.mp3");
-    soundManager.loadSound("fleshimpact", "sounds/fleshimpact.mp3");
     
-    // Load footstep and jump sounds
-    soundManager.loadSound("leftstep", "sounds/leftstep.mp3");
-    soundManager.loadSound("rightstep", "sounds/rightstep.mp3");
-    soundManager.loadSound("jump", "sounds/jump.mp3");
+    // Store preloaded audio if available
+    if (window.preloadedAudio) {
+      console.log("Transferring preloaded audio to SoundManager");
+      Object.keys(window.preloadedAudio).forEach(soundName => {
+        soundManager.addPreloadedBuffer(soundName, window.preloadedAudio[soundName]);
+      });
+    }
     
-    // Load headshot marker sound
-    soundManager.loadSound("headshotmarker", "sounds/headshotmarker.mp3");
+    // Skip loading sounds if we already preloaded content during name entry
+    if (!window.contentPreloaded) {
+      // Load shot sounds
+      soundManager.loadSound("shot", "sounds/shot.mp3");
+      soundManager.loadSound("aimclick", "sounds/aimclick.mp3");
+      soundManager.loadSound("shellejection", "sounds/shellejection.mp3");
+      soundManager.loadSound("reloading", "sounds/reloading.mp3");
+      // Load the bell start sound for Quick Draw start signal
+      soundManager.loadSound("bellstart", "sounds/bellstart.mp3");
+      // Load impact sounds
+      soundManager.loadSound("woodimpact", "sounds/woodimpact.mp3");
+      soundManager.loadSound("fleshimpact", "sounds/fleshimpact.mp3");
+      
+      // Load footstep and jump sounds
+      soundManager.loadSound("leftstep", "sounds/leftstep.mp3");
+      soundManager.loadSound("rightstep", "sounds/rightstep.mp3");
+      soundManager.loadSound("jump", "sounds/jump.mp3");
+      
+      // Load headshot marker sound
+      soundManager.loadSound("headshotmarker", "sounds/headshotmarker.mp3");
+    } else {
+      console.log("Content was preloaded during first-time setup, skipping redundant loads");
+      
+      // Register sounds in sound manager without loading them again
+      ["shot", "aimclick", "shellejection", "reloading", "bellstart",
+       "woodimpact", "fleshimpact", "leftstep", "rightstep", "jump", 
+       "headshotmarker"].forEach(soundName => {
+         soundManager.registerPreloadedSound(soundName);
+      });
+    }
     
     // Preload all visual effects to prevent FPS drops on first use
-    if (!window.isMobile) {
+    if (!window.isMobile && !window.contentPreloaded) {
       console.log("Preloading visual effects...");
       // Preload muzzle flash effect
       preloadMuzzleFlash(scene);
@@ -145,6 +192,15 @@ async function init() {
             smokeRings[j].update(0.016); // 16ms in seconds
           }
         }
+      }
+    } else if (window.contentPreloaded) {
+      console.log("Visual effects were preloaded during first-time setup");
+      
+      // Still need to initialize the smoke ring array
+      for (let i = 0; i < 3; i++) {
+        const smokeRing = new SmokeRingEffect(scene);
+        smokeRing.active = false;
+        smokeRings.push(smokeRing);
       }
     }
     
