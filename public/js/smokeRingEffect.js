@@ -186,6 +186,10 @@ export class SmokeRingEffect {
         // Create new mesh with the proper geometry
         const geometry = isMuzzle ? this.muzzleGeometry : this.puffGeometry;
         const mesh = new THREE.Mesh(geometry, material);
+        
+        // Set renderOrder on the mesh itself where it belongs
+        mesh.renderOrder = 1000;
+        
         this.group.add(mesh);
         return mesh;
     }
@@ -415,6 +419,7 @@ export class SmokeRingEffect {
             const puff = this.puffs[i];
             puff.age += clampedDelta;
             
+            // If puff still alive, update it
             if (puff.age < puff.lifespan) {
                 allExpired = false;
                 

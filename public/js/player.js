@@ -796,9 +796,20 @@ export class Player {
       if (this.bullets === 0) {
         const reloadMessage = document.getElementById('reload-message');
         if (reloadMessage) reloadMessage.style.display = 'block';
+        
+        // Play the fakeshoot animation when no ammo
+        if (this.isAiming && this.viewmodel) {
+          this.viewmodel.playFakeShootAnim();
+          
+          // Play empty gun click sound if sound manager exists
+          if (this.soundManager) {
+            this.soundManager.playSound("empty_click");
+          }
+        }
       }
       return;
     }
+    
     // Actually shoot
     this.bullets--;
     updateAmmoUI(this);
@@ -944,6 +955,12 @@ export class Player {
     if (reloadMessage) reloadMessage.style.display = 'none';
     if (reloadProgressContainer) reloadProgressContainer.style.display = 'block';
 
+    // Always make sure viewmodel is visible during reload, regardless of aim state
+    if (this.viewmodel) {
+      this.viewmodel.group.visible = true;
+      this.viewmodel.playReloadAnim();
+    }
+
     if (this.soundManager) {
       this.soundManager.playSound("shellejection");
       this.soundManager.playSound("reloading");
@@ -979,6 +996,19 @@ export class Player {
     if (reloadProgressBar) reloadProgressBar.style.width = '0%';
     
     this.isReloading = false;
+
+    // After reload, hide viewmodel if not aiming
+    if (this.viewmodel && !this.isAiming) {
+      // Play holster animation and then hide
+      this.viewmodel.playHolsterAnim();
+      
+      setTimeout(() => {
+        if (!this.isAiming && !this.isReloading) {
+          this.viewmodel.group.visible = false;
+        }
+      }, 500); // Adjust timing based on holster animation length
+    }
+    
     this.sendNetworkUpdate(); // let others know
   }
   
@@ -1026,19 +1056,28 @@ export class Player {
           this.viewmodel.playDrawAim();
         }
       } else {
-        // Stopping aim - play holster animation
-        this.viewmodel.playHolsterAnim();
-        
-        // When holster animation finishes, hide the model
-        setTimeout(() => {
-          if (!this.isAiming) { // Double-check we're still not aiming
-            this.viewmodel.group.visible = false;
-          }
-        }, 500); // Adjust based on holster animation length
+        // Only holster if not in a forced-visible state (fakeshoot or reload)
+        if (!this.viewmodel.forceVisible) {
+          // Stopping aim - play holster animation
+          this.viewmodel.playHolsterAnim();
+          
+          // When holster animation finishes, hide the model
+          setTimeout(() => {
+            if (!this.isAiming && !this.viewmodel.forceVisible) { 
+              // Double-check we're still not aiming and not forced visible
+              this.viewmodel.group.visible = false;
+            }
+          }, 500); // Adjust based on holster animation length
+        }
       }
       
       // Update the tracked state
       this.updateAiming.lastAimingState = this.isAiming;
+    }
+    
+    // Always keep the gun visible if forceVisible is set (fakeshoot, reload, etc.)
+    if (this.viewmodel.forceVisible) {
+      this.viewmodel.group.visible = true;
     }
     
     // Crosshair animation if aiming
