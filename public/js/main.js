@@ -48,6 +48,15 @@ let maxSmokeRings = 10; // Limit to prevent performance issues
 window.showHitZoneDebug = false;
 window.showTownColliders = true; // Enable by default to help with debugging
 
+// Create a global renderer object to allow camera switching
+window.renderer = {
+  instance: null,
+  camera: null,
+  setCamera: function(newCamera) {
+    this.camera = newCamera;
+  }
+};
+
 // Initialize the application
 async function init() {
   try {
@@ -94,8 +103,11 @@ async function init() {
     const sceneSetup = initScene();
     camera = sceneSetup.camera;
     renderer = sceneSetup.renderer;
-    // scene is now initialized through initScene()
-
+    
+    // Set up global renderer access for camera switching
+    window.renderer.instance = renderer;
+    window.renderer.camera = camera;
+    
     // Initialize physics system first so it's available for the scene
     physics = new PhysicsSystem();
     window.physics = physics; // Make physics globally accessible
@@ -225,6 +237,12 @@ async function init() {
 
     // Initialize Quick Draw game mode after the local player is created
     quickDraw = new QuickDraw(scene, localPlayer, networkManager, soundManager);
+    
+    // Initialize the QuickDraw game mode
+    quickDraw.init();
+    
+    // Make quickDraw globally accessible for debugging
+    window.quickDraw = quickDraw;
     
     // Share the main physics system with game modes
     quickDraw.physics = physics;
@@ -429,6 +447,21 @@ function animate(time) {
   // Update Quick Draw game mode
   if (quickDraw) {
     quickDraw.update(deltaTime);
+    
+    // Camera safety check for QuickDraw
+    if (quickDraw.duelState === 'draw') {
+      // In draw phase, ALWAYS use the player's camera directly
+      if (localPlayer && localPlayer.camera) {
+        // For render call below - temporarily save which camera to use
+        window._renderWithCamera = localPlayer.camera;
+        
+        // Also update renderer references to be extra safe
+        window.renderer.camera = localPlayer.camera;
+        if (window.renderer.instance) {
+          window.renderer.instance.camera = localPlayer.camera;
+        }
+      }
+    }
   }
 
   // Update smoke ring effects
@@ -468,8 +501,27 @@ function animate(time) {
   // Update FPS display
   updateFPS(renderer, camera, deltaTime);
 
-  // Render
-  renderer.render(scene, camera);
+  // CAMERA SELECTION LOGIC:
+  // 1. First priority: Use special flag camera if set in QuickDraw draw phase
+  // 2. Second priority: Use window.renderer.camera
+  // 3. Fallback: Use default camera
+  let renderCamera;
+  
+  if (window._renderWithCamera) {
+    // Use the camera explicitly set by QuickDraw draw phase
+    renderCamera = window._renderWithCamera;
+    // Clear the flag after use
+    window._renderWithCamera = null;
+  } else if (window.renderer && window.renderer.camera) {
+    // Use the window.renderer camera
+    renderCamera = window.renderer.camera;
+  } else {
+    // Use default camera as last resort
+    renderCamera = camera;
+  }
+  
+  // Render with selected camera
+  renderer.render(scene, renderCamera);
 }
 
 /**

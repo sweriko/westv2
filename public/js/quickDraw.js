@@ -76,6 +76,14 @@ export class QuickDraw {
 
         // Make this instance globally accessible for network handlers
         window.quickDraw = this;
+
+        // Aerial camera for duel mode
+        this.aerialCamera = null;
+        this.aerialCameraActive = false;
+        this.aerialCameraAngle = 0;
+        
+        // Third-person model for local player (only visible during aerial view)
+        this.localPlayerModel = null;
     }
     
     /**
@@ -237,17 +245,22 @@ export class QuickDraw {
         // Skip if not in game or if player is in lobby/duel
         if (!this.localPlayer || this.inLobby || this.inDuel) return;
         
+        console.log(`[QuickDraw] Key pressed: ${event.code} | Pending challenge: ${this.pendingChallenge ? 'yes' : 'no'}`);
+        
         switch (event.code) {
             case 'KeyE':
                 // Send challenge when near a player
                 if (this.challengePromptActive) {
+                    console.log('[QuickDraw] E key pressed - sending challenge');
                     this.sendChallenge();
                 }
                 break;
                 
             case 'Enter':
+            case 'NumpadEnter': // Also handle numpad enter
                 // Accept invitation
                 if (this.pendingChallenge) {
+                    console.log('[QuickDraw] Enter key pressed - accepting challenge');
                     this.acceptChallenge();
                 }
                 break;
@@ -255,6 +268,7 @@ export class QuickDraw {
             case 'KeyT':
                 // Decline invitation
                 if (this.pendingChallenge) {
+                    console.log('[QuickDraw] T key pressed - declining challenge');
                     this.declineChallenge();
                 }
                 break;
@@ -265,7 +279,9 @@ export class QuickDraw {
      * Initialize network handlers for Quick Draw game mode.
      */
     initNetworkHandlers() {
-        // Methods for direct challenges
+        if (!this.networkManager || !this.networkManager.socket) return;
+        
+        // Methods for direct challenges and server communication
         this.networkManager.sendQuickDrawChallenge = (targetPlayerId) => {
             if (this.networkManager.socket && this.networkManager.socket.readyState === WebSocket.OPEN) {
                 this.networkManager.socket.send(JSON.stringify({
@@ -333,65 +349,130 @@ export class QuickDraw {
             try {
                 const message = JSON.parse(event.data);
                 
+                // Debug log for QuickDraw related messages
+                if (message.type && message.type.startsWith('quickDraw')) {
+                    console.log(`[QuickDraw] Received message: ${message.type}`, message);
+                }
+                
                 // Handle Quick Draw specific messages
                 switch (message.type) {
-                    case 'quickDrawMatch':
+                    case 'quickDrawMatchFound':
+                    case 'quickDrawMatch':  // Handle both formats for compatibility
+                        console.log('[QuickDraw] Match found!', message);
                         this.handleMatchFound(message);
+                        
+                        // Clear any pending challenge since we're now in a match
+                        this.pendingChallenge = null;
                         break;
+                        
                     case 'quickDrawReady':
+                        console.log('[QuickDraw] Ready signal received');
                         this.showReadyMessage();
                         break;
+                        
                     case 'quickDrawCountdown':
-                        this.startDuelCountdown();
+                        console.log('[QuickDraw] Countdown signal received');
+                        this.handleCountdown(message);
                         break;
+                        
                     case 'quickDrawDraw':
-                        this.triggerDraw();
+                        console.log('[QuickDraw] Received DRAW command from server');
+                        
+                        // Set duel state to draw phase
+                        this.duelState = 'draw';
+                        
+                        // Stop any countdown timer
+                        if (this._countdownInterval) {
+                            clearInterval(this._countdownInterval);
+                            this._countdownInterval = null;
+                        }
+                        
+                        // CRITICAL: Enable player aiming to allow drawing weapon
+                        if (this.localPlayer) {
+                            console.log('[QuickDraw] Enabling player aiming for draw phase');
+                            this.localPlayer.canAim = true;
+                        }
+                        
+                        // Switch to first person view (emergency direct camera switch)
+                        if (this.localPlayer && this.localPlayer.camera) {
+                            // Force camera to player's view
+                            if (this.scene && this.scene.renderer) {
+                                this.scene.renderer.camera = this.localPlayer.camera;
+                                this.scene.renderer.overrideCamera = null;
+                            }
+                        }
+                        
+                        // Ensure gun is visible but holstered
+                        if (this.localPlayer && this.localPlayer.viewmodel) {
+                            // Make gun visible
+                            this.localPlayer.viewmodel.visible = true;
+                            
+                            // Update gun state (without forcing aiming to false)
+                            if (this.localPlayer.currentGunOffset && this.localPlayer.holsterOffset && !this.localPlayer.isAiming) {
+                                this.localPlayer.currentGunOffset.copy(this.localPlayer.holsterOffset);
+                            }
+                        }
+                        
+                        // Hide local player model in first person
+                        if (this.localPlayerModel && this.localPlayerModel.group) {
+                            this.localPlayerModel.group.visible = false;
+                        }
+                        
+                        // Display draw message and play sound
+                        this.showMessage('DRAW!', 2000, 'red');
+                        if (this.soundManager) {
+                            this.soundManager.playSound("draw", 0.9);
+                        }
+                        
+                        // Check hit zones for proper detection
+                        this.fixHitZonesForQuickDraw();
+                        
                         break;
-                    case 'quickDrawEnd':
-                        this.endDuel(message.winnerId);
+                        
+                    case 'quickDrawKill':
+                        this.handleKill(message);
                         break;
+                        
+                    case 'quickDrawDeath':
+                        this.handleDeath(message);
+                        break;
+                        
+                    case 'quickDrawResult':
+                    case 'quickDrawEnd':  // Handle both formats for compatibility
+                        this.handleResult(message);
+                        break;
+                        
+                    case 'quickDrawChallengeReceived':
+                        this.handleChallengeReceived(message);
+                        break;
+                        
+                    case 'quickDrawChallengeAccepted':
+                        this.handleChallengeAccepted(message);
+                        break;
+                        
+                    case 'quickDrawChallengeDeclined':
+                        this.handleChallengeDeclined(message);
+                        break;
+                    
+                    case 'quickDrawAccepted':
+                    case 'quickDrawAccept':
+                        // Handle server confirmation of challenge acceptance
+                        console.log('[QuickDraw] Challenge acceptance confirmed by server');
+                        // The match will be set up by the server and we'll receive a matchFound message
+                        break;
+                        
                     case 'playerHealthUpdate':
-                        // Only handle playerHealthUpdate if we're in a duel and haven't already processed it
-                        // The general hit handler in network.js may also process health updates from 'hit' messages
-                        if (this.inDuel && message._quickdraw_processed !== true) {
+                        // Only handle playerHealthUpdate if we're in a duel and it's related to us
+                        if (this.inDuel && 
+                            (message.playerId === this.localPlayer.id || message.playerId === this.duelOpponentId)) {
+                            
                             // Initialize health update tracking if it doesn't exist
                             if (!this.healthUpdateTracking) {
                                 this.healthUpdateTracking = new Map();
                             }
                             
                             // Create a unique ID for this health update to prevent duplicates
-                            const updateId = `${message.playerId}_${message.health}_${message.hitBy}_${Date.now()}`;
-                            
-                            // Check if we've seen a very similar update recently
-                            let isDuplicate = false;
-                            const now = Date.now();
-                            
-                            // Check each recent update to see if this is likely a duplicate
-                            for (const [id, timestamp] of this.healthUpdateTracking.entries()) {
-                                // Remove old entries (older than 500ms)
-                                if (now - timestamp > 500) {
-                                    this.healthUpdateTracking.delete(id);
-                                    continue;
-                                }
-                                
-                                // If the ID contains the same player and health, likely a duplicate
-                                if (id.includes(`${message.playerId}_${message.health}_`)) {
-                                    console.log(`[QuickDraw] Detected duplicate health update: ${updateId}`);
-                                    isDuplicate = true;
-                                    break;
-                                }
-                            }
-                            
-                            // Skip if it's a duplicate
-                            if (isDuplicate) {
-                                return;
-                            }
-                            
-                            // Track this update
-                            this.healthUpdateTracking.set(updateId, now);
-                            
-                            // Mark this message as processed to prevent double-handling
-                            message._quickdraw_processed = true;
+                            const updateId = `${message.playerId}_${message.health}_${Date.now()}`;
                             
                             // Update own health if it's us
                             if (message.playerId === this.localPlayer.id) {
@@ -416,21 +497,22 @@ export class QuickDraw {
                                 // Could update opponent health bar if we had one
                                 console.log(`[QuickDraw] Opponent health updated: ${message.health}`);
                             }
+                            
+                            // Track this update to prevent duplicates
+                            this.healthUpdateTracking.set(updateId, Date.now());
+                            
+                            // Clean up old health updates (older than 1 second)
+                            const now = Date.now();
+                            for (const [id, timestamp] of this.healthUpdateTracking.entries()) {
+                                if (now - timestamp > 1000) {
+                                    this.healthUpdateTracking.delete(id);
+                                }
+                            }
                         }
-                        break;
-                    // Challenge system message handlers
-                    case 'quickDrawChallengeReceived':
-                        this.handleChallengeReceived(message);
-                        break;
-                    case 'quickDrawChallengeAccepted':
-                        this.handleChallengeAccepted(message);
-                        break;
-                    case 'quickDrawChallengeDeclined':
-                        this.handleChallengeDeclined(message);
                         break;
                 }
             } catch (err) {
-                console.error('Error parsing Quick Draw message:', err);
+                console.error('[QuickDraw] Error parsing message:', err);
             }
         };
     }
@@ -532,7 +614,10 @@ export class QuickDraw {
      * @param {Object} message - The challenge message
      */
     handleChallengeReceived(message) {
+        console.log('[QuickDraw] Challenge received from player', message.challengerId);
+        
         if (this.inDuel || this.inLobby) {
+            console.log('[QuickDraw] Already in duel or lobby, automatically declining');
             // Automatically decline if already in a duel or lobby
             this.networkManager.sendQuickDrawDecline(message.challengerId);
             return;
@@ -571,16 +656,19 @@ export class QuickDraw {
         // Hide the invitation
         this.challengeInvitation.style.display = 'none';
         
+        // Store challenger id before clearing
+        const challengerId = this.pendingChallenge.challengerId;
+        
         // Send acceptance to server
-        this.networkManager.sendQuickDrawAccept(this.pendingChallenge.challengerId);
+        this.networkManager.sendQuickDrawAccept(challengerId);
         
         // Show message
         this.showMessage('Challenge accepted!', 1000);
         
-        console.log(`Accepted Quick Draw challenge from player ${this.pendingChallenge.challengerId}`);
+        console.log(`Accepted Quick Draw challenge from player ${challengerId}`);
         
-        // Wait for server to respond with match details
-        // Challenge will be cleared when match is found
+        // Log that we're waiting for match details
+        console.log('Waiting for server to set up the duel...');
     }
 
     /**
@@ -713,113 +801,433 @@ export class QuickDraw {
         // Explicitly disable aiming during countdown
         this.localPlayer.canAim = false;
         
+        // Create and switch to aerial camera immediately
+        this.setupAndEnableAerialCamera();
+        
         console.log('Duel countdown started - waiting for draw signal');
     }
 
     /**
-     * Trigger the "DRAW!" signal with just the expanding circle.
+     * Setup and immediately enable the aerial camera
+     */
+    setupAndEnableAerialCamera() {
+        // Create aerial camera if it doesn't exist
+        if (!this.aerialCamera) {
+            this.aerialCamera = new THREE.PerspectiveCamera(
+                75, 
+                window.innerWidth / window.innerHeight,
+                0.1,
+                1000
+            );
+            this.scene.add(this.aerialCamera);
+        }
+        
+        // Create local player model if it doesn't exist
+        this.setupLocalPlayerModel();
+        
+        // Save the current camera for later restoration
+        if (this.localPlayer && this.localPlayer.camera) {
+            this.originalCamera = this.localPlayer.camera;
+            
+            // Clear any direct override flags
+            this._directCameraOverride = false;
+        } else {
+            console.warn('Cannot save original camera - local player camera not available');
+        }
+        
+        // Position the camera correctly before switching
+        this.positionAerialCamera();
+        
+        // DIRECT SWITCH: Set the renderer's camera directly to aerial
+        if (window.renderer) {
+            window.renderer.camera = this.aerialCamera;
+            
+            // Also set the instance camera if available
+            if (window.renderer.instance) {
+                window.renderer.instance.camera = this.aerialCamera;
+                
+                // Force a render
+                window.renderer.instance.render(this.scene, this.aerialCamera);
+            }
+        }
+        
+        // Show local player model
+        if (this.localPlayerModel && !this.localPlayerModel.loading) {
+            this.localPlayerModel.group.visible = true;
+        }
+        
+        this.aerialCameraActive = true;
+        
+        console.log('Aerial camera enabled for duel countdown');
+    }
+
+    /**
+     * Position the aerial camera to focus on both players
+     */
+    positionAerialCamera() {
+        if (!this.aerialCamera) return;
+        
+        // Get player positions
+        const player1Pos = this.localPlayer.group.position.clone();
+        const player2Pos = this.getOpponentPosition();
+        
+        if (!player2Pos) {
+            console.warn('Cannot find opponent position - using fallback camera position');
+            
+            // Fallback - position camera around local player only
+            const cameraX = player1Pos.x + Math.cos(this.aerialCameraAngle) * 10;
+            const cameraZ = player1Pos.z + Math.sin(this.aerialCameraAngle) * 10;
+            
+            this.aerialCamera.position.set(
+                cameraX,
+                player1Pos.y + 7, // Higher position to see more of the scene
+                cameraZ
+            );
+            
+            // Look at the player
+            this.aerialCamera.lookAt(player1Pos);
+            return;
+        }
+        
+        // Calculate midpoint between players
+        const midpoint = new THREE.Vector3(
+            (player1Pos.x + player2Pos.x) / 2,
+            (player1Pos.y + player2Pos.y) / 2,
+            (player1Pos.z + player2Pos.z) / 2
+        );
+        
+        // Calculate distance between players to scale camera positioning
+        const distanceBetweenPlayers = player1Pos.distanceTo(player2Pos);
+        
+        // Set camera height based on distance (more distance = higher camera)
+        const cameraHeight = Math.max(5, distanceBetweenPlayers * 0.5);
+        
+        // Set camera distance from midpoint based on player distance
+        const cameraDistance = Math.max(10, distanceBetweenPlayers * 1.2);
+        
+        // Camera position along the circle
+        const cameraX = midpoint.x + Math.cos(this.aerialCameraAngle) * cameraDistance;
+        const cameraZ = midpoint.z + Math.sin(this.aerialCameraAngle) * cameraDistance;
+        
+        // Position camera
+        this.aerialCamera.position.set(
+            cameraX,
+            midpoint.y + cameraHeight,
+            cameraZ
+        );
+        
+        // Look at midpoint
+        this.aerialCamera.lookAt(midpoint);
+        
+        // Log camera positioning for debugging
+        if (this.aerialCameraActive && Math.random() < 0.01) { // Only log occasionally to avoid spam
+            console.log(`Aerial camera: pos(${cameraX.toFixed(1)}, ${(midpoint.y + cameraHeight).toFixed(1)}, ${cameraZ.toFixed(1)}) looking at (${midpoint.x.toFixed(1)}, ${midpoint.y.toFixed(1)}, ${midpoint.z.toFixed(1)})`);
+        }
+    }
+
+    /**
+     * Update aerial camera rotation and positioning
+     * @param {number} deltaTime - Time elapsed since last frame
+     */
+    updateAerialCamera(deltaTime) {
+        if (!this.aerialCameraActive || !this.aerialCamera) return;
+        
+        // Rotate camera around the scene
+        this.aerialCameraAngle += 0.3 * deltaTime;
+        
+        // Update camera position based on new angle
+        this.positionAerialCamera();
+        
+        // Update local player model if it exists
+        if (this.localPlayerModel) {
+            this.updateLocalPlayerModel();
+            
+            // Ensure animations are running on the model
+            if (this.localPlayerModel.animationMixer) {
+                this.localPlayerModel.animationMixer.update(deltaTime);
+            }
+        }
+    }
+
+    /**
+     * Setup the local player model for third-person view
+     */
+    setupLocalPlayerModel() {
+        // If model already exists, make it visible and update it
+        if (this.localPlayerModel && !this.localPlayerModel.loading) {
+            // Only set visibility if group exists
+            if (this.localPlayerModel.group) {
+                this.localPlayerModel.group.visible = true;
+            } else {
+                console.warn('Local player model exists but group is undefined');
+            }
+            this.updateLocalPlayerModel();
+            return;
+        }
+        
+        // Load ThirdPersonModel if not available
+        if (!window.ThirdPersonModel) {
+            console.log('Loading ThirdPersonModel module...');
+            // First set a placeholder to prevent duplicated loading
+            this.localPlayerModel = { loading: true };
+            
+            import('./playerModel.js').then(module => {
+                window.ThirdPersonModel = module.ThirdPersonModel;
+                this.createLocalPlayerModel();
+            }).catch(error => {
+                console.error('Failed to load ThirdPersonModel:', error);
+                this.localPlayerModel = null;
+            });
+        } else {
+            // Create model immediately if ThirdPersonModel is available
+            this.createLocalPlayerModel();
+        }
+    }
+
+    /**
+     * Create the local player model
+     */
+    createLocalPlayerModel() {
+        // Skip if already created or currently loading
+        if (this.localPlayerModel && !this.localPlayerModel.loading) return;
+        
+        if (!window.ThirdPersonModel) {
+            console.error('Cannot create player model: ThirdPersonModel not available');
+            return;
+        }
+        
+        try {
+            console.log('Creating local player model for aerial view');
+            
+            // Create the model
+            this.localPlayerModel = new window.ThirdPersonModel(this.scene, this.localPlayer.id);
+            
+            // Check if model was created correctly
+            if (!this.localPlayerModel || !this.localPlayerModel.group) {
+                console.error('Failed to create player model - group not available');
+                this.localPlayerModel = null;
+                return;
+            }
+            
+            // Enable debug logging for this model
+            this.localPlayerModel.debug = true;
+            
+            // Apply player appearance if available
+            if (window.playerIdentity && window.playerIdentity.appearance) {
+                const appearance = window.playerIdentity.appearance;
+                if (this.localPlayerModel.setSkinTone) {
+                    this.localPlayerModel.setSkinTone(appearance.skinTone || '#C68642');
+                }
+                if (this.localPlayerModel.setClothingColor) {
+                    this.localPlayerModel.setClothingColor(appearance.clothingColor || '#8B4513');
+                }
+            }
+            
+            // Add missing updateHitZones method if it doesn't exist
+            if (!this.localPlayerModel.updateHitZones) {
+                console.log('Adding missing updateHitZones method to localPlayerModel');
+                this.localPlayerModel.updateHitZones = function() {
+                    // Basic implementation - later we might add proper hit zone updates
+                    if (this.hitZones) {
+                        console.log('Model has hit zones - updating based on model position');
+                        // Real implementation would update hit zone positions here
+                    } else {
+                        console.log('Model does not have hit zones defined');
+                    }
+                };
+            }
+            
+            // Update position and play idle animation
+            this.updateLocalPlayerModel(true);
+            
+            // Force idle animation - We need to initialize the animation properly
+            if (this.localPlayerModel.playAnimation) {
+                try {
+                    // First make sure animations are properly initialized
+                    if (this.localPlayerModel.setupAnimations && 
+                        (!this.localPlayerModel.animations || Object.keys(this.localPlayerModel.animations).length === 0)) {
+                        // Try to force animation setup if animations aren't loaded
+                        if (window.preloadedModels && window.preloadedModels.playermodel && 
+                            window.preloadedModels.playermodel.animations) {
+                            this.localPlayerModel.setupAnimations(window.preloadedModels.playermodel.animations);
+                        }
+                    }
+                    
+                    // Play idle animation with immediate transition
+                    this.localPlayerModel.playAnimation('idle', 0);
+                    
+                    // Explicitly set walking/running flags to ensure proper state
+                    this.localPlayerModel.isWalking = false;
+                    this.localPlayerModel.isRunning = false;
+                    
+                    console.log('Playing idle animation on local player model');
+                } catch (animError) {
+                    console.error('Error playing idle animation:', animError);
+                }
+            } else {
+                console.warn('No playAnimation method available on player model');
+            }
+            
+            // Make sure the model is added to the scene
+            if (!this.scene.children.includes(this.localPlayerModel.group)) {
+                console.log('Adding player model to scene');
+                this.scene.add(this.localPlayerModel.group);
+            }
+            
+            // Show immediately if aerial camera is active
+            this.localPlayerModel.group.visible = this.aerialCameraActive;
+            
+            console.log('Local player model created successfully');
+        } catch (error) {
+            console.error('Error creating local player model:', error);
+            
+            // Create a minimal placeholder model to prevent further errors
+            this.localPlayerModel = { 
+                loading: false,
+                group: new THREE.Group(),
+                updateHitZones: function() {},
+                playAnimation: function() {},
+                hitZones: {}
+            };
+            
+            // Add the minimal group to the scene
+            this.scene.add(this.localPlayerModel.group);
+            
+            console.log('Created minimal placeholder model to prevent further errors');
+        }
+    }
+
+    /**
+     * Update local player model position to match the player's camera position.
+     * @param {boolean} forceLog - Whether to force logging regardless of state changes.
+     */
+    updateLocalPlayerModel(forceLog = false) {
+        if (!this.localPlayerModel || this.localPlayerModel.loading) return;
+        
+        // Get the player's current camera position
+        const cameraPosition = this.localPlayer.group.position;
+        
+        // Position calculations
+        const lastPosition = this.localPlayerModel.group ? 
+            this.localPlayerModel.group.position.clone() : new THREE.Vector3();
+        
+        // IMPORTANT: Use the exact eye-level position from the player
+        // The ThirdPersonModel will internally adjust the model so its feet are on the ground
+        // while the eyes are at the correct height
+        if (this.localPlayerModel.group) {
+            this.localPlayerModel.group.position.copy(cameraPosition);
+            
+            // Copy the player's rotation to the model
+            this.localPlayerModel.group.rotation.y = this.localPlayer.group.rotation.y;
+            
+            // Determine if position has changed significantly to log
+            const positionChanged = lastPosition.distanceTo(this.localPlayerModel.group.position) > 0.01;
+            
+            // Log player model position updates when debugging or forced
+            if ((positionChanged || forceLog) && this.debug) {
+                console.log(`[QuickDraw] Updated local player model position: 
+                    Camera: (${cameraPosition.x.toFixed(2)}, ${cameraPosition.y.toFixed(2)}, ${cameraPosition.z.toFixed(2)})
+                    Model: (${this.localPlayerModel.group.position.x.toFixed(2)}, ${this.localPlayerModel.group.position.y.toFixed(2)}, ${this.localPlayerModel.group.position.z.toFixed(2)})
+                    On Ground: y=${(this.localPlayerModel.group.position.y - 2.72).toFixed(2)}`);
+            }
+        } else {
+            console.warn('Cannot update local player model - group not initialized');
+        }
+        
+        // Make sure hit boxes align with visible model
+        if (typeof this.localPlayerModel.updateHitZones === 'function') {
+            this.localPlayerModel.updateHitZones();
+        }
+    }
+
+    /**
+     * Get the position of the opponent in the duel
+     * @returns {THREE.Vector3|null} - The opponent's position or null if not found
+     */
+    getOpponentPosition() {
+        if (!this.duelOpponentId) return null;
+        
+        // First try window.otherPlayers (from main.js)
+        if (window.otherPlayers && window.otherPlayers.has(this.duelOpponentId)) {
+            const opponent = window.otherPlayers.get(this.duelOpponentId);
+            if (opponent && opponent.group) {
+                return opponent.group.position.clone();
+            }
+        }
+        
+        // Fallback to networkManager.otherPlayers
+        if (this.networkManager && this.networkManager.otherPlayers) {
+            const opponentData = this.networkManager.otherPlayers.get(this.duelOpponentId);
+            if (opponentData && opponentData.position) {
+                return new THREE.Vector3(
+                    opponentData.position.x,
+                    opponentData.position.y,
+                    opponentData.position.z
+                );
+            }
+        }
+        
+        return null;
+    }
+
+    /**
+     * Trigger the draw phase of the duel.
      */
     triggerDraw() {
+        console.log('[QuickDraw] Triggering draw phase!');
+        
+        // Update duel state
         this.duelState = 'draw';
-        this.updateStatusIndicator();
         
-        // Enable aiming if not penalized
-        if (this.penaltyEndTime <= Date.now()) {
+        // CRITICAL: Allow player to aim during draw phase
+        if (this.localPlayer) {
             this.localPlayer.canAim = true;
+            console.log('[QuickDraw] Player aim enabled - can now draw weapon');
         }
         
-        // Play gun draw sound
+        // Show the draw message
+        this.showMessage('DRAW!', 2000, 'red');
+        
+        // Play draw sound effect
         if (this.soundManager) {
-            this.soundManager.playSound("draw", 1.0);
+            this.soundManager.playSound("draw", 0.9);
         }
         
-        // Show the DRAW! message
-        if (window.isMobileDevice || /iPad|iPhone|iPod/.test(navigator.userAgent)) {
-            // Create iOS-friendly fullscreen overlay for DRAW message
-            const drawOverlay = document.createElement('div');
-            drawOverlay.style.position = 'fixed';
-            drawOverlay.style.top = '0';
-            drawOverlay.style.left = '0';
-            drawOverlay.style.width = '100%';
-            drawOverlay.style.height = '100%';
-            drawOverlay.style.display = 'flex';
-            drawOverlay.style.alignItems = 'center';
-            drawOverlay.style.justifyContent = 'center';
-            drawOverlay.style.backgroundColor = 'rgba(255, 0, 0, 0.2)';
-            drawOverlay.style.zIndex = '9999';
+        // Make gun visible but initially holstered - player must manually draw
+        if (this.localPlayer && this.localPlayer.viewmodel) {
+            this.localPlayer.viewmodel.visible = true;
             
-            // Create text element inside the overlay
-            const drawText = document.createElement('div');
-            drawText.textContent = 'DRAW!';
-            drawText.style.fontSize = '150px';
-            drawText.style.fontWeight = 'bold';
-            drawText.style.fontFamily = 'Western, Arial, sans-serif';
-            drawText.style.color = 'white';
-            drawText.style.textShadow = '0 0 30px #FF0000, 0 0 60px #FF0000';
-            
-            drawOverlay.appendChild(drawText);
-            document.body.appendChild(drawOverlay);
-            
-            // Use a simple animation for better visibility
-            setTimeout(() => {
-                drawText.style.transition = 'transform 0.1s ease-in-out';
-                drawText.style.transform = 'scale(1.3)';
-                setTimeout(() => {
-                    drawText.style.transform = 'scale(1)';
-                }, 100);
-            }, 50);
-            
-            // Remove overlay after 1 second
-            setTimeout(() => {
-                if (drawOverlay.parentNode) {
-                    drawOverlay.parentNode.removeChild(drawOverlay);
+            // Don't force aim state, just ensure the gun starts holstered
+            if (!this.localPlayer.isAiming) {
+                // Reset gun position to holster if available
+                if (this.localPlayer.currentGunOffset && this.localPlayer.holsterOffset) {
+                    this.localPlayer.currentGunOffset.copy(this.localPlayer.holsterOffset);
                 }
-            }, 1000);
+                
+                // Reset any ongoing gun animation
+                if (this.localPlayer.gunAnimation) {
+                    this.localPlayer.gunAnimation.reset();
+                    this.localPlayer.gunAnimation = null;
+                }
+            }
         }
         
-        // Show in standard message overlay as backup
-        this.messageOverlay.textContent = 'DRAW!';
-        this.messageOverlay.style.display = 'block';
-        this.messageOverlay.style.fontSize = '72px';
-        this.messageOverlay.style.color = '#FF0000';
-        this.messageOverlay.style.textShadow = '0 0 20px #FF0000';
+        // Disable aerial camera and switch to player view
+        this.disableAerialCamera();
         
-        // Animate message
-        this.messageOverlay.style.transition = 'transform 0.1s ease-in-out';
-        this.messageOverlay.style.transform = 'translate(-50%, -50%) scale(1)';
+        // Make local player model invisible in first person
+        if (this.localPlayerModel && this.localPlayerModel.group) {
+            this.localPlayerModel.group.visible = false;
+        }
         
-        setTimeout(() => {
-            this.messageOverlay.style.transform = 'translate(-50%, -50%) scale(1.2)';
-            setTimeout(() => {
-                this.messageOverlay.style.transform = 'translate(-50%, -50%) scale(1)';
-            }, 100);
-        }, 10);
+        // Check hit zones are properly set up
+        this.fixHitZonesForQuickDraw();
         
-        // Hide message after 1 second
-        setTimeout(() => {
-            this.hideMessage();
-        }, 1000);
-        
-        // Animate the draw circle
-        this.drawCircle.style.display = 'block';
-        this.drawCircle.style.opacity = '0';
-        this.drawCircle.style.transform = 'translate(-50%, -50%) scale(0)';
-        
-        // Start animation after a short delay
-        setTimeout(() => {
-            this.drawCircle.style.opacity = '1';
-            this.drawCircle.style.transform = 'translate(-50%, -50%) scale(1)';
-            
-            // Fade out and hide after animation
-            setTimeout(() => {
-                this.drawCircle.style.opacity = '0';
-                
-                // Hide after fade out
-                setTimeout(() => {
-                    this.drawCircle.style.display = 'none';
-                }, 300);
-            }, 800);
-        }, 10);
+        // Clear any previous force update interval
+        if (this.forceUpdateInterval) {
+            clearInterval(this.forceUpdateInterval);
+            this.forceUpdateInterval = null;
+        }
     }
 
     /**
@@ -829,6 +1237,53 @@ export class QuickDraw {
     update(deltaTime) {
         // Skip if player not initialized
         if (!this.localPlayer || !this.localPlayer.group) return;
+        
+        // CRITICAL: Emergency camera switch enforcement
+        if (this.duelState === 'draw') {
+            // If we're in draw phase, FORCE the local camera always
+            if (window.renderer && window.renderer.instance) {
+                if (this.localPlayer && this.localPlayer.camera) {
+                    // Direct override if not already applied
+                    if (!this._directCameraOverride) {
+                        console.log('EMERGENCY CAMERA RESET in update loop - forcing player camera');
+                        window.renderer.instance.camera = this.localPlayer.camera;
+                        window.renderer.camera = this.localPlayer.camera;
+                        this._directCameraOverride = true;
+                    }
+                    
+                    // Double-check that camera is still correctly set
+                    if (window.renderer.instance.camera !== this.localPlayer.camera) {
+                        console.warn('CRITICAL: Camera was changed outside our control - RE-FORCING player camera');
+                        window.renderer.instance.camera = this.localPlayer.camera;
+                        window.renderer.camera = this.localPlayer.camera;
+                    }
+                }
+            }
+            
+            // Make sure aerial camera is disabled
+            this.aerialCameraActive = false;
+            
+            // Ensure local player model is hidden
+            if (this.localPlayerModel && !this.localPlayerModel.loading && this.localPlayerModel.group) {
+                this.localPlayerModel.group.visible = false;
+            }
+            
+            // If we're in duel mode, periodically check and fix hit zones
+            if (this.inDuel && Math.random() < 0.01) { // Check occasionally 
+                this.fixHitZonesForQuickDraw();
+            }
+        } 
+        else if ((this.duelState === 'ready' || this.duelState === 'countdown' || this.duelState === 'none') && 
+                 this.inDuel && !this.aerialCameraActive) {
+            // If we're in ready or countdown phase but not using aerial camera, enable it
+            console.log('Aerial camera not active during pre-draw phase - enabling');
+            this.setupAndEnableAerialCamera();
+        }
+        
+        // Update aerial camera if active
+        if (this.aerialCameraActive) {
+            this.updateAerialCamera(deltaTime);
+        }
         
         // Update nearby players for challenges
         this.updateNearbyPlayers();
@@ -899,11 +1354,27 @@ export class QuickDraw {
      * Handle match found notification from server.
      */
     handleMatchFound(message) {
+        console.log('[QuickDraw] Match found handler executed', message);
+        
+        // Validate required fields
+        if (!message.opponentId) {
+            console.error('[QuickDraw] Missing opponent ID in match found message:', message);
+            return;
+        }
+        
+        // First, make sure any previous aerial camera is disabled
+        this.disableAerialCamera();
+        
+        // Clear any existing timers from previous matches
+        this.clearAllDuelTimers();
+        
         this.inDuel = true;
         this.inLobby = false;
         this.duelOpponentId = message.opponentId;
         this.duelState = 'none';
         this.pendingChallenge = null;
+        
+        console.log(`[QuickDraw] Starting duel with opponent ${this.duelOpponentId}`);
         
         // Store original player movement and aiming states
         this.originalCanAim = this.localPlayer.canAim;
@@ -933,10 +1404,15 @@ export class QuickDraw {
             }
         }
         
-        console.log(`Quick Draw match found! Your opponent is player ${message.opponentId}`);
+        // Create and enable aerial camera immediately when match is found
+        this.setupAndEnableAerialCamera();
+        
+        console.log(`[QuickDraw] Match found! Your opponent is player ${message.opponentId}`);
         
         // Teleport player to the start position
         if (message.startPosition) {
+            console.log('[QuickDraw] Teleporting to start position:', message.startPosition);
+            
             // First move to new position, ensuring player feet are on ground
             // The player's eye level is at group.position, and feet are 2.72 units below
             const eyeLevel = message.startPosition.y;
@@ -963,6 +1439,24 @@ export class QuickDraw {
                 // Debug visualization - draw a direction arrow for 5 seconds
                 this.showFacingDirection(message.startPosition, message.startRotation);
             }
+            
+            // Update local player model position after teleporting
+            if (this.localPlayerModel && !this.localPlayerModel.loading) {
+                this.updateLocalPlayerModel(true);
+            }
+            
+            // Force holstered gun state
+            if (this.localPlayer.viewmodel) {
+                this.localPlayer.isAiming = false;
+                if (this.localPlayer.currentGunOffset) {
+                    this.localPlayer.currentGunOffset.copy(this.localPlayer.holsterOffset);
+                }
+            }
+            
+            // Fix hit zones for the local player in QuickDraw mode
+            this.fixHitZonesForQuickDraw();
+        } else {
+            console.warn('[QuickDraw] No start position in match found message');
         }
         
         // Reset player health to full at the start of the duel
@@ -982,7 +1476,8 @@ export class QuickDraw {
         this.showMessage(`Duel vs. Player ${message.opponentId}`, 2000);
         
         // Mark as ready after showing message
-        setTimeout(() => {
+        this.createDuelTimeout(() => {
+            console.log('[QuickDraw] Sending ready signal to server');
             this.networkManager.sendQuickDrawReady();
         }, 2000);
     }
@@ -1206,16 +1701,210 @@ export class QuickDraw {
      * End the duel with enhanced win/lose UI effects.
      */
     endDuel(winnerId) {
-        // Update state
+        console.log('[QuickDraw] Ending duel, winner:', winnerId);
+        
+        // Update state first to prevent any update logic from running
         this.duelState = 'none';
+        
+        // IMPORTANT: Temporarily re-enable aerial camera for death view
+        this.setupAndEnableAerialCamera();
+        console.log('[QuickDraw] Temporarily showing aerial death scene');
         
         // Determine if player won or lost
         const playerWon = winnerId === this.localPlayer.id;
         
+        // Create overlay and play sounds
+        this.showVictoryDefeatOverlay(playerWon);
+        
+        // Unlock player movement immediately but leave them in position temporarily
+        // This is crucial - ensure the player isn't locked even if later code fails
+        if (this.localPlayer) {
+            // Restore original movement methods right away
+            if (this.localPlayer._origMove) {
+                console.log('[QuickDraw] Restoring original move method immediately');
+                this.localPlayer.move = this.localPlayer._origMove;
+                this.localPlayer._origMove = null;
+            }
+            
+            // Reset force lock immediately
+            this.localPlayer.forceLockMovement = false;
+        }
+        
+        // Function for full respawn - placed here to avoid errors with networkManager.sendMessage
+        const doFullRespawn = () => {
+            console.log('[QuickDraw] Aerial death scene complete, respawning players');
+            
+            // Clear any force update interval that might be keeping movement locked
+            if (this.forceUpdateInterval) {
+                clearInterval(this.forceUpdateInterval);
+                this.forceUpdateInterval = null;
+            }
+            
+            // Reset all duel state
+            this.duelActive = false;
+            this.inDuel = false;
+            this.duelState = 'none';
+            this.inLobby = false;
+            
+            // Disable aerial camera completely
+            this.disableAerialCamera();
+            
+            // Ensure the player camera is the active camera
+            if (this.scene && this.scene.renderer) {
+                this.scene.renderer.overrideCamera = null;
+                
+                // Force a render with player camera to ensure it's properly restored
+                if (this.localPlayer && this.localPlayer.camera) {
+                    console.log('[QuickDraw] Forcing render with player camera');
+                    this.scene.renderer.camera = this.localPlayer.camera;
+                    this.scene.renderer.render();
+                }
+            }
+            
+            // Fully restore player state and camera
+            if (this.localPlayer) {
+                console.log('[QuickDraw] Unlocking player movement and restoring camera');
+                
+                // Set explicit movement flags
+                this.localPlayer.canMove = true;
+                this.localPlayer.canAim = true;
+                this.localPlayer.forceLockMovement = false;
+                this.localPlayer.forceLockRotation = false;
+                
+                // Restore player health to full
+                this.localPlayer.health = 100;
+                
+                // Set position back to spawn if applicable
+                if (this.scene && this.scene.spawnPlayer) {
+                    console.log('[QuickDraw] Respawning player at spawn point');
+                    this.scene.spawnPlayer(this.localPlayer, true);
+                }
+            }
+            
+            // Remove local player model
+            if (this.localPlayerModel) {
+                console.log('[QuickDraw] Removing local player model');
+                
+                if (this.localPlayerModel.group) {
+                    // Remove from scene if it's part of the scene
+                    if (this.localPlayerModel.group.parent) {
+                        this.localPlayerModel.group.parent.remove(this.localPlayerModel.group);
+                    }
+                    
+                    // Or try removing directly from scene
+                    if (this.scene && this.scene.scene) {
+                        this.scene.scene.remove(this.localPlayerModel.group);
+                    }
+                }
+                
+                this.localPlayerModel = null;
+            }
+            
+            // Reset gun and animation state
+            if (this.localPlayer && this.localPlayer.viewmodel) {
+                console.log('[QuickDraw] Resetting gun state');
+                this.localPlayer.viewmodel.visible = true;
+                this.localPlayer.isAiming = false;
+            }
+            
+            // Try sending network message in a safe way
+            try {
+                if (this.networkManager) {
+                    console.log('[QuickDraw] Sending respawn complete notification');
+                    
+                    // Check which method exists for sending messages
+                    if (this.networkManager.socket && this.networkManager.socket.readyState === 1) { // 1 = OPEN
+                        this.networkManager.socket.send(JSON.stringify({
+                            type: 'quickDrawRespawnComplete',
+                            playerId: this.localPlayer ? this.localPlayer.id : null
+                        }));
+                    } 
+                    else if (typeof window.socketSend === 'function') {
+                        window.socketSend({
+                            type: 'quickDrawRespawnComplete',
+                            playerId: this.localPlayer ? this.localPlayer.id : null
+                        });
+                    } else {
+                        console.log('[QuickDraw] No network method available to send respawn complete');
+                    }
+                }
+            } catch (error) {
+                console.error('[QuickDraw] Error sending respawn complete notification:', error);
+            }
+            
+            console.log('[QuickDraw] Respawn complete');
+        };
+        
+        // Wait for 2 seconds then fully respawn the players
+        this.createDuelTimeout(() => {
+            doFullRespawn();
+            
+            // Final check to ensure player is unlocked
+            if (this.localPlayer) {
+                this.localPlayer.canMove = true;
+                this.localPlayer.canAim = true;
+                this.localPlayer.forceLockMovement = false;
+                
+                console.log('[QuickDraw] FINAL VERIFICATION - Player movement unlocked, canMove =', 
+                    this.localPlayer.canMove, 'canAim =', this.localPlayer.canAim);
+            }
+        }, 2000);
+        
+        // Hide UI after 2.5 seconds to ensure it's cleared after respawn starts
+        this.createDuelTimeout(() => {
+            console.log('[QuickDraw] Clearing match UI');
+            this.clearMatchUI();
+        }, 2500);
+    }
+
+    /**
+     * Clear all match-related UI elements
+     */
+    clearMatchUI() {
+        console.log('[QuickDraw] Clearing all match UI elements');
+        
+        // Force hide any message overlay
+        this.hideMessage();
+        
+        // Force remove any victory/defeat overlay (handle both overlay types)
+        const resultOverlay = document.getElementById('quickdraw-result-overlay');
+        if (resultOverlay && resultOverlay.parentNode) {
+            console.log('[QuickDraw] Removing result overlay');
+            resultOverlay.parentNode.removeChild(resultOverlay);
+        }
+        
+        // Try removing all elements with quickdraw-result class as backup
+        const allResultElements = document.querySelectorAll('.quickdraw-result');
+        if (allResultElements.length > 0) {
+            console.log(`[QuickDraw] Removing ${allResultElements.length} additional result elements`);
+            allResultElements.forEach(el => {
+                if (el.parentNode) {
+                    el.parentNode.removeChild(el);
+                }
+            });
+        }
+        
+        // Hide health bar
+        if (this.healthBarContainer) {
+            this.healthBarContainer.style.display = 'none';
+        }
+        
+        // Update status indicator
+        this.updateStatusIndicator();
+        
+        console.log('[QuickDraw] Match UI cleared');
+    }
+
+    /**
+     * Show victory/defeat overlay with appropriate effects
+     */
+    showVictoryDefeatOverlay(playerWon) {
         // For iOS/Safari and mobile devices - create a fixed fullscreen overlay
         if (window.isMobileDevice || /iPad|iPhone|iPod/.test(navigator.userAgent)) {
             // Create iOS-friendly fullscreen overlay
             const resultOverlay = document.createElement('div');
+            resultOverlay.id = 'quickdraw-result-overlay';
+            resultOverlay.className = 'quickdraw-result'; // Add class for easier selection
             resultOverlay.style.position = 'fixed';
             resultOverlay.style.top = '0';
             resultOverlay.style.left = '0';
@@ -1249,17 +1938,11 @@ export class QuickDraw {
                     resultText.style.transform = 'scale(1)';
                 }, 300);
             }, 100);
-            
-            // Remove overlay after 3 seconds
-            setTimeout(() => {
-                if (resultOverlay.parentNode) {
-                    resultOverlay.parentNode.removeChild(resultOverlay);
-                }
-            }, 3000);
         }
         
         // Show in standard message overlay as backup
         this.messageOverlay.textContent = playerWon ? 'VICTORY!' : 'DEFEAT';
+        this.messageOverlay.className = 'quickdraw-result'; // Add class for easier selection
         this.messageOverlay.style.display = 'block';
         this.messageOverlay.style.fontSize = '72px';
         this.messageOverlay.style.color = playerWon ? '#00FF00' : '#FF0000';
@@ -1285,111 +1968,6 @@ export class QuickDraw {
             } else {
                 this.soundManager.playSound("defeat", 0.7);
             }
-        }
-        
-        // Hide message after 3 seconds
-        setTimeout(() => {
-            this.hideMessage();
-            
-            // Reset player state
-            this.inDuel = false;
-            this.duelOpponentId = null;
-            
-            // Hide health bar
-            this.healthBarContainer.style.display = 'none';
-            
-            // Restore original movement methods if they were force-locked
-            if (this.localPlayer._origMove) {
-                this.localPlayer.move = this.localPlayer._origMove;
-                this.localPlayer._origMove = null;
-                this.localPlayer.forceLockMovement = false;
-            }
-            
-            // Restore original movement and aiming states
-            this.localPlayer.canAim = this.originalCanAim;
-            this.localPlayer.canMove = this.originalCanMove;
-            
-            // Return to original position
-            if (this.originalPosition) {
-                this.localPlayer.group.position.set(
-                    this.originalPosition.x,
-                    this.originalPosition.y,
-                    this.originalPosition.z
-                );
-                this.localPlayer.group.rotation.y = this.originalRotation;
-            }
-            
-            // Reset player health - ensure it's properly set to 100 again
-            this.localPlayer.health = 100;
-            // Also update the main UI health display
-            if (typeof updateHealthUI === 'function') {
-                updateHealthUI(this.localPlayer);
-            }
-            
-            // Update UI
-            this.updateStatusIndicator();
-        }, 3000);
-    }
-
-    /**
-     * Helper to show a message in the center of the screen.
-     */
-    showMessage(message, duration = 0) {
-        this.messageOverlay.textContent = message;
-        this.messageOverlay.style.display = 'block';
-        
-        if (duration > 0) {
-            setTimeout(() => {
-                this.hideMessage();
-            }, duration);
-        }
-    }
-
-    /**
-     * Hide the message overlay.
-     */
-    hideMessage() {
-        this.messageOverlay.style.display = 'none';
-    }
-
-    /**
-     * Cleanup resources.
-     */
-    cleanup() {
-        // Clean up physics
-        if (this.physics) {
-            this.physics.cleanup();
-        }
-        
-        // Remove UI elements
-        if (this.messageOverlay && this.messageOverlay.parentNode) {
-            this.messageOverlay.parentNode.removeChild(this.messageOverlay);
-        }
-        
-        if (this.drawCircle && this.drawCircle.parentNode) {
-            this.drawCircle.parentNode.removeChild(this.drawCircle);
-        }
-        
-        if (this.statusIndicator && this.statusIndicator.parentNode) {
-            this.statusIndicator.parentNode.removeChild(this.statusIndicator);
-        }
-        
-        if (this.healthBarContainer && this.healthBarContainer.parentNode) {
-            this.healthBarContainer.parentNode.removeChild(this.healthBarContainer);
-        }
-        
-        // Clear timers
-        if (this.countdownTimer) clearTimeout(this.countdownTimer);
-        if (this.drawTimer) clearTimeout(this.drawTimer);
-        if (this.penaltyTimer) clearTimeout(this.penaltyTimer);
-        
-        // Remove challenge UI elements
-        if (this.challengePrompt && this.challengePrompt.parentNode) {
-            this.challengePrompt.parentNode.removeChild(this.challengePrompt);
-        }
-        
-        if (this.challengeInvitation && this.challengeInvitation.parentNode) {
-            this.challengeInvitation.parentNode.removeChild(this.challengeInvitation);
         }
     }
     
@@ -1482,6 +2060,890 @@ export class QuickDraw {
         // Play hit sound
         if (this.soundManager) {
             this.soundManager.playSound("hurt", 0.7);
+        }
+    }
+
+    /**
+     * Fix hit zones for players in QuickDraw mode
+     */
+    fixHitZonesForQuickDraw() {
+        // First, try to fix local player's hit zones
+        if (window.playersMap && this.localPlayer && this.localPlayer.id) {
+            console.log('Fixing hit zones for QuickDraw mode');
+            
+            // Add local player to playersMap for bullet collision detection
+            const localPlayerId = this.localPlayer.id.toString();
+            if (!window.playersMap.has(localPlayerId) && this.localPlayerModel) {
+                window.playersMap.set(localPlayerId, this.localPlayerModel);
+                console.log(`Added local player ${localPlayerId} to players map for hit detection`);
+            }
+            
+            // Make sure opponent is in the playersMap
+            if (this.duelOpponentId && !window.playersMap.has(this.duelOpponentId.toString())) {
+                // Try to find the opponent in remotePlayers
+                if (window.remotePlayers && window.remotePlayers.has(this.duelOpponentId.toString())) {
+                    const opponentModel = window.remotePlayers.get(this.duelOpponentId.toString());
+                    if (opponentModel) {
+                        window.playersMap.set(this.duelOpponentId.toString(), opponentModel);
+                        console.log(`Added opponent ${this.duelOpponentId} to players map for hit detection`);
+                    }
+                }
+            }
+            
+            // Fix visible hit zones for debugging
+            if (window.showHitZoneDebug) {
+                if (window.physics && typeof window.physics.refreshHitZoneDebug === 'function') {
+                    window.physics.refreshHitZoneDebug();
+                    console.log('Refreshed hit zone debug visualization');
+                }
+            }
+        }
+    }
+
+    /**
+     * Handle shooting in Quick Draw mode.
+     * This is called when the player fires during a Quick Draw duel.
+     */
+    handleShoot() {
+        // Do not allow shooting if not in the draw phase
+        if (this.duelState !== 'draw') {
+            console.log('Cannot shoot yet - waiting for draw signal');
+            return false;
+        }
+        
+        console.log('Player fired in Quick Draw mode!');
+        
+        // Check if opponent is visible in the scene
+        const opponentId = this.duelOpponentId?.toString();
+        if (!opponentId) {
+            console.error('No opponent ID found for shooting');
+            return false;
+        }
+        
+        // Try to find opponent in players map
+        let opponentModel = null;
+        let opponentHitZones = null;
+        
+        // First try the playersMap (should be populated)
+        if (window.playersMap && window.playersMap.has(opponentId)) {
+            opponentModel = window.playersMap.get(opponentId);
+            if (opponentModel && opponentModel.hitZones) {
+                opponentHitZones = opponentModel.hitZones;
+            }
+        }
+        // Fallback to remotePlayers
+        else if (window.remotePlayers && window.remotePlayers.has(opponentId)) {
+            opponentModel = window.remotePlayers.get(opponentId);
+            if (opponentModel && opponentModel.hitZones) {
+                opponentHitZones = opponentModel.hitZones;
+            }
+        }
+        
+        // Debug - validate opponent model is found
+        if (!opponentModel) {
+            console.error(`Cannot find opponent model for player ${opponentId}`);
+            
+            // List available players for debug
+            console.log('Available players in playersMap:');
+            if (window.playersMap) {
+                for (const [pid, model] of window.playersMap.entries()) {
+                    console.log(`- Player ${pid}: ${model ? 'found' : 'missing'}`);
+                }
+            }
+            
+            console.log('Available players in remotePlayers:');
+            if (window.remotePlayers) {
+                for (const [pid, model] of window.remotePlayers.entries()) {
+                    console.log(`- Player ${pid}: ${model ? 'found' : 'missing'}`);
+                }
+            }
+            
+            // Emergency add to playersMap if we have it in remotePlayers
+            if (window.remotePlayers && window.remotePlayers.has(opponentId) && window.playersMap) {
+                window.playersMap.set(opponentId, window.remotePlayers.get(opponentId));
+                console.log(`Emergency added opponent ${opponentId} to playersMap`);
+                
+                // Try again
+                if (window.playersMap.has(opponentId)) {
+                    opponentModel = window.playersMap.get(opponentId);
+                    if (opponentModel && opponentModel.hitZones) {
+                        opponentHitZones = opponentModel.hitZones;
+                    }
+                }
+            }
+        }
+        
+        // Check if we have valid hit zones
+        if (!opponentHitZones) {
+            console.error(`No hit zones found for opponent ${opponentId}`);
+            
+            // Emergency fallback - create temporary hit zone for opponent
+            if (opponentModel && opponentModel.group) {
+                console.log('Creating emergency hit zones for opponent');
+                
+                // Create a simple box hit zone around the opponent
+                const boundingBox = new THREE.Box3().setFromObject(opponentModel.group);
+                const size = boundingBox.getSize(new THREE.Vector3());
+                const center = boundingBox.getCenter(new THREE.Vector3());
+                
+                // Create a simple hit zone object
+                opponentHitZones = {
+                    head: new THREE.Box3(
+                        new THREE.Vector3(center.x - size.x/4, center.y + size.y/4, center.z - size.x/4),
+                        new THREE.Vector3(center.x + size.x/4, center.y + size.y/2, center.z + size.x/4)
+                    ),
+                    body: new THREE.Box3(
+                        new THREE.Vector3(center.x - size.x/3, center.y - size.y/4, center.z - size.x/3),
+                        new THREE.Vector3(center.x + size.x/3, center.y + size.y/4, center.z + size.x/3)
+                    ),
+                    legs: new THREE.Box3(
+                        new THREE.Vector3(center.x - size.x/3, center.y - size.y/2, center.z - size.x/3),
+                        new THREE.Vector3(center.x + size.x/3, center.y - size.y/4, center.z + size.x/3)
+                    )
+                };
+                
+                // Store the hit zones on the model
+                opponentModel.hitZones = opponentHitZones;
+                console.log('Emergency hit zones created:', opponentHitZones);
+            }
+        }
+        
+        // Get bullet direction from player camera
+        const camera = this.localPlayer.camera;
+        const bulletDirection = new THREE.Vector3(0, 0, -1);
+        bulletDirection.applyQuaternion(camera.quaternion);
+        
+        // Create ray for bullet path
+        const bulletOrigin = new THREE.Vector3();
+        camera.getWorldPosition(bulletOrigin);
+        
+        // Offset slightly to account for gun position
+        bulletOrigin.add(new THREE.Vector3(
+            bulletDirection.x * 0.2,
+            bulletDirection.y * 0.2,
+            bulletDirection.z * 0.2
+        ));
+        
+        const bulletRay = new THREE.Raycaster(bulletOrigin, bulletDirection, 0, 100);
+        
+        // Visualize bullet path for debugging
+        if (this.debug) {
+            this.drawBulletPath(bulletOrigin.clone(), bulletDirection.clone().multiplyScalar(100));
+        }
+        
+        // Check for a hit
+        let hitZone = null;
+        let hitDistance = Infinity;
+        
+        // Check intersection with each hit zone
+        if (opponentHitZones) {
+            // Check head hit
+            if (opponentHitZones.head) {
+                const headIntersection = bulletRay.ray.intersectBox(opponentHitZones.head, new THREE.Vector3());
+                if (headIntersection) {
+                    const distance = headIntersection.distanceTo(bulletOrigin);
+                    if (distance < hitDistance) {
+                        hitZone = 'head';
+                        hitDistance = distance;
+                        console.log(`HEAD HIT at distance ${distance.toFixed(2)}`);
+                    }
+                }
+            }
+            
+            // Check body hit
+            if (opponentHitZones.body) {
+                const bodyIntersection = bulletRay.ray.intersectBox(opponentHitZones.body, new THREE.Vector3());
+                if (bodyIntersection) {
+                    const distance = bodyIntersection.distanceTo(bulletOrigin);
+                    if (distance < hitDistance) {
+                        hitZone = 'body';
+                        hitDistance = distance;
+                        console.log(`BODY HIT at distance ${distance.toFixed(2)}`);
+                    }
+                }
+            }
+            
+            // Check legs hit
+            if (opponentHitZones.legs) {
+                const legsIntersection = bulletRay.ray.intersectBox(opponentHitZones.legs, new THREE.Vector3());
+                if (legsIntersection) {
+                    const distance = legsIntersection.distanceTo(bulletOrigin);
+                    if (distance < hitDistance) {
+                        hitZone = 'legs';
+                        hitDistance = distance;
+                        console.log(`LEGS HIT at distance ${distance.toFixed(2)}`);
+                    }
+                }
+            }
+        }
+        
+        // If we have a hit, send it to the server
+        if (hitZone) {
+            console.log(`Hit opponent ${opponentId} in the ${hitZone}!`);
+            
+            // Calculate damage based on hit zone
+            let damage = 40; // Default body damage
+            if (hitZone === 'head') {
+                damage = 100; // One-shot kill for headshot
+            } else if (hitZone === 'legs') {
+                damage = 25; // Less damage for leg hit
+            }
+            
+            // Send hit to server
+            this.networkManager.sendQuickDrawShoot(opponentId, 0, hitZone, damage);
+            
+            // Show hit marker
+            this.showHitMarker(hitZone);
+            
+            return true;
+        } else {
+            console.log('Missed the opponent');
+            
+            // Send miss to server
+            this.networkManager.sendQuickDrawShoot(opponentId, 0, 'miss', 0);
+            
+            return false;
+        }
+    }
+
+    /**
+     * Draw a line representing the bullet path (for debugging)
+     */
+    drawBulletPath(start, end) {
+        // Remove any existing debug line
+        if (this.bulletPathLine) {
+            this.scene.remove(this.bulletPathLine);
+            this.bulletPathLine = null;
+        }
+        
+        // Create line geometry
+        const geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
+        
+        // Create line material
+        const material = new THREE.LineBasicMaterial({ 
+            color: 0xff0000,
+            transparent: true,
+            opacity: 0.7
+        });
+        
+        // Create line and add to scene
+        this.bulletPathLine = new THREE.Line(geometry, material);
+        this.scene.add(this.bulletPathLine);
+        
+        // Auto-remove after 2 seconds
+        setTimeout(() => {
+            if (this.bulletPathLine) {
+                this.scene.remove(this.bulletPathLine);
+                this.bulletPathLine = null;
+            }
+        }, 2000);
+    }
+
+    /**
+     * Show a hit marker on the screen
+     */
+    showHitMarker(hitZone) {
+        // Create hit marker element if it doesn't exist
+        if (!this.hitMarker) {
+            this.hitMarker = document.createElement('div');
+            this.hitMarker.style.position = 'absolute';
+            this.hitMarker.style.top = '50%';
+            this.hitMarker.style.left = '50%';
+            this.hitMarker.style.transform = 'translate(-50%, -50%)';
+            this.hitMarker.style.width = '40px';
+            this.hitMarker.style.height = '40px';
+            this.hitMarker.style.backgroundImage = 'url("/assets/hitmarker.png")';
+            this.hitMarker.style.backgroundSize = 'contain';
+            this.hitMarker.style.backgroundRepeat = 'no-repeat';
+            this.hitMarker.style.pointerEvents = 'none';
+            this.hitMarker.style.zIndex = '1000';
+            this.hitMarker.style.opacity = '0';
+            this.hitMarker.style.transition = 'opacity 0.1s ease-in-out';
+            
+            document.body.appendChild(this.hitMarker);
+        }
+        
+        // Set color based on hit zone
+        let color = '#ffffff';
+        if (hitZone === 'head') {
+            color = '#ff0000'; // Red for headshot
+            
+            // Play headshot sound
+            if (window.audioManager) {
+                window.audioManager.playSound('headshot', 0.7);
+            }
+        }
+        
+        // Set color and show hit marker
+        this.hitMarker.style.filter = `brightness(1.5) drop-shadow(0 0 2px ${color})`;
+        this.hitMarker.style.opacity = '1';
+        
+        // Play hit sound
+        if (window.audioManager) {
+            window.audioManager.playSound('hit_marker', 0.5);
+        }
+        
+        // Hide after a short delay
+        setTimeout(() => {
+            if (this.hitMarker) {
+                this.hitMarker.style.opacity = '0';
+            }
+        }, 300);
+    }
+
+    /**
+     * Initialize Quick Draw mode
+     */
+    init() {
+        console.log('Initializing Quick Draw mode');
+        this.debug = false;  // Set to true to enable debug logging
+        
+        // Initialize network handlers
+        this.initNetworkHandlers();
+        
+        // Hook into player shooting actions
+        this.hookPlayerShooting();
+        
+        // Initialize UI elements
+        this.initUI();
+        
+        // Initialize the aerial camera
+        this.initAerialCamera();
+        
+        // Initialize hit zone debugging if needed
+        if (this.debug) {
+            this.initHitZoneDebugging();
+        }
+    }
+
+    /**
+     * Hook into player shooting actions to handle Quick Draw specific logic
+     */
+    hookPlayerShooting() {
+        // Store original shoot method
+        if (this.localPlayer && !this.localPlayer._originalShoot) {
+            // Store original shoot method if it exists
+            this.localPlayer._originalShoot = this.localPlayer.shoot;
+            
+            // Override shoot method
+            this.localPlayer.shoot = (...args) => {
+                // If we're in a duel, handle QuickDraw specific shooting
+                if (this.inDuel && this.duelState === 'draw') {
+                    console.log('QuickDraw shooting detected');
+                    
+                    // First check if player is allowed to shoot
+                    if (!this.localPlayer.canAim) {
+                        console.log('Cannot shoot - player aiming is disabled');
+                        return false;
+                    }
+                    
+                    // Check if the opponent should be hit
+                    const hitResult = this.handleShoot();
+                    
+                    // Call original shoot method to handle animations and effects
+                    // but with a flag to prevent double processing
+                    if (this.localPlayer._originalShoot) {
+                        // Create a context object to pass to the original method
+                        const shootContext = {
+                            _quickDrawProcessed: true,
+                            hitResult: hitResult
+                        };
+                        
+                        // Call original with our quickdraw context
+                        return this.localPlayer._originalShoot.apply(this.localPlayer, [...args, shootContext]);
+                    }
+                    
+                    return hitResult;
+                } else {
+                    // Not in QuickDraw - use original shoot method
+                    if (this.localPlayer._originalShoot) {
+                        return this.localPlayer._originalShoot.apply(this.localPlayer, args);
+                    }
+                }
+                
+                return false;
+            };
+            
+            console.log('Hooked player shooting for QuickDraw mode');
+        }
+        
+        // Also hook into the input manager to detect mouse clicks during Quick Draw
+        if (window.inputManager && !window.inputManager._quickDrawHooked) {
+            // Store original mouse down handler
+            const originalMouseDown = window.inputManager.handleMouseDown;
+            
+            // Override mouse down handler
+            window.inputManager.handleMouseDown = (event) => {
+                // Call original handler first
+                if (originalMouseDown) {
+                    originalMouseDown.call(window.inputManager, event);
+                }
+                
+                // Additional QuickDraw specific logic
+                if (this.inDuel && this.duelState === 'draw') {
+                    // Left mouse button
+                    if (event.button === 0) {
+                        // Check if player tried to shoot before allowed
+                        if (!this.localPlayer.canAim) {
+                            console.log('Player tried to shoot too early!');
+                            
+                            // Apply penalty for shooting too early
+                            this.applyEarlyShootPenalty();
+                        }
+                    }
+                }
+            };
+            
+            // Mark as hooked
+            window.inputManager._quickDrawHooked = true;
+            console.log('Hooked input manager for QuickDraw mode');
+        }
+    }
+
+    /**
+     * Apply penalty for shooting too early
+     */
+    applyEarlyShootPenalty() {
+        console.log('Applying penalty for shooting too early');
+        
+        // Notify server about penalty
+        this.networkManager.sendQuickDrawPenalty();
+        
+        // Disable aiming for 3 seconds as penalty
+        this.localPlayer.canAim = false;
+        this.penaltyEndTime = Date.now() + 3000;
+        
+        // Show penalty message
+        this.showMessage('Too Early! Penalty: 3s', 2000, '#ff0000');
+        
+        // Schedule re-enabling of aiming after penalty time
+        setTimeout(() => {
+            if (this.inDuel && this.duelState === 'draw') {
+                this.localPlayer.canAim = true;
+                console.log('Penalty ended, player can now aim');
+            }
+        }, 3000);
+    }
+
+    /**
+     * Initialize hit zone debugging if needed
+     */
+    initHitZoneDebugging() {
+        console.log('Initializing hit zone debugging');
+        
+        // Create toggle button
+        const debugButton = document.createElement('button');
+        debugButton.innerText = 'Toggle Hit Zones';
+        debugButton.style.position = 'absolute';
+        debugButton.style.bottom = '10px';
+        debugButton.style.right = '10px';
+        debugButton.style.zIndex = '1000';
+        debugButton.style.padding = '5px 10px';
+        debugButton.style.background = 'rgba(0,0,0,0.7)';
+        debugButton.style.color = 'white';
+        debugButton.style.border = '1px solid #666';
+        debugButton.style.borderRadius = '4px';
+        
+        // Add to DOM
+        document.body.appendChild(debugButton);
+        
+        // Toggle hit zone visualization
+        let hitZonesVisible = false;
+        debugButton.addEventListener('click', () => {
+            hitZonesVisible = !hitZonesVisible;
+            debugButton.innerText = hitZonesVisible ? 'Hide Hit Zones' : 'Show Hit Zones';
+            
+            // Set global flag
+            window.showHitZoneDebug = hitZonesVisible;
+            
+            // Update visualization
+            this.visualizeHitZones(hitZonesVisible);
+        });
+    }
+
+    /**
+     * Visualize hit zones for debugging
+     */
+    visualizeHitZones(show) {
+        // Clean up existing visualizations
+        if (this.hitZoneHelpers) {
+            for (const helper of this.hitZoneHelpers) {
+                this.scene.remove(helper);
+            }
+        }
+        
+        // Initialize array
+        this.hitZoneHelpers = [];
+        
+        // Exit if not showing
+        if (!show) return;
+        
+        // Create helpers for our opponent
+        const opponentId = this.duelOpponentId?.toString();
+        if (opponentId && window.playersMap && window.playersMap.has(opponentId)) {
+            const opponentModel = window.playersMap.get(opponentId);
+            if (opponentModel && opponentModel.hitZones) {
+                // Create helper for each hit zone
+                for (const [zone, box] of Object.entries(opponentModel.hitZones)) {
+                    const color = zone === 'head' ? 0xff0000 : (zone === 'body' ? 0x00ff00 : 0x0000ff);
+                    const helper = new THREE.Box3Helper(box, color);
+                    this.scene.add(helper);
+                    this.hitZoneHelpers.push(helper);
+                }
+            }
+        }
+    }
+
+    /**
+     * Handle countdown notification from server.
+     * @param {Object} message - The countdown message
+     */
+    handleCountdown(message) {
+        console.log('Received countdown notification from server');
+        this.startDuelCountdown();
+    }
+
+    /**
+     * Handle kill notification from server.
+     * @param {Object} message - The kill message
+     */
+    handleKill(message) {
+        console.log(`You killed player ${message.targetId}`);
+        
+        // Show kill message
+        this.showMessage('KILL!', 1500, '#00FF00');
+        
+        // Play kill sound
+        if (this.soundManager) {
+            this.soundManager.playSound("kill", 0.7);
+        }
+        
+        // Create kill effect
+        this.createKillEffect();
+    }
+
+    /**
+     * Handle death notification from server.
+     * @param {Object} message - The death message
+     */
+    handleDeath(message) {
+        console.log(`You were killed by player ${message.killerId}`);
+        
+        // Show death message
+        this.showMessage('YOU DIED', 1500, '#FF0000');
+        
+        // Play death sound
+        if (this.soundManager) {
+            this.soundManager.playSound("death", 0.7);
+        }
+        
+        // Create death effect
+        this.createDeathEffect();
+    }
+
+    /**
+     * Handle duel result notification from server.
+     * @param {Object} message - The result message
+     */
+    handleResult(message) {
+        console.log(`Duel ended. Winner: ${message.winnerId}`);
+        this.endDuel(message.winnerId);
+    }
+
+    /**
+     * Create a visual effect when player gets a kill
+     */
+    createKillEffect() {
+        // Create a green flash to indicate kill
+        const killFlash = document.createElement('div');
+        killFlash.style.position = 'absolute';
+        killFlash.style.top = '0';
+        killFlash.style.left = '0';
+        killFlash.style.width = '100%';
+        killFlash.style.height = '100%';
+        killFlash.style.backgroundColor = 'rgba(0, 255, 0, 0.2)';
+        killFlash.style.pointerEvents = 'none';
+        killFlash.style.zIndex = '999';
+        killFlash.style.animation = 'kill-flash 0.5s ease-out';
+        
+        // Add animation style
+        const style = document.createElement('style');
+        style.innerHTML = `
+            @keyframes kill-flash {
+                0% { opacity: 0.5; }
+                100% { opacity: 0; }
+            }
+        `;
+        document.head.appendChild(style);
+        
+        // Add to game container
+        document.getElementById('game-container').appendChild(killFlash);
+        
+        // Remove after animation
+        setTimeout(() => {
+            if (killFlash.parentNode) {
+                killFlash.parentNode.removeChild(killFlash);
+            }
+            if (style.parentNode) {
+                style.parentNode.removeChild(style);
+            }
+        }, 500);
+    }
+
+    /**
+     * Create a visual effect when player dies
+     */
+    createDeathEffect() {
+        // Create a red vignette effect for death
+        const deathOverlay = document.createElement('div');
+        deathOverlay.style.position = 'absolute';
+        deathOverlay.style.top = '0';
+        deathOverlay.style.left = '0';
+        deathOverlay.style.width = '100%';
+        deathOverlay.style.height = '100%';
+        deathOverlay.style.background = 'radial-gradient(ellipse at center, rgba(0,0,0,0) 0%,rgba(255,0,0,0.5) 100%)';
+        deathOverlay.style.pointerEvents = 'none';
+        deathOverlay.style.zIndex = '999';
+        deathOverlay.style.opacity = '0';
+        deathOverlay.style.animation = 'death-fade 1s ease-in forwards';
+        
+        // Add animation style
+        const style = document.createElement('style');
+        style.innerHTML = `
+            @keyframes death-fade {
+                0% { opacity: 0; }
+                100% { opacity: 1; }
+            }
+        `;
+        document.head.appendChild(style);
+        
+        // Add to game container
+        document.getElementById('game-container').appendChild(deathOverlay);
+        
+        // Remove after animation (longer for death effect)
+        setTimeout(() => {
+            if (deathOverlay.parentNode) {
+                deathOverlay.parentNode.removeChild(deathOverlay);
+            }
+            if (style.parentNode) {
+                style.parentNode.removeChild(style);
+            }
+        }, 1500);
+    }
+
+    /**
+     * Disable and remove the aerial camera.
+     */
+    disableAerialCamera() {
+        console.log('[QuickDraw] Disabling aerial camera');
+        
+        // Set active flag to false first
+        this.aerialCameraActive = false;
+        
+        // Remove camera from scene
+        if (this.aerialCamera) {
+            console.log('[QuickDraw] Removing aerial camera from scene');
+            
+            // Remove from parent if attached
+            if (this.aerialCamera.parent) {
+                this.aerialCamera.parent.remove(this.aerialCamera);
+            }
+            // Or try removing directly from scene
+            else if (this.scene && this.scene.scene) {
+                this.scene.scene.remove(this.aerialCamera);
+            }
+            
+            // Clear reference to camera
+            this.aerialCamera = null;
+        }
+        
+        // Restore player camera immediately
+        if (this.scene && this.scene.renderer) {
+            // Clear any override flags
+            this.scene.renderer.overrideCamera = null;
+            
+            // Explicitly set renderer's camera back to player camera
+            if (this.localPlayer && this.localPlayer.camera) {
+                console.log('[QuickDraw] Restoring renderer camera to player camera');
+                this.scene.renderer.camera = this.localPlayer.camera;
+                
+                // Force a render to ensure changes take effect
+                try {
+                    this.scene.renderer.render();
+                } catch (e) {
+                    console.error('[QuickDraw] Error during forced render:', e);
+                }
+            }
+        }
+        
+        // Additional global cleanup
+        if (window.renderer) {
+            if (this.localPlayer && this.localPlayer.camera) {
+                window.renderer.camera = this.localPlayer.camera;
+            }
+            delete window._renderWithCamera;
+        }
+        
+        // Make sure we clear any direct override flag
+        this._directCameraOverride = false;
+        
+        console.log('[QuickDraw] Aerial camera disabled and removed');
+    }
+
+    /**
+     * Initialize UI elements for QuickDraw mode
+     */
+    initUI() {
+        // Skip if UI was already created
+        if (this.messageOverlay) return;
+        
+        console.log('Initializing QuickDraw UI');
+        
+        // Create main UI elements
+        this.createUI();
+        
+        // Create challenge UI elements
+        this.createChallengeUI();
+    }
+
+    /**
+     * Initialize aerial camera for duel mode
+     */
+    initAerialCamera() {
+        // Create aerial camera if it doesn't exist
+        if (!this.aerialCamera) {
+            console.log('Creating aerial camera for QuickDraw duels');
+            
+            this.aerialCamera = new THREE.PerspectiveCamera(
+                75, 
+                window.innerWidth / window.innerHeight,
+                0.1,
+                1000
+            );
+            
+            if (this.scene) {
+                this.scene.add(this.aerialCamera);
+            } else {
+                console.error('Cannot add aerial camera - scene not available');
+            }
+        }
+    }
+
+    /**
+     * Create a timeout that will be automatically cleared on cleanup
+     * to prevent lingering effects when a duel ends prematurely.
+     */
+    createDuelTimeout(callback, delay) {
+        // Initialize the array if it doesn't exist
+        if (!this._duelTimers) {
+            this._duelTimers = [];
+        }
+        
+        // Create the timeout and store its ID
+        const timerId = setTimeout(() => {
+            // Remove this timer from the tracking array once it completes
+            if (this._duelTimers) {
+                const index = this._duelTimers.indexOf(timerId);
+                if (index !== -1) {
+                    this._duelTimers.splice(index, 1);
+                }
+            }
+            
+            // Execute the callback safely
+            try {
+                callback();
+            } catch (error) {
+                console.error('[QuickDraw] Error in timeout callback:', error);
+            }
+        }, delay);
+        
+        // Add this timer to our tracking array
+        this._duelTimers.push(timerId);
+        console.log(`[QuickDraw] Created duel timeout #${timerId}, total active: ${this._duelTimers.length}`);
+        
+        return timerId;
+    }
+
+    /**
+     * Clear all duel-related timers to prevent lingering effects
+     */
+    clearAllDuelTimers() {
+        if (!this._duelTimers) {
+            return;
+        }
+        
+        console.log(`[QuickDraw] Clearing all ${this._duelTimers.length} duel timers`);
+        
+        // Clear each timer and track how many we actually cleared
+        let clearedCount = 0;
+        const timersCopy = [...this._duelTimers]; // Create a copy to avoid modification issues
+        
+        for (const timerId of timersCopy) {
+            clearTimeout(timerId);
+            clearedCount++;
+        }
+        
+        // Reset the array
+        this._duelTimers = [];
+        
+        console.log(`[QuickDraw] Cleared ${clearedCount} duel timers`);
+    }
+
+    /**
+     * Helper to show a message in the center of the screen.
+     * @param {string} message - The message to display
+     * @param {number} duration - How long to show the message (in ms)
+     * @param {string} color - Optional color for the message text
+     */
+    showMessage(message, duration = 0, color = '') {
+        // Check if messageOverlay exists
+        if (!this.messageOverlay) {
+            console.log('[QuickDraw] Creating missing messageOverlay for showMessage');
+            // Text overlay for messages
+            this.messageOverlay = document.createElement('div');
+            this.messageOverlay.id = 'quick-draw-message';
+            this.messageOverlay.style.position = 'absolute';
+            this.messageOverlay.style.top = '50%';
+            this.messageOverlay.style.left = '50%';
+            this.messageOverlay.style.transform = 'translate(-50%, -50%)';
+            this.messageOverlay.style.color = 'white';
+            this.messageOverlay.style.fontSize = '48px';
+            this.messageOverlay.style.fontWeight = 'bold';
+            this.messageOverlay.style.textAlign = 'center';
+            this.messageOverlay.style.display = 'none';
+            this.messageOverlay.style.fontFamily = 'Western, Arial, sans-serif';
+            this.messageOverlay.style.textShadow = '2px 2px 4px rgba(0, 0, 0, 0.5)';
+            this.messageOverlay.style.zIndex = '1000';
+            document.getElementById('game-container').appendChild(this.messageOverlay);
+        }
+        
+        // Set message text
+        this.messageOverlay.textContent = message;
+        
+        // Set color if provided
+        if (color) {
+            this.messageOverlay.style.color = color;
+        } else {
+            this.messageOverlay.style.color = '#FFFFFF'; // Default to white
+        }
+        
+        // Show the message
+        this.messageOverlay.style.display = 'block';
+        
+        // Hide after specified duration
+        if (duration > 0) {
+            this.createDuelTimeout(() => {
+                this.hideMessage();
+            }, duration);
+        }
+    }
+
+    /**
+     * Hide the message overlay.
+     */
+    hideMessage() {
+        if (this.messageOverlay) {
+            this.messageOverlay.style.display = 'none';
         }
     }
 }
