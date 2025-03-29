@@ -309,7 +309,7 @@ export class QuickDraw {
             }
         };
         
-        this.networkManager.sendQuickDrawShoot = (opponentId, arenaIndex, hitZone = 'body', damage = 40) => {
+        this.networkManager.sendQuickDrawShoot = (opponentId, arenaIndex, hitZone = 'body', damage = 40, hitDetected = false) => {
             if (this.networkManager.socket && this.networkManager.socket.readyState === WebSocket.OPEN) {
                 console.log(`Sending Quick Draw hit notification to server: player ${this.localPlayer.id} hit player ${opponentId} in the ${hitZone} for ${damage} damage`);
                 this.networkManager.socket.send(JSON.stringify({
@@ -317,7 +317,8 @@ export class QuickDraw {
                     opponentId: opponentId,
                     arenaIndex: arenaIndex,
                     hitZone: hitZone,
-                    damage: damage
+                    damage: damage,
+                    hitDetected: hitDetected // Add this flag to let server know a hit was properly detected
                 }));
             }
         };
@@ -459,6 +460,21 @@ export class QuickDraw {
                         // Handle server confirmation of challenge acceptance
                         console.log('[QuickDraw] Challenge acceptance confirmed by server');
                         // The match will be set up by the server and we'll receive a matchFound message
+                        break;
+                        
+                    case 'debug':
+                        // Display debug messages from server
+                        console.log(`[DEBUG] Server message: ${message.message}`);
+                        // Show on-screen for easier debugging
+                        if (message.message.includes('hit detection')) {
+                            this.showMessage(`DEBUG: ${message.message}`, 3000, '#ff9900');
+                        }
+                        break;
+                        
+                    case 'quickDrawMiss':
+                        // Handle explicit miss notifications
+                        console.log(`[QuickDraw] Player ${message.playerId} missed shot at player ${message.targetId}`);
+                        // No visual feedback for misses per user request
                         break;
                         
                     case 'playerHealthUpdate':
@@ -1027,12 +1043,57 @@ export class QuickDraw {
             if (!this.localPlayerModel.updateHitZones) {
                 console.log('Adding missing updateHitZones method to localPlayerModel');
                 this.localPlayerModel.updateHitZones = function() {
-                    // Basic implementation - later we might add proper hit zone updates
-                    if (this.hitZones) {
-                        console.log('Model has hit zones - updating based on model position');
-                        // Real implementation would update hit zone positions here
+                    // If the model has the updateCollisionBox method, use that to update hitboxes
+                    if (typeof this.updateCollisionBox === 'function') {
+                        this.updateCollisionBox();
+                        console.log('Updated hit zones using updateCollisionBox');
+                        
+                        // Ensure hitZones mapping exists and is properly updated
+                        if (!this.hitZones && (this.headHitbox || this.bodyHitbox || this.limbsHitbox)) {
+                            this.hitZones = {
+                                head: this.headHitbox,
+                                body: this.bodyHitbox,
+                                legs: this.limbsHitbox
+                            };
+                            console.log('Created hit zones mapping from hitboxes');
+                        }
+                    } else if (this.hitZones) {
+                        console.log('Model has hit zones - already properly setup');
                     } else {
                         console.log('Model does not have hit zones defined');
+                        
+                        // Create basic hitboxes if they don't exist
+                        if (this.group && !this.hitZones) {
+                            // Calculate bounding box from the model
+                            const boundingBox = new THREE.Box3().setFromObject(this.group);
+                            const size = boundingBox.getSize(new THREE.Vector3());
+                            const center = boundingBox.getCenter(new THREE.Vector3());
+                            
+                            // Create basic hitboxes
+                            this.headHitbox = new THREE.Box3(
+                                new THREE.Vector3(center.x - size.x/4, center.y + size.y/4, center.z - size.x/4),
+                                new THREE.Vector3(center.x + size.x/4, center.y + size.y/2, center.z + size.x/4)
+                            );
+                            
+                            this.bodyHitbox = new THREE.Box3(
+                                new THREE.Vector3(center.x - size.x/3, center.y - size.y/4, center.z - size.x/3),
+                                new THREE.Vector3(center.x + size.x/3, center.y + size.y/4, center.z + size.x/3)
+                            );
+                            
+                            this.limbsHitbox = new THREE.Box3(
+                                new THREE.Vector3(center.x - size.x/3, center.y - size.y/2, center.z - size.x/3),
+                                new THREE.Vector3(center.x + size.x/3, center.y - size.y/4, center.z + size.x/3)
+                            );
+                            
+                            // Create hitZones mapping
+                            this.hitZones = {
+                                head: this.headHitbox,
+                                body: this.bodyHitbox,
+                                legs: this.limbsHitbox
+                            };
+                            
+                            console.log('Created emergency hit zones for model without proper hitboxes');
+                        }
                     }
                 };
             }
@@ -2090,6 +2151,46 @@ export class QuickDraw {
                 }
             }
             
+            // Setup hit zones mapping for all players in the map
+            for (const [playerId, playerModel] of window.playersMap.entries()) {
+                if (playerModel) {
+                    // Check if the model has hitboxes but no hitZones mapping
+                    if ((playerModel.headHitbox || playerModel.bodyHitbox || playerModel.limbsHitbox) && 
+                        !playerModel.hitZones) {
+                        
+                        console.log(`Creating hitZones mapping for player ${playerId}`);
+                        
+                        // Create the mapping of hitboxes to hitZones
+                        playerModel.hitZones = {
+                            head: playerModel.headHitbox,
+                            body: playerModel.bodyHitbox,
+                            legs: playerModel.limbsHitbox
+                        };
+                        
+                        // Make sure updateHitZones properly updates the hitZones mapping
+                        const originalUpdateMethod = playerModel.updateCollisionBox;
+                        if (originalUpdateMethod && !playerModel._hitZonesMappingAdded) {
+                            playerModel._hitZonesMappingAdded = true;
+                            playerModel.updateCollisionBox = function() {
+                                // Call the original method first
+                                originalUpdateMethod.call(this);
+                                
+                                // Update the hitZones mapping
+                                if (this.hitZones) {
+                                    this.hitZones.head = this.headHitbox;
+                                    this.hitZones.body = this.bodyHitbox;
+                                    this.hitZones.legs = this.limbsHitbox;
+                                }
+                            };
+                            
+                            // Force an update
+                            playerModel.updateCollisionBox();
+                            console.log(`Enhanced updateCollisionBox for player ${playerId} to maintain hitZones mapping`);
+                        }
+                    }
+                }
+            }
+            
             // Fix visible hit zones for debugging
             if (window.showHitZoneDebug) {
                 if (window.physics && typeof window.physics.refreshHitZoneDebug === 'function') {
@@ -2123,24 +2224,98 @@ export class QuickDraw {
         // Try to find opponent in players map
         let opponentModel = null;
         let opponentHitZones = null;
+        let opponentFound = false;
         
-        // First try the playersMap (should be populated)
-        if (window.playersMap && window.playersMap.has(opponentId)) {
-            opponentModel = window.playersMap.get(opponentId);
-            if (opponentModel && opponentModel.hitZones) {
-                opponentHitZones = opponentModel.hitZones;
+        // First try ALL possible player maps
+        const playerMaps = [
+            { name: 'playersMap', map: window.playersMap },
+            { name: 'remotePlayers', map: window.remotePlayers },
+            { name: 'otherPlayers', map: window.otherPlayers }
+        ];
+        
+        // Debug - list all player IDs in all maps
+        console.log('DEBUGGING ALL PLAYER MAPS:');
+        for (const mapInfo of playerMaps) {
+            if (mapInfo.map) {
+                console.log(`${mapInfo.name} contents:`);
+                for (const [pid, model] of mapInfo.map.entries()) {
+                    console.log(`- Player ${pid}: ${model ? 'found' : 'missing'}`);
+                    
+                    // If this is our opponent, store the model
+                    if (pid === opponentId && model && !opponentModel) {
+                        console.log(`Found opponent ${opponentId} in ${mapInfo.name}`);
+                        opponentModel = model;
+                        opponentFound = true;
+                        
+                        // Add to playersMap for future reference
+                        if (window.playersMap && mapInfo.name !== 'playersMap') {
+                            window.playersMap.set(opponentId, model);
+                        }
+                    }
+                }
+            } else {
+                console.log(`${mapInfo.name} not available`);
             }
         }
-        // Fallback to remotePlayers
-        else if (window.remotePlayers && window.remotePlayers.has(opponentId)) {
-            opponentModel = window.remotePlayers.get(opponentId);
-            if (opponentModel && opponentModel.hitZones) {
-                opponentHitZones = opponentModel.hitZones;
+        
+        // Special case: Try to use opponent position data if available
+        if (!opponentModel && this.networkManager && this.networkManager.otherPlayers) {
+            const opponentData = this.networkManager.otherPlayers.get(opponentId);
+            if (opponentData) {
+                console.log(`Found opponent ${opponentId} position data in networkManager`);
+                opponentFound = true;
+                
+                // Create emergency model with position
+                opponentModel = {
+                    id: opponentId,
+                    position: new THREE.Vector3(
+                        opponentData.position.x,
+                        opponentData.position.y,
+                        opponentData.position.z
+                    ),
+                    group: new THREE.Group()
+                };
+                
+                // Position the group
+                if (opponentModel.position) {
+                    opponentModel.group.position.copy(opponentModel.position);
+                }
+                
+                // Add to scene temporarily
+                if (this.scene) {
+                    this.scene.add(opponentModel.group);
+                    
+                    // Schedule removal
+                    setTimeout(() => {
+                        if (this.scene && opponentModel.group) {
+                            this.scene.remove(opponentModel.group);
+                        }
+                    }, 100);
+                }
             }
         }
         
-        // Debug - validate opponent model is found
-        if (!opponentModel) {
+        // If we found an opponent model, check for hit zones
+        if (opponentModel) {
+            if (opponentModel.hitZones) {
+                opponentHitZones = opponentModel.hitZones;
+            }
+            else if (opponentModel.headHitbox || opponentModel.bodyHitbox || opponentModel.limbsHitbox) {
+                // Create hitZones mapping from individual hitboxes
+                opponentHitZones = {
+                    head: opponentModel.headHitbox,
+                    body: opponentModel.bodyHitbox,
+                    legs: opponentModel.limbsHitbox
+                };
+                
+                // Store on the model
+                opponentModel.hitZones = opponentHitZones;
+                console.log('Created hitZones mapping from individual hitboxes');
+            }
+        }
+        
+        // If still no model found, log error
+        if (!opponentFound) {
             console.error(`Cannot find opponent model for player ${opponentId}`);
             
             // List available players for debug
@@ -2157,27 +2332,13 @@ export class QuickDraw {
                     console.log(`- Player ${pid}: ${model ? 'found' : 'missing'}`);
                 }
             }
-            
-            // Emergency add to playersMap if we have it in remotePlayers
-            if (window.remotePlayers && window.remotePlayers.has(opponentId) && window.playersMap) {
-                window.playersMap.set(opponentId, window.remotePlayers.get(opponentId));
-                console.log(`Emergency added opponent ${opponentId} to playersMap`);
-                
-                // Try again
-                if (window.playersMap.has(opponentId)) {
-                    opponentModel = window.playersMap.get(opponentId);
-                    if (opponentModel && opponentModel.hitZones) {
-                        opponentHitZones = opponentModel.hitZones;
-                    }
-                }
-            }
         }
         
         // Check if we have valid hit zones
         if (!opponentHitZones) {
-            console.error(`No hit zones found for opponent ${opponentId}`);
+            console.warn(`No hit zones found for opponent ${opponentId}`);
             
-            // Emergency fallback - create temporary hit zone for opponent
+            // Emergency fallback - create temporary hit zone for opponent if we have a position
             if (opponentModel && opponentModel.group) {
                 console.log('Creating emergency hit zones for opponent');
                 
@@ -2204,7 +2365,39 @@ export class QuickDraw {
                 
                 // Store the hit zones on the model
                 opponentModel.hitZones = opponentHitZones;
-                console.log('Emergency hit zones created:', opponentHitZones);
+                console.log('Emergency hit zones created based on model position');
+            } 
+            else if (opponentFound) {
+                // If we have opponent data but no model/group, create basic hit zones based on fixed dimensions
+                const opponentPos = opponentModel.position || this.getOpponentPosition() || new THREE.Vector3(0, 2, -10);
+                
+                if (opponentPos) {
+                    const playerHeight = 3.0;
+                    const playerWidth = 1.0;
+                    
+                    // Create basic hit zones at opponent position
+                    opponentHitZones = {
+                        head: new THREE.Box3(
+                            new THREE.Vector3(opponentPos.x - playerWidth/4, opponentPos.y + playerHeight*0.6, opponentPos.z - playerWidth/4),
+                            new THREE.Vector3(opponentPos.x + playerWidth/4, opponentPos.y + playerHeight*0.9, opponentPos.z + playerWidth/4)
+                        ),
+                        body: new THREE.Box3(
+                            new THREE.Vector3(opponentPos.x - playerWidth/2, opponentPos.y + playerHeight*0.2, opponentPos.z - playerWidth/2),
+                            new THREE.Vector3(opponentPos.x + playerWidth/2, opponentPos.y + playerHeight*0.6, opponentPos.z + playerWidth/2)
+                        ),
+                        legs: new THREE.Box3(
+                            new THREE.Vector3(opponentPos.x - playerWidth/2, opponentPos.y, opponentPos.z - playerWidth/2),
+                            new THREE.Vector3(opponentPos.x + playerWidth/2, opponentPos.y + playerHeight*0.2, opponentPos.z + playerWidth/2)
+                        )
+                    };
+                    
+                    console.log('Created emergency hit zones based on position data');
+                    
+                    // Store on the model if we have one
+                    if (opponentModel) {
+                        opponentModel.hitZones = opponentHitZones;
+                    }
+                }
             }
         }
         
@@ -2228,12 +2421,14 @@ export class QuickDraw {
         
         // Visualize bullet path for debugging
         if (this.debug) {
-            this.drawBulletPath(bulletOrigin.clone(), bulletDirection.clone().multiplyScalar(100));
+            const debugEndPoint = bulletOrigin.clone().add(bulletDirection.clone().multiplyScalar(100));
+            this.drawBulletPath(bulletOrigin.clone(), debugEndPoint);
         }
         
         // Check for a hit
         let hitZone = null;
         let hitDistance = Infinity;
+        let hitDetected = false;
         
         // Check intersection with each hit zone
         if (opponentHitZones) {
@@ -2245,6 +2440,7 @@ export class QuickDraw {
                     if (distance < hitDistance) {
                         hitZone = 'head';
                         hitDistance = distance;
+                        hitDetected = true;
                         console.log(`HEAD HIT at distance ${distance.toFixed(2)}`);
                     }
                 }
@@ -2258,6 +2454,7 @@ export class QuickDraw {
                     if (distance < hitDistance) {
                         hitZone = 'body';
                         hitDistance = distance;
+                        hitDetected = true;
                         console.log(`BODY HIT at distance ${distance.toFixed(2)}`);
                     }
                 }
@@ -2271,6 +2468,7 @@ export class QuickDraw {
                     if (distance < hitDistance) {
                         hitZone = 'legs';
                         hitDistance = distance;
+                        hitDetected = true;
                         console.log(`LEGS HIT at distance ${distance.toFixed(2)}`);
                     }
                 }
@@ -2278,7 +2476,7 @@ export class QuickDraw {
         }
         
         // If we have a hit, send it to the server
-        if (hitZone) {
+        if (hitDetected && hitZone) {
             console.log(`Hit opponent ${opponentId} in the ${hitZone}!`);
             
             // Calculate damage based on hit zone
@@ -2289,8 +2487,8 @@ export class QuickDraw {
                 damage = 25; // Less damage for leg hit
             }
             
-            // Send hit to server
-            this.networkManager.sendQuickDrawShoot(opponentId, 0, hitZone, damage);
+            // Send hit to server with hit detection flag
+            this.networkManager.sendQuickDrawShoot(opponentId, 0, hitZone, damage, true);
             
             // Show hit marker
             this.showHitMarker(hitZone);
@@ -2299,8 +2497,8 @@ export class QuickDraw {
         } else {
             console.log('Missed the opponent');
             
-            // Send miss to server
-            this.networkManager.sendQuickDrawShoot(opponentId, 0, 'miss', 0);
+            // Send miss to server with hit detection flag
+            this.networkManager.sendQuickDrawShoot(opponentId, 0, 'miss', 0, true);
             
             return false;
         }
@@ -2578,17 +2776,127 @@ export class QuickDraw {
         // Exit if not showing
         if (!show) return;
         
-        // Create helpers for our opponent
-        const opponentId = this.duelOpponentId?.toString();
-        if (opponentId && window.playersMap && window.playersMap.has(opponentId)) {
-            const opponentModel = window.playersMap.get(opponentId);
-            if (opponentModel && opponentModel.hitZones) {
-                // Create helper for each hit zone
-                for (const [zone, box] of Object.entries(opponentModel.hitZones)) {
+        // First, ensure hit zone mappings are created for all players
+        this.fixHitZonesForQuickDraw();
+        
+        // Create helpers for local player model too, if available
+        if (this.localPlayerModel) {
+            console.log('Visualizing local player hit zones');
+            
+            // Try hitZones mapping first
+            if (this.localPlayerModel.hitZones) {
+                for (const [zone, box] of Object.entries(this.localPlayerModel.hitZones)) {
                     const color = zone === 'head' ? 0xff0000 : (zone === 'body' ? 0x00ff00 : 0x0000ff);
                     const helper = new THREE.Box3Helper(box, color);
                     this.scene.add(helper);
                     this.hitZoneHelpers.push(helper);
+                }
+            } 
+            // Fall back to individual hitboxes if available
+            else if (this.localPlayerModel.headHitbox || this.localPlayerModel.bodyHitbox || this.localPlayerModel.limbsHitbox) {
+                if (this.localPlayerModel.headHitbox) {
+                    const helper = new THREE.Box3Helper(this.localPlayerModel.headHitbox, 0xff0000);
+                    this.scene.add(helper);
+                    this.hitZoneHelpers.push(helper);
+                }
+                
+                if (this.localPlayerModel.bodyHitbox) {
+                    const helper = new THREE.Box3Helper(this.localPlayerModel.bodyHitbox, 0x00ff00);
+                    this.scene.add(helper);
+                    this.hitZoneHelpers.push(helper);
+                }
+                
+                if (this.localPlayerModel.limbsHitbox) {
+                    const helper = new THREE.Box3Helper(this.localPlayerModel.limbsHitbox, 0x0000ff);
+                    this.scene.add(helper);
+                    this.hitZoneHelpers.push(helper);
+                }
+            }
+        }
+        
+        // Create helpers for our opponent
+        const opponentId = this.duelOpponentId?.toString();
+        if (opponentId) {
+            let opponentModel = null;
+            
+            // Try different sources for opponent model
+            if (window.playersMap && window.playersMap.has(opponentId)) {
+                opponentModel = window.playersMap.get(opponentId);
+            } else if (window.remotePlayers && window.remotePlayers.has(opponentId)) {
+                opponentModel = window.remotePlayers.get(opponentId);
+            } else if (window.otherPlayers && window.otherPlayers.has(opponentId)) {
+                opponentModel = window.otherPlayers.get(opponentId);
+            }
+            
+            if (opponentModel) {
+                console.log('Visualizing opponent hit zones');
+                
+                // Try hitZones mapping first
+                if (opponentModel.hitZones) {
+                    for (const [zone, box] of Object.entries(opponentModel.hitZones)) {
+                        const color = zone === 'head' ? 0xff0000 : (zone === 'body' ? 0x00ff00 : 0x0000ff);
+                        const helper = new THREE.Box3Helper(box, color);
+                        this.scene.add(helper);
+                        this.hitZoneHelpers.push(helper);
+                    }
+                } 
+                // Fall back to individual hitboxes if available
+                else if (opponentModel.headHitbox || opponentModel.bodyHitbox || opponentModel.limbsHitbox) {
+                    if (opponentModel.headHitbox) {
+                        const helper = new THREE.Box3Helper(opponentModel.headHitbox, 0xff0000);
+                        this.scene.add(helper);
+                        this.hitZoneHelpers.push(helper);
+                    }
+                    
+                    if (opponentModel.bodyHitbox) {
+                        const helper = new THREE.Box3Helper(opponentModel.bodyHitbox, 0x00ff00);
+                        this.scene.add(helper);
+                        this.hitZoneHelpers.push(helper);
+                    }
+                    
+                    if (opponentModel.limbsHitbox) {
+                        const helper = new THREE.Box3Helper(opponentModel.limbsHitbox, 0x0000ff);
+                        this.scene.add(helper);
+                        this.hitZoneHelpers.push(helper);
+                    }
+                }
+                // If no hit zones, try to create them
+                else if (opponentModel.group) {
+                    console.log('Creating on-the-fly hit zones for visualization');
+                    
+                    // Calculate bounding box from the model
+                    const boundingBox = new THREE.Box3().setFromObject(opponentModel.group);
+                    const size = boundingBox.getSize(new THREE.Vector3());
+                    const center = boundingBox.getCenter(new THREE.Vector3());
+                    
+                    // Create basic hitboxes for visualization
+                    const headBox = new THREE.Box3(
+                        new THREE.Vector3(center.x - size.x/4, center.y + size.y/4, center.z - size.x/4),
+                        new THREE.Vector3(center.x + size.x/4, center.y + size.y/2, center.z + size.x/4)
+                    );
+                    
+                    const bodyBox = new THREE.Box3(
+                        new THREE.Vector3(center.x - size.x/3, center.y - size.y/4, center.z - size.x/3),
+                        new THREE.Vector3(center.x + size.x/3, center.y + size.y/4, center.z + size.x/3)
+                    );
+                    
+                    const legsBox = new THREE.Box3(
+                        new THREE.Vector3(center.x - size.x/3, center.y - size.y/2, center.z - size.x/3),
+                        new THREE.Vector3(center.x + size.x/3, center.y - size.y/4, center.z + size.x/3)
+                    );
+                    
+                    // Create helpers
+                    const headHelper = new THREE.Box3Helper(headBox, 0xff0000);
+                    const bodyHelper = new THREE.Box3Helper(bodyBox, 0x00ff00);
+                    const legsHelper = new THREE.Box3Helper(legsBox, 0x0000ff);
+                    
+                    // Add to scene
+                    this.scene.add(headHelper);
+                    this.scene.add(bodyHelper);
+                    this.scene.add(legsHelper);
+                    
+                    // Track helpers
+                    this.hitZoneHelpers.push(headHelper, bodyHelper, legsHelper);
                 }
             }
         }

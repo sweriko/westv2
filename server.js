@@ -267,7 +267,8 @@ wss.on('connection', (ws, req) => {
             data.opponentId, 
             data.arenaIndex, 
             data.hitZone || 'body', 
-            data.damage || 40
+            data.damage || 40,
+            data.hitDetected || false
           );
           break;
           
@@ -567,7 +568,7 @@ function handlePlayerHit(playerId, targetId, hitData, bulletId) {
       }
       
       // Use the quickdraw handler with the appropriate damage and hit zone
-      handleQuickDrawShoot(playerId, targetId, undefined, hitData.hitZone, finalDamage);
+      handleQuickDrawShoot(playerId, targetId, undefined, hitData.hitZone, finalDamage, true);
       return;
     }
   }
@@ -1146,11 +1147,11 @@ function sendDrawSignal(duelId) {
  * @param {string} hitZone - The hit zone ('head', 'body', 'limbs')
  * @param {number} damage - The damage amount
  */
-function handleQuickDrawShoot(playerId, targetId, arenaIndex, hitZone = 'body', damage = 40) {
+function handleQuickDrawShoot(playerId, targetId, arenaIndex, hitZone = 'body', damage = 40, hitDetected = false) {
     playerId = Number(playerId);
     targetId = Number(targetId);
     
-    console.log(`Quick Draw shoot: Player ${playerId} shot player ${targetId} (${hitZone}, ${damage} damage)`);
+    console.log(`Quick Draw shoot: Player ${playerId} shot player ${targetId} (${hitZone}, ${damage} damage, hitDetected: ${hitDetected})`);
     
     const playerData = players.get(playerId);
     
@@ -1186,6 +1187,23 @@ function handleQuickDrawShoot(playerId, targetId, arenaIndex, hitZone = 'body', 
         return;
     }
     
+    // If hitDetected is false and it's not a miss, don't apply damage
+    if (!hitDetected && hitZone !== 'miss') {
+        console.log(`Quick Draw shot without proper hit detection from player ${playerId} - ignoring damage`);
+        
+        // Send a debug message to the client
+        if (playerData.ws && playerData.ws.readyState === WebSocket.OPEN) {
+            playerData.ws.send(JSON.stringify({
+                type: 'debug',
+                message: 'Shot ignored - hit detection failed'
+            }));
+        }
+        
+        // Consider this a miss
+        hitZone = 'miss';
+        damage = 0;
+    }
+    
     // Add hit debouncing to prevent double counting - track the last hit time
     // Initialize the lastHitTime map on the duel object if it doesn't exist
     if (!duel.lastHitTime) {
@@ -1199,6 +1217,29 @@ function handleQuickDrawShoot(playerId, targetId, arenaIndex, hitZone = 'body', 
     if (now - lastHitTime < hitDebounceTime) {
         console.log(`Quick Draw shoot debounced: Too soon after last hit (${now - lastHitTime}ms)`);
         return; // Ignore rapid-fire hit reports that are too close together
+    }
+    
+    // If it's a miss, don't apply damage
+    if (hitZone === 'miss') {
+        console.log(`Player ${playerId} missed - no damage applied`);
+        
+        // Send miss notification to both players
+        const missData = {
+            type: 'quickDrawMiss',
+            playerId: playerId,
+            targetId: targetId
+        };
+        
+        if (playerData.ws && playerData.ws.readyState === WebSocket.OPEN) {
+            playerData.ws.send(JSON.stringify(missData));
+        }
+        
+        const targetPlayer = players.get(targetId);
+        if (targetPlayer && targetPlayer.ws && targetPlayer.ws.readyState === WebSocket.OPEN) {
+            targetPlayer.ws.send(JSON.stringify(missData));
+        }
+        
+        return;
     }
     
     // Update the last hit time for this target
