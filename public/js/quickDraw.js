@@ -1172,17 +1172,14 @@ export class QuickDraw {
         const lastPosition = this.localPlayerModel.group ? 
             this.localPlayerModel.group.position.clone() : new THREE.Vector3();
         
-        // During QuickDraw, the server already sends positions where the feet should be at ground level
+        // Create position with the Y-offset correction to ensure feet touch ground
         const correctedPosition = cameraPosition.clone();
         
-        // Create position with the Y-offset correction to ensure feet touch ground
-        if (this.inDuel) {
-            // For QuickDraw duels, use less vertical adjustment to prevent floating
-            correctedPosition.y -= 1.72; // Reduced offset for QuickDraw mode
-            console.log(`[QuickDraw DEBUG] Using reduced offset: camera height: ${cameraPosition.y.toFixed(2)}, feet position: ${correctedPosition.y.toFixed(2)}`);
-        } else {
-            // Use standard offset for normal gameplay
-            correctedPosition.y -= 2.72;
+        // Always use consistent offset of 2.72 for proper ground alignment
+        correctedPosition.y -= 2.72;
+        
+        if (this.debug && this.inDuel) {
+            console.log(`[QuickDraw DEBUG] Positioning player model: camera at ${cameraPosition.y.toFixed(2)}, feet at ${correctedPosition.y.toFixed(2)}`);
         }
         
         if (this.localPlayerModel.group) {
@@ -1199,7 +1196,7 @@ export class QuickDraw {
                 console.log(`[QuickDraw] Updated local player model position: 
                     Camera: (${cameraPosition.x.toFixed(2)}, ${cameraPosition.y.toFixed(2)}, ${cameraPosition.z.toFixed(2)})
                     Model: (${this.localPlayerModel.group.position.x.toFixed(2)}, ${this.localPlayerModel.group.position.y.toFixed(2)}, ${this.localPlayerModel.group.position.z.toFixed(2)})
-                    On Ground: y=${(this.localPlayerModel.group.position.y + 2.72).toFixed(2)}`);
+                    On Ground: y=${correctedPosition.y.toFixed(2)}`);
             }
         } else {
             console.warn('Cannot update local player model - group not initialized');
@@ -1482,23 +1479,21 @@ export class QuickDraw {
         
         // Teleport player to the start position
         if (message.startPosition) {
-            console.log('[QuickDraw] Teleporting to start position:', message.startPosition);
+            console.log('[QuickDraw] Original start position from server:', message.startPosition);
             
-            // First move to new position, ensuring player feet are on ground
-            // The player's eye level is at group.position, and feet are 2.72 units below
-            const eyeLevel = message.startPosition.y;
+            // Ground the player position by determining the correct height at the spawn point
+            const groundedPosition = this.groundPlayerPosition(message.startPosition);
             
-            // Apply the server-provided eye level during quickdraw match
+            // Apply the properly grounded position
             this.localPlayer.group.position.set(
-                message.startPosition.x,
-                eyeLevel,
-                message.startPosition.z
+                groundedPosition.x,
+                groundedPosition.y,
+                groundedPosition.z
             );
             
-            // Debug log the player height
-            console.log(`[QuickDraw] Player position set to: (${message.startPosition.x.toFixed(2)}, ${eyeLevel.toFixed(2)}, ${message.startPosition.z.toFixed(2)})`);
-            console.log(`[QuickDraw] With normal offset, feet would be at y=${(eyeLevel-2.72).toFixed(2)}`);
-            console.log(`[QuickDraw] With reduced offset, feet would be at y=${(eyeLevel-1.72).toFixed(2)}`);
+            // Debug log the grounded player position
+            console.log(`[QuickDraw] Player position set to grounded position: (${groundedPosition.x.toFixed(2)}, ${groundedPosition.y.toFixed(2)}, ${groundedPosition.z.toFixed(2)})`);
+            console.log(`[QuickDraw] Player feet should be at y=${(groundedPosition.y - 2.72).toFixed(2)}`);
             
             // Set rotation to face the opponent
             if (message.startRotation !== undefined) {
@@ -1511,7 +1506,7 @@ export class QuickDraw {
                 
                 // Debug visualization - draw a direction arrow for 5 seconds
                 if (this.debug) {
-                    this.showFacingDirection(message.startPosition, message.startRotation);
+                    this.showFacingDirection(groundedPosition, message.startRotation);
                 }
             }
             
@@ -3267,5 +3262,96 @@ export class QuickDraw {
         if (this.messageOverlay) {
             this.messageOverlay.style.display = 'none';
         }
+    }
+
+    /**
+     * Use raycast to find the proper ground level at the given position
+     * @param {Object} position - The position to check (x, z coordinates)
+     * @returns {number} - The ground height at that position
+     */
+    findGroundHeight(position) {
+        // Default ground level is 0 (flat town area)
+        let groundHeight = 0;
+        
+        // Check if we have physics and terrain systems available
+        if (window.physics) {
+            // First check for terrain height (desert dunes, etc.)
+            const terrainHeight = window.physics.getTerrainHeightAt(position.x, position.z);
+            groundHeight = Math.max(groundHeight, terrainHeight);
+            
+            // Check the physics bodies to find any platform/structure at this position
+            if (window.physics.bodies) {
+                // Create ray start position high above the potential ground
+                const rayStart = new THREE.Vector3(position.x, 50, position.z);
+                
+                // Check each physics body
+                for (const body of window.physics.bodies) {
+                    // Skip irrelevant bodies
+                    if (body.arenaBoundary || body.mass > 0) continue;
+                    
+                    // Currently we only handle box shapes
+                    for (let i = 0; i < body.shapes.length; i++) {
+                        const shape = body.shapes[i];
+                        if (shape.type !== CANNON.Shape.types.BOX) continue;
+                        
+                        // Get shape properties
+                        const shapePos = new CANNON.Vec3();
+                        body.pointToWorldFrame(body.shapeOffsets[i], shapePos);
+                        
+                        // Convert to THREE.js
+                        const boxPos = new THREE.Vector3(shapePos.x, shapePos.y, shapePos.z);
+                        const boxSize = new THREE.Vector3(
+                            shape.halfExtents.x * 2,
+                            shape.halfExtents.y * 2,
+                            shape.halfExtents.z * 2
+                        );
+                        
+                        // Check if the ray passes through this box horizontally
+                        const margin = 0.5; // Small margin for precision
+                        if (Math.abs(position.x - boxPos.x) <= boxSize.x/2 + margin && 
+                            Math.abs(position.z - boxPos.z) <= boxSize.z/2 + margin) {
+                            
+                            // Get top of box
+                            const topOfBox = boxPos.y + boxSize.y/2;
+                            
+                            // If this box is higher than current ground level, update it
+                            // But only if the ray from above would hit it first
+                            if (topOfBox > groundHeight && topOfBox < rayStart.y) {
+                                groundHeight = topOfBox;
+                                console.log(`[QuickDraw] Found elevated ground at ${groundHeight.toFixed(2)} (box: ${boxPos.x.toFixed(2)}, ${boxPos.y.toFixed(2)}, ${boxPos.z.toFixed(2)})`);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        console.log(`[QuickDraw] Ground height at (${position.x.toFixed(2)}, ${position.z.toFixed(2)}) is ${groundHeight.toFixed(2)}`);
+        return groundHeight;
+    }
+
+    /**
+     * Properly ground a player at the specified position
+     * @param {Object} position - The position to start with (will be modified)
+     * @returns {Object} - The corrected position with proper eye height above ground
+     */
+    groundPlayerPosition(position) {
+        if (!position) return position;
+        
+        // First find the actual ground height at this position
+        const groundHeight = this.findGroundHeight(position);
+        
+        // Set the player's eye level to be exactly 2.72 units above ground
+        const groundedPosition = {
+            x: position.x,
+            y: groundHeight + 2.72, // Standard eye level above ground
+            z: position.z
+        };
+        
+        console.log(`[QuickDraw] Grounded player position:`, 
+            `Original: (${position.x.toFixed(2)}, ${position.y ? position.y.toFixed(2) : 'N/A'}, ${position.z.toFixed(2)})`,
+            `Grounded: (${groundedPosition.x.toFixed(2)}, ${groundedPosition.y.toFixed(2)}, ${groundedPosition.z.toFixed(2)})`);
+        
+        return groundedPosition;
     }
 }
