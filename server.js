@@ -1421,9 +1421,9 @@ function generateQuickDrawStreetPositions() {
   // The client expects player feet at y=0, with eye level at 1.6 to 2.7 units above that
   // This was causing players to spawn half-sunk into the ground
   const groundLevel = 0.0;  // Ground level is always at 0
-  const eyeLevel = 3.5;     // Must be high enough to ensure feet are above ground
+  const eyeLevel = 2.72;     // This matches player model height in ThreeJS
   
-  console.log(`[DEBUG] QuickDraw duel - Setting player eye level to ${eyeLevel} (feet at ${eyeLevel-2.72})`);
+  console.log(`[DEBUG] QuickDraw duel - Setting player eye level to ${eyeLevel} (feet should be at ground level)`);
   
   // Generate a random position within the street bounds
   const midX = streetMinX + Math.random() * (streetMaxX - streetMinX);

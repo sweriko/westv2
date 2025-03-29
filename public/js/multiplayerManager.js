@@ -389,6 +389,12 @@ export class MultiplayerManager {
     
     const label = labelInfo.div;
     
+    // Hide player names if in a quickdraw match
+    if (window.quickDraw && window.quickDraw.inDuel) {
+      label.style.display = 'none';
+      return;
+    }
+    
     // Get player position
     if (playerModel) {
       // Use model property if available, otherwise fall back to group

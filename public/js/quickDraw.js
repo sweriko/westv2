@@ -1172,11 +1172,21 @@ export class QuickDraw {
         const lastPosition = this.localPlayerModel.group ? 
             this.localPlayerModel.group.position.clone() : new THREE.Vector3();
         
-        // IMPORTANT: Use the exact eye-level position from the player
-        // The ThirdPersonModel will internally adjust the model so its feet are on the ground
-        // while the eyes are at the correct height
+        // During QuickDraw, the server already sends positions where the feet should be at ground level
+        const correctedPosition = cameraPosition.clone();
+        
+        // Create position with the Y-offset correction to ensure feet touch ground
+        if (this.inDuel) {
+            // For QuickDraw duels, use less vertical adjustment to prevent floating
+            correctedPosition.y -= 1.72; // Reduced offset for QuickDraw mode
+            console.log(`[QuickDraw DEBUG] Using reduced offset: camera height: ${cameraPosition.y.toFixed(2)}, feet position: ${correctedPosition.y.toFixed(2)}`);
+        } else {
+            // Use standard offset for normal gameplay
+            correctedPosition.y -= 2.72;
+        }
+        
         if (this.localPlayerModel.group) {
-            this.localPlayerModel.group.position.copy(cameraPosition);
+            this.localPlayerModel.group.position.copy(correctedPosition);
             
             // Copy the player's rotation to the model
             this.localPlayerModel.group.rotation.y = this.localPlayer.group.rotation.y;
@@ -1189,7 +1199,7 @@ export class QuickDraw {
                 console.log(`[QuickDraw] Updated local player model position: 
                     Camera: (${cameraPosition.x.toFixed(2)}, ${cameraPosition.y.toFixed(2)}, ${cameraPosition.z.toFixed(2)})
                     Model: (${this.localPlayerModel.group.position.x.toFixed(2)}, ${this.localPlayerModel.group.position.y.toFixed(2)}, ${this.localPlayerModel.group.position.z.toFixed(2)})
-                    On Ground: y=${(this.localPlayerModel.group.position.y - 2.72).toFixed(2)}`);
+                    On Ground: y=${(this.localPlayerModel.group.position.y + 2.72).toFixed(2)}`);
             }
         } else {
             console.warn('Cannot update local player model - group not initialized');
@@ -1478,15 +1488,17 @@ export class QuickDraw {
             // The player's eye level is at group.position, and feet are 2.72 units below
             const eyeLevel = message.startPosition.y;
             
+            // Apply the server-provided eye level during quickdraw match
             this.localPlayer.group.position.set(
                 message.startPosition.x,
-                eyeLevel, // Use server-provided eye level directly
+                eyeLevel,
                 message.startPosition.z
             );
             
             // Debug log the player height
-            console.log(`Player position set to: (${message.startPosition.x.toFixed(2)}, ${eyeLevel.toFixed(2)}, ${message.startPosition.z.toFixed(2)})`);
-            console.log(`Feet should be at y=${(eyeLevel-2.72).toFixed(2)}`);
+            console.log(`[QuickDraw] Player position set to: (${message.startPosition.x.toFixed(2)}, ${eyeLevel.toFixed(2)}, ${message.startPosition.z.toFixed(2)})`);
+            console.log(`[QuickDraw] With normal offset, feet would be at y=${(eyeLevel-2.72).toFixed(2)}`);
+            console.log(`[QuickDraw] With reduced offset, feet would be at y=${(eyeLevel-1.72).toFixed(2)}`);
             
             // Set rotation to face the opponent
             if (message.startRotation !== undefined) {
@@ -1498,7 +1510,9 @@ export class QuickDraw {
                 this.localPlayer.group.rotation.y = message.startRotation;
                 
                 // Debug visualization - draw a direction arrow for 5 seconds
-                this.showFacingDirection(message.startPosition, message.startRotation);
+                if (this.debug) {
+                    this.showFacingDirection(message.startPosition, message.startRotation);
+                }
             }
             
             // Update local player model position after teleporting
