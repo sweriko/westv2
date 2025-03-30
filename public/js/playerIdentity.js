@@ -429,11 +429,6 @@ function promptForUsername(playerData) {
     modalContent.appendChild(button);
     modal.appendChild(modalContent);
     document.body.appendChild(modal);
-    
-    // Start preloading content in the background for first-time users
-    if (!playerData.username) {
-      preloadGameContent();
-    }
   });
 }
 
@@ -457,6 +452,5 @@ export {
   initPlayerIdentity, 
   getPlayerIdentity, 
   savePlayerIdentity, 
-  promptForUsername,
-  preloadGameContent 
+  promptForUsername
 }; 
