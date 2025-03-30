@@ -12,6 +12,7 @@ import { QuickDraw } from './quickDraw.js';
 import { updateAmmoUI, updateHealthUI } from './ui.js';
 import { Viewmodel } from './viewmodel.js';
 import { initPlayerIdentity } from './playerIdentity.js';
+import logger from './logger.js';
 
 // Check if device is mobile
 function isMobileDevice() {
@@ -95,6 +96,12 @@ async function init() {
     
     // Set debug mode flag
     window.debugMode = false; // Set to true to enable verbose console logging
+    
+    // Initialize logger UI if in debug mode
+    if (window.debugMode) {
+      const gameContainer = document.getElementById('gameContainer') || document.body;
+      logger.createUI(gameContainer);
+    }
     
     // Detect if we're on a mobile device
     window.isMobile = isMobileDevice();
@@ -481,7 +488,10 @@ function animate(time) {
     if (!result.active) {
       // If bullet hit something or traveled too far
       if (result.hit && result.hit.type === 'player') {
-        console.log(`Bullet hit player ${result.hit.playerId} in the ${result.hit.zone || 'body'} for ${result.hit.damage || 'unknown'} damage`);
+        // Use logger for bullet hits
+        if (window.logger) {
+          window.logger.info(`Bullet hit player ${result.hit.playerId} in the ${result.hit.zone || 'body'} for ${result.hit.damage || 'unknown'} damage`);
+        }
         
         // Set the last hit zone for server validation
         if (bullet.bulletId !== null && result.hit.zone) {
@@ -617,7 +627,10 @@ function handleBulletImpact(bulletId, hitType, targetId, position, hitZone) {
     // Remove from bullet map
     bulletMap.delete(bulletId);
   } else {
-    console.log(`Bullet ${bulletId} not found for impact event`);
+    // Use logger instead of console.log
+    if (window.logger) {
+      window.logger.debug(`Bullet ${bulletId} not found for impact event`);
+    }
     
     // If we don't have the bullet object, still create visual effect at impact position
     if (impactPosition) {

@@ -251,15 +251,6 @@ export class Player {
     
     // Update viewmodel animation - Ensure this is being called!
     if (this.viewmodel) {
-      // Log the first few updates to verify it's called
-      if (this.updateCount === undefined) {
-        this.updateCount = 0;
-      }
-      if (this.updateCount < 10) {
-        console.log(`Player.update calling viewmodel.update with deltaTime=${deltaTime}`);
-        this.updateCount++;
-      }
-      
       this.viewmodel.update(deltaTime);
     } else {
       console.warn("Viewmodel is not initialized!");
@@ -489,9 +480,6 @@ export class Player {
       
       // Determine which foot and play the appropriate sound
       if (this.soundManager) {
-        // Temporary debug log
-        console.log(`Playing ${this.isLeftFoot ? 'left' : 'right'} footstep`);
-        
         // Use direct sound play instead of positional audio for now
         this.soundManager.playSound(
           this.isLeftFoot ? 'leftstep' : 'rightstep',

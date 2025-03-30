@@ -354,7 +354,7 @@ export class SoundManager {
     if (!this.buffers[name]) {
       // If this is a registered preloaded sound, load it now
       if (this.soundPools[name]) {
-        console.log(`Lazy loading sound "${name}" on first play`);
+        // Remove verbose lazy loading log
         // Determine URL from name
         const url = `sounds/${name}.mp3`;
         
@@ -370,7 +370,7 @@ export class SoundManager {
             .then(arrayBuffer => this.audioContext.decodeAudioData(arrayBuffer))
             .then(audioBuffer => {
               this.buffers[name] = audioBuffer;
-              console.log(`Lazy loaded sound "${name}" as AudioBuffer`);
+              // Remove verbose lazy loaded log
               
               // Now play the sound and resolve the promise
               const sound = this._playSoundFromBuffer(name, volume, loop);
@@ -473,7 +473,15 @@ export class SoundManager {
    */
   playSoundAt(name, position, cooldown = 0, volume = 1.0, loop = false, spatialize = true) {
     if (!this.buffers[name]) {
-      console.error(`Positional sound "${name}" not found in buffers.`);
+      // Only log this error once per sound name to reduce log spam
+      if (!this._reportedMissingSounds) {
+        this._reportedMissingSounds = new Set();
+      }
+      
+      if (!this._reportedMissingSounds.has(name)) {
+        console.error(`Sound "${name}" not loaded.`);
+        this._reportedMissingSounds.add(name);
+      }
       return;
     }
     

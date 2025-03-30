@@ -245,7 +245,7 @@ export class QuickDraw {
         // Skip if not in game or if player is in lobby/duel
         if (!this.localPlayer || this.inLobby || this.inDuel) return;
         
-        console.log(`[QuickDraw] Key pressed: ${event.code} | Pending challenge: ${this.pendingChallenge ? 'yes' : 'no'}`);
+        // Remove excessive key press logging
         
         switch (event.code) {
             case 'KeyE':
@@ -311,7 +311,10 @@ export class QuickDraw {
         
         this.networkManager.sendQuickDrawShoot = (opponentId, arenaIndex, hitZone = 'body', damage = 40, hitDetected = false) => {
             if (this.networkManager.socket && this.networkManager.socket.readyState === WebSocket.OPEN) {
-                console.log(`Sending Quick Draw hit notification to server: player ${this.localPlayer.id} hit player ${opponentId} in the ${hitZone} for ${damage} damage`);
+                // Use logger instead of console.log
+                if (window.logger) {
+                    window.logger.debug(`Sending Quick Draw hit notification to server: player ${this.localPlayer.id} hit player ${opponentId} in the ${hitZone} for ${damage} damage`);
+                }
                 this.networkManager.socket.send(JSON.stringify({
                     type: 'quickDrawShoot',
                     opponentId: opponentId,

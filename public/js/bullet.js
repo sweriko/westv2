@@ -74,7 +74,6 @@ export class Bullet {
       
       // If bullet is inside arena but not from a duel player, destroy it immediately
       if (!(isPlayerInDuel && isLocalPlayerBullet) && !isOpponentBullet) {
-        console.log("Destroying unauthorized bullet inside arena from player " + this.sourcePlayerId);
         createImpactEffect(this.mesh.position, this.direction, scene, 'ground');
         return { active: false, hit: { type: 'arena', position: this.mesh.position } };
       }
@@ -109,29 +108,21 @@ export class Bullet {
         
         // Case 1: Player in duel and their bullet trying to exit
         if (playerInDuel && isLocalPlayerBullet && !bulletInArena) {
-          console.log("Bullet hit arena boundary (exiting) - destroying it");
-          // Skip creating impact effect for boundary
           return { active: false, hit: { type: 'arena', position: endPos } };
         }
         
         // Case 2: Player outside trying to shoot in
         if (!playerInDuel && isLocalPlayerBullet && bulletInArena) {
-          console.log("Bullet from outside entering arena - destroying it");
-          // Skip creating impact effect for boundary
           return { active: false, hit: { type: 'arena', position: endPos } };
         }
         
         // Case 3: Bullet from duel player hitting boundary from inside
         if (playerInDuel && !isLocalPlayerBullet && !bulletInArena) {
-          console.log("Bullet from other duel player hitting boundary (exiting) - destroying it");
-          // Skip creating impact effect for boundary
           return { active: false, hit: { type: 'arena', position: endPos } };
         }
         
         // Case 4: Bullet from outside player hitting boundary from outside
         if (!playerInDuel && !isLocalPlayerBullet && bulletInArena) {
-          console.log("Bullet from outside player hitting boundary (entering) - destroying it");
-          // Skip creating impact effect for boundary
           return { active: false, hit: { type: 'arena', position: endPos } };
         }
       }
@@ -212,7 +203,10 @@ export class Bullet {
             const debounceTime = 500; // 500ms debounce time
 
             if (now - lastHitTime < debounceTime) {
-              console.log(`Debouncing duplicate hit detection: ${hitKey}`);
+              // Use logger for debug logs
+              if (window.logger) {
+                window.logger.debug(`Debouncing duplicate hit detection: ${hitKey}`);
+              }
               return { 
                 active: false, 
                 hit: { 
@@ -242,7 +236,10 @@ export class Bullet {
                 Number(playerId) === Number(window.quickDraw.duelOpponentId) && 
                 Number(this.sourcePlayerId) === Number(window.localPlayer.id)) {
                 
-                console.log(`Quick Draw hit detected! Player ${this.sourcePlayerId} hit player ${playerId} in the ${hitResult.zone} for ${hitResult.damage} damage`);
+                // Use logger for important hit information
+                if (window.logger) {
+                  window.logger.info(`Quick Draw hit detected! Player ${this.sourcePlayerId} hit player ${playerId} in the ${hitResult.zone} for ${hitResult.damage} damage`);
+                }
                 
                 // We don't need to send both a playerHit and a quickDrawShoot - just use one
                 // The previous playerHit is enough for the server to handle this hit

@@ -110,13 +110,14 @@ export class Viewmodel {
         // Setup animations
         this.mixer = new THREE.AnimationMixer(this.model);
         
-        console.log('Viewmodel animations loaded:');
+        // Remove verbose animation logging
         if (gltf.animations && gltf.animations.length) {
           this._setupActions(gltf.animations);
         } else {
           console.warn('No animations found in preloaded viewmodel!');
         }
         
+        // Keep this single log to confirm successful loading
         console.log('Viewmodel loaded successfully from preload');
         this.isLoaded = true;
         
@@ -139,13 +140,14 @@ export class Viewmodel {
         // Setup animations
         this.mixer = new THREE.AnimationMixer(this.model);
         
-        console.log('Viewmodel animations loaded:');
+        // Remove verbose animation logging
         if (gltf.animations && gltf.animations.length) {
           this._setupActions(gltf.animations);
         } else {
           console.warn('No animations found in viewmodel.glb!');
         }
         
+        // Keep this single log to confirm successful loading
         console.log('Viewmodel loaded successfully');
         this.isLoaded = true;
         
@@ -167,7 +169,7 @@ export class Viewmodel {
   _setupActions(animations) {
     // Index all animations by name
     animations.forEach(clip => {
-      console.log(`- Animation: "${clip.name}" (Duration: ${clip.duration.toFixed(2)}s)`);
+      // Remove verbose animation logging
       
       // Create action but don't play it yet
       const action = this.mixer.clipAction(clip);
@@ -274,6 +276,7 @@ export class Viewmodel {
         this.EFFECTS.MUZZLE_FLASH.y,
         this.EFFECTS.MUZZLE_FLASH.z
       );
+      // Only log in debug mode
       if (window.debugMode) {
         console.log("Muzzle flash anchor attached to barrel");
       }
@@ -287,6 +290,7 @@ export class Viewmodel {
         this.EFFECTS.MUZZLE_FLASH.y,
         this.EFFECTS.MUZZLE_FLASH.z
       );
+      // Only log in debug mode
       if (window.debugMode) {
         console.log("Muzzle flash anchor attached to model root - no barrel found");
       }

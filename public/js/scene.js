@@ -171,7 +171,6 @@ function createWesternTown() {
     gltf.scene.traverse((node) => {
       if (node.isMesh) {
         objectCount++;
-        console.log(`Object in town model: ${node.name}, type: ${node.type}`);
         
         // Make sure all meshes cast and receive shadows
         node.castShadow = true;
@@ -180,7 +179,6 @@ function createWesternTown() {
         // Add collision boxes for objects with "collider" prefix
         if (node.name.toLowerCase().startsWith('collider')) {
           colliderCount++;
-          console.log(`Creating collider for ${node.name}`);
           
           // Make the collider semi-transparent for easier identification in debug mode
           if (node.material) {
@@ -246,7 +244,10 @@ function createWesternTown() {
       (progress) => {
         if (progress.lengthComputable) {
           const percentage = Math.round((progress.loaded / progress.total) * 100);
-          console.log(`Loading town model: ${percentage}%`);
+          // Only log at 25%, 50%, 75%, and 100% to reduce spam
+          if (percentage === 25 || percentage === 50 || percentage === 75 || percentage === 100) {
+            console.log(`Loading town model: ${percentage}%`);
+          }
         }
       },
       (error) => {
