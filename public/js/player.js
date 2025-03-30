@@ -617,18 +617,7 @@ export class Player {
       }
     }
     
-    // Then check town border limits
-    const townWidth = window.townDimensions ? window.townDimensions.width : 60;
-    const townLength = window.townDimensions ? window.townDimensions.length : 100;
-    
-    if (
-      position.x < -townWidth / 2 || 
-      position.x > townWidth / 2 || 
-      position.z < -townLength / 2 || 
-      position.z > townLength / 2
-    ) {
-      return false; // Colliding with town border
-    }
+    // Town border limits check removed - players can now leave town
     
     // Check collision with town objects/colliders
     if (window.physics && window.physics.bodies) {

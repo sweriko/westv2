@@ -323,7 +323,7 @@ function handlePlayerUpdate(playerId, data) {
   }
   timeouts.lastPositionUpdate = now;
   
-  // Update player data
+  // Update player data - town boundary check removed to allow players to explore freely
   if (data.position) {
     player.position = data.position;
   }
@@ -730,12 +730,8 @@ function respawnPlayer(playerId) {
 
 // Anti-cheat: Check if position is within town boundaries
 function isPositionInTown(position) {
-  return (
-    position.x >= -GAME_CONSTANTS.TOWN_WIDTH / 2 &&
-    position.x <= GAME_CONSTANTS.TOWN_WIDTH / 2 &&
-    position.z >= -GAME_CONSTANTS.TOWN_LENGTH / 2 &&
-    position.z <= GAME_CONSTANTS.TOWN_LENGTH / 2
-  );
+  // Modified to always return true, allowing players to leave town
+  return true;
 }
 
 // Anti-cheat: Check if position is in arena
