@@ -13,6 +13,7 @@ import { updateAmmoUI, updateHealthUI } from './ui.js';
 import { Viewmodel } from './viewmodel.js';
 import { initPlayerIdentity } from './playerIdentity.js';
 import logger from './logger.js';
+import { FlyingEagle } from './flyingEagle.js';
 
 // Check if device is mobile
 function isMobileDevice() {
@@ -422,6 +423,12 @@ async function init() {
         console.log("Players map not found");
       }
     };
+    
+    // Create flying eagle that follows the camera
+    window.flyingEagle = new FlyingEagle({
+      scene: scene,
+      camera: camera
+    });
 
     // Start the animation loop
     animate(0);
@@ -510,6 +517,12 @@ function animate(time) {
 
   // Update FPS display
   updateFPS(renderer, camera, deltaTime);
+
+  // Update flying eagle if it exists
+  if (window.flyingEagle) {
+    // Only let the eagle control its own path when in aerial camera mode
+    window.flyingEagle.update(deltaTime);
+  }
 
   // CAMERA SELECTION LOGIC:
   // 1. First priority: Use special flag camera if set in QuickDraw draw phase

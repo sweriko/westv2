@@ -854,8 +854,55 @@ export class QuickDraw {
             console.warn('Cannot save original camera - local player camera not available');
         }
         
-        // Position the camera correctly before switching
-        this.positionAerialCamera();
+        // Get player positions to determine the center of the duel
+        const player1Pos = this.localPlayer.group.position.clone();
+        const player2Pos = this.getOpponentPosition();
+        let duelCenter;
+        
+        if (player2Pos) {
+            // Calculate midpoint between players for eagle's circular path center
+            duelCenter = new THREE.Vector3(
+                (player1Pos.x + player2Pos.x) / 2,
+                (player1Pos.y + player2Pos.y) / 2,
+                (player1Pos.z + player2Pos.z) / 2
+            );
+            
+            // Calculate distance between players to scale flight radius
+            const distanceBetweenPlayers = player1Pos.distanceTo(player2Pos);
+            const flightRadius = Math.max(15, distanceBetweenPlayers * 1.5);
+            
+            // Set eagle flight parameters
+            if (window.flyingEagle) {
+                // Setup the eagle's circular flight path
+                window.flyingEagle.setCircularFlightPath(
+                    duelCenter, 
+                    12, // Height above ground
+                    flightRadius // Radius of circle
+                );
+                
+                // Use the aerial camera as the eagle's POV camera
+                window.flyingEagle.camera = this.aerialCamera;
+                window.flyingEagle.activateAerialCamera();
+            }
+        } else {
+            console.warn('Cannot find opponent position - using fallback camera position');
+            
+            // Fallback - position camera around local player only
+            duelCenter = player1Pos.clone();
+            
+            if (window.flyingEagle) {
+                // Setup the eagle's circular flight path around the player
+                window.flyingEagle.setCircularFlightPath(
+                    duelCenter, 
+                    12, // Height
+                    20  // Default radius
+                );
+                
+                // Use the aerial camera as the eagle's POV camera
+                window.flyingEagle.camera = this.aerialCamera;
+                window.flyingEagle.activateAerialCamera();
+            }
+        }
         
         // DIRECT SWITCH: Set the renderer's camera directly to aerial
         if (window.renderer) {
@@ -877,7 +924,7 @@ export class QuickDraw {
         
         this.aerialCameraActive = true;
         
-        console.log('Aerial camera enabled for duel countdown');
+        console.log('Eagle POV aerial camera enabled for duel countdown');
     }
 
     /**
@@ -951,11 +998,8 @@ export class QuickDraw {
     updateAerialCamera(deltaTime) {
         if (!this.aerialCameraActive || !this.aerialCamera) return;
         
-        // Rotate camera around the scene
-        this.aerialCameraAngle += 0.3 * deltaTime;
-        
-        // Update camera position based on new angle
-        this.positionAerialCamera();
+        // We no longer need to position the camera manually
+        // since the eagle controls its own path and the camera follows it
         
         // Update local player model if it exists
         if (this.localPlayerModel) {
@@ -3059,6 +3103,11 @@ export class QuickDraw {
         
         // Set active flag to false first
         this.aerialCameraActive = false;
+        
+        // Deactivate eagle POV camera if active
+        if (window.flyingEagle) {
+            window.flyingEagle.deactivateAerialCamera();
+        }
         
         // Remove camera from scene
         if (this.aerialCamera) {
