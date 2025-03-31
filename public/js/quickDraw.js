@@ -573,6 +573,25 @@ export class QuickDraw {
                             else if (message.playerId === this.duelOpponentId) {
                                 // Could update opponent health bar if we had one
                                 console.log(`[QuickDraw] Opponent health updated: ${message.health}`);
+                                
+                                // If opponent health is 0, mark them as dying to trigger death animation
+                                if (message.health <= 0) {
+                                    // Find opponent in the otherPlayers map
+                                    const opponentPlayer = this.networkManager.otherPlayers.get(this.duelOpponentId);
+                                    if (opponentPlayer) {
+                                        // Set the dying flag to trigger death animation
+                                        opponentPlayer.isDying = true;
+                                        
+                                        // Find the remote player model if it exists
+                                        if (this.scene.remotePlayerModels) {
+                                            const opponentModel = this.scene.remotePlayerModels.get(this.duelOpponentId);
+                                            if (opponentModel && opponentModel.playDeathAnimation) {
+                                                console.log(`[QuickDraw] Playing death animation for remote player ${this.duelOpponentId}`);
+                                                opponentModel.playDeathAnimation();
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             
                             // Track this update to prevent duplicates
@@ -2945,6 +2964,55 @@ export class QuickDraw {
         
         // Create death effect
         this.createDeathEffect();
+        
+        // Make sure we have a local player model for the death animation
+        if (!this.localPlayerModel) {
+            this.createLocalPlayerModel();
+        }
+        
+        // Ensure local player model is visible - aerial view to see death animation
+        if (this.localPlayerModel) {
+            this.setupAndEnableAerialCamera();
+            this.localPlayerModel.group.visible = true;
+            
+            // Play the death animation
+            if (this.localPlayerModel.playDeathAnimation) {
+                console.log('[QuickDraw] Playing death animation');
+                const deathResult = this.localPlayerModel.playDeathAnimation();
+                
+                // Allow the death animation to complete before reset/respawn
+                const deathAnimDuration = deathResult.duration || 1500;
+                
+                // Disable player controls during death animation
+                if (this.localPlayer) {
+                    this.localPlayer.canMove = false;
+                    this.localPlayer.canAim = false;
+                    this.localPlayer.forceLockMovement = true;
+                }
+                
+                // Wait for animation to complete before server sends respawn
+                console.log(`[QuickDraw] Death animation playing, duration: ${deathAnimDuration}ms`);
+                
+                // The server will send fullStateReset message after the animation duration
+                // We're ensuring the animation has time to play fully
+                
+                // Broadcast our death animation state to other players
+                if (this.networkManager && this.networkManager.socket) {
+                    this.networkManager.socket.send(JSON.stringify({
+                        type: 'playerUpdate',
+                        isDying: true,  // Special flag to trigger death animation on other clients
+                        health: 0,
+                        position: this.localPlayer.group.position,
+                        rotation: { y: this.localPlayer.group.rotation.y }
+                    }));
+                    console.log('[QuickDraw] Broadcast death animation state to other players');
+                }
+            } else {
+                console.warn('[QuickDraw] Death animation not available on player model');
+            }
+        } else {
+            console.warn('[QuickDraw] Could not create local player model for death animation');
+        }
     }
 
     /**

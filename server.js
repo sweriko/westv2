@@ -1366,6 +1366,17 @@ function handleQuickDrawShoot(playerId, targetId, arenaIndex, hitZone = 'body', 
     // Only end the duel if target's health is 0 or less
     if (newHealth <= 0) {
         console.log(`Player ${targetId} defeated in duel - health reduced to 0`);
+        
+        // Send death flag to all other players to trigger death animation
+        broadcastToOthers(targetId, {
+            type: 'playerUpdate',
+            id: targetId,
+            position: targetPlayer.position,
+            rotation: targetPlayer.rotation,
+            health: 0,
+            isDying: true // Trigger death animation on client
+        });
+        
         // End the duel with shooter as winner
         endQuickDrawDuel(duelId, playerId);
     } else {
@@ -1508,7 +1519,7 @@ function endQuickDrawDuel(duelId, winnerId) {
         fullReset: true // Special flag to trigger full model reset on other clients
       });
     }
-  }, 3000); // Wait 3 seconds for victory/defeat animation before resetting
+  }, 4500); // Wait 4.5 seconds to allow for death animation to complete
   
   // Remove the duel
   quickDrawDuels.delete(duelId);

@@ -316,7 +316,8 @@ export class ThirdPersonModel {
           if (animation.name === 'idle' || animation.name === 'walking' || animation.name === 'running') {
             this.animations[animation.name].setLoop(THREE.LoopRepeat);
           } else if (animation.name === 'jump' || animation.name === 'playeraim' || 
-                     animation.name === 'playerholstering' || animation.name === 'playershoot') {
+                     animation.name === 'playerholstering' || animation.name === 'playershoot' ||
+                     animation.name === 'death') {
             this.animations[animation.name].setLoop(THREE.LoopOnce);
             this.animations[animation.name].clampWhenFinished = true;
           }
@@ -773,6 +774,14 @@ export class ThirdPersonModel {
     
     // Skip animation updates if animations aren't loaded yet
     const animationsLoaded = this.animations && Object.keys(this.animations).length > 0;
+
+    // Handle death animation if the player is dying
+    if (animationsLoaded && playerData.isDying && !this.isDying) {
+      console.log(`Playing death animation for remote player ${this.playerId}`);
+      this.playDeathAnimation();
+      // Don't process any other animation states after playing death animation
+      return;
+    }
     
     // Handle jump animation first to ensure immediacy
     if (animationsLoaded && playerData.velocity && playerData.velocity.y > 2.5 && !this.isJumping) {
@@ -1205,5 +1214,35 @@ export class ThirdPersonModel {
     }
     
     return shootAction;
+  }
+  
+  // Play the death animation when player is killed
+  playDeathAnimation() {
+    // Set death state
+    this.isDying = true;
+    
+    // Reset other animation states
+    this.isAiming = false;
+    this.isShooting = false;
+    this.isWalking = false;
+    this.isRunning = false;
+    this.isJumping = false;
+    
+    // Play the death animation with fast transition
+    const deathAction = this.playAnimation('death', 0.1);
+    
+    // Return the action and its duration if available
+    if (deathAction && deathAction._clip) {
+      return {
+        action: deathAction,
+        duration: deathAction._clip.duration * 1000 // Duration in milliseconds
+      };
+    }
+    
+    // Return a default duration if animation couldn't be played
+    return {
+      action: null,
+      duration: 1500 // Default fallback duration in milliseconds
+    };
   }
 }

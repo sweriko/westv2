@@ -242,6 +242,8 @@ export class NetworkManager {
               message.quickDrawLobbyIndex !== undefined ? message.quickDrawLobbyIndex : existing.quickDrawLobbyIndex;
             existing.health =
               message.health !== undefined ? message.health : existing.health;
+            existing.isDying =
+              message.isDying !== undefined ? message.isDying : existing.isDying;
           }
           if (this.onPlayerUpdate) {
             this.onPlayerUpdate(message.id, existing);

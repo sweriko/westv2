@@ -100,6 +100,13 @@ export class MultiplayerManager {
         return;
       }
       
+      // Check if player is dying and should play death animation
+      if (updatedData && updatedData.isDying === true && playerModel && playerModel.playDeathAnimation && !playerModel.isDying) {
+        console.log(`[MultiplayerManager] Playing death animation for remote player ${playerId}`);
+        playerModel.playDeathAnimation();
+        return; // Skip normal update as death animation takes precedence
+      }
+      
       // Normal update
       if (playerModel) {
         playerModel.update(updatedData);
