@@ -1026,3 +1026,28 @@ canvas {
 .hidden {
   display: none;
 }
+
+/* Letterbox effect for cinematic eagle camera view */
+.letterbox-top, 
+.letterbox-bottom {
+  position: fixed;
+  left: 0;
+  width: 100%;
+  height: 0;
+  background-color: #000;
+  z-index: 1000;
+  transition: height 0.7s ease-in-out;
+}
+
+.letterbox-top {
+  top: 0;
+}
+
+.letterbox-bottom {
+  bottom: 0;
+}
+
+.letterbox-active .letterbox-top,
+.letterbox-active .letterbox-bottom {
+  height: 15vh;  /* 15% of viewport height for each bar */
+}

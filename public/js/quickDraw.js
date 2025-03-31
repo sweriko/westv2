@@ -962,9 +962,8 @@ export class QuickDraw {
             console.warn('Cannot save original camera - local player camera not available');
         }
         
-        // Only set up the flight path if it hasn't been set already
-        // This ensures a consistent path throughout the match
-        if (!this.aerialCameraPathSet && window.flyingEagle) {
+        // Set up the flight path for the quickdraw match
+        if (window.flyingEagle) {
             // Get player positions to determine the center of the duel
             const player1Pos = this.localPlayer.group.position.clone();
             const player2Pos = this.getOpponentPosition();
@@ -978,18 +977,13 @@ export class QuickDraw {
                     (player1Pos.z + player2Pos.z) / 2
                 );
                 
-                // Calculate distance between players to scale flight radius
+                // Calculate distance between players for flight radius
                 const distanceBetweenPlayers = player1Pos.distanceTo(player2Pos);
-                const flightRadius = Math.max(15, distanceBetweenPlayers * 1.5);
                 
-                // Setup the eagle's circular flight path
-                window.flyingEagle.setCircularFlightPath(
-                    duelCenter, 
-                    12, // Height above ground
-                    flightRadius // Radius of circle
-                );
+                // Use the new method to set a closer flight path for quickdraw
+                window.flyingEagle.setQuickdrawFlightPath(duelCenter, distanceBetweenPlayers);
                 
-                console.log('Eagle flight path set initially - will remain consistent throughout the match');
+                console.log('Eagle quickdraw flight path set - closer to players for cinematic view');
                 this.aerialCameraPathSet = true;
             } else {
                 console.warn('Cannot find opponent position - using fallback camera position');
@@ -998,19 +992,13 @@ export class QuickDraw {
                 duelCenter = player1Pos.clone();
                 
                 // Setup the eagle's circular flight path around the player
-                window.flyingEagle.setCircularFlightPath(
-                    duelCenter, 
-                    12, // Height
-                    20  // Default radius
-                );
+                window.flyingEagle.setQuickdrawFlightPath(duelCenter, 10); // Default small distance for single player
                 
-                console.log('Eagle flight path set to fallback - will remain consistent throughout the match');
+                console.log('Eagle quickdraw flight path set to fallback position');
                 this.aerialCameraPathSet = true;
             }
-        }
-        
-        // Use the aerial camera as the eagle's POV camera
-        if (window.flyingEagle) {
+            
+            // Use the aerial camera as the eagle's POV camera
             window.flyingEagle.camera = this.aerialCamera;
             window.flyingEagle.activateAerialCamera();
         }
@@ -1934,9 +1922,9 @@ export class QuickDraw {
         // Update state first to prevent any update logic from running
         this.duelState = 'none';
         
-        // IMPORTANT: Temporarily re-enable aerial camera for death view
-        this.setupAndEnableAerialCamera();
-        console.log('[QuickDraw] Temporarily showing aerial death scene');
+        // IMPORTANT: We no longer show aerial camera after death
+        // Instead, we keep the player's camera viewpoint
+        console.log('[QuickDraw] Keeping player viewpoint for death scene');
         
         // Determine if player won or lost
         const playerWon = winnerId === this.localPlayer.id;
@@ -1958,7 +1946,6 @@ export class QuickDraw {
             this.localPlayer.forceLockMovement = false;
         }
         
-        // Let the aerial camera view run for a few seconds before resetting
         // Server will send fullStateReset message after a delay
     }
 
@@ -2997,9 +2984,10 @@ export class QuickDraw {
             this.createLocalPlayerModel();
         }
         
-        // Ensure local player model is visible - aerial view to see death animation
+        // Ensure local player model is visible for death animation but don't switch to aerial view
         if (this.localPlayerModel) {
-            this.setupAndEnableAerialCamera();
+            // Keep player's own camera (first person view)
+            // We no longer switch to aerial camera here
             this.localPlayerModel.group.visible = true;
             
             // Play the death animation
@@ -3300,6 +3288,9 @@ export class QuickDraw {
         // Deactivate eagle POV camera if active
         if (window.flyingEagle) {
             window.flyingEagle.deactivateAerialCamera();
+            
+            // Return the eagle to its default path around the town
+            window.flyingEagle.returnToDefaultPath();
         }
         
         // Remove camera from scene

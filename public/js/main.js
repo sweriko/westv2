@@ -370,6 +370,12 @@ async function init() {
       camera: camera
     });
     
+    // Set the default town center for the eagle to fly around
+    // This ensures the eagle is always flying overhead in the town
+    const townCenter = new THREE.Vector3(0, 0, 0); // Center of the town
+    window.flyingEagle.townCenter = townCenter;
+    window.flyingEagle.setDefaultFlightPath();
+    
     // Initialize chat system
     initChat(networkManager);
     
@@ -474,7 +480,7 @@ function animate(time) {
 
   // Update flying eagle if it exists
   if (window.flyingEagle) {
-    // Only let the eagle control its own path when in aerial camera mode
+    // Always update eagle's flight path
     window.flyingEagle.update(deltaTime);
   }
 

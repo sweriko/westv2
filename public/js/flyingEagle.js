@@ -41,6 +41,28 @@ export class FlyingEagle {
     
     // Flag to indicate if we're in aerial camera mode
     this.aerialCameraActive = false;
+
+    // Set a default town center position
+    this.townCenter = new THREE.Vector3(0, 0, 0);
+    
+    // Initialize the eagle with a default flight path
+    this.setDefaultFlightPath();
+    
+    // Flag to indicate if we're in a quickdraw match
+    this.inQuickdraw = false;
+  }
+
+  /**
+   * Sets a default circular flight path above the town center
+   */
+  setDefaultFlightPath() {
+    // Default town center coordinates - should be updated once we have actual town data
+    this.townCenter = new THREE.Vector3(0, 0, 0);
+    const defaultHeight = 25; // Higher altitude when patrolling
+    const defaultRadius = 40; // Wider circle when patrolling
+    
+    this.setCircularFlightPath(this.townCenter, defaultHeight, defaultRadius);
+    console.log('Eagle default flight path set');
   }
 
   /**
@@ -161,6 +183,35 @@ export class FlyingEagle {
   }
 
   /**
+   * Switch to quickdraw mode with closer flight path to players
+   * @param {THREE.Vector3} duelCenter - Center position between the two players
+   * @param {number} distanceBetweenPlayers - Distance between the two dueling players
+   */
+  setQuickdrawFlightPath(duelCenter, distanceBetweenPlayers) {
+    this.inQuickdraw = true;
+    
+    // Save the duel center
+    this.duelCenter = duelCenter.clone();
+    
+    // Calculate a closer flight radius based on player distance
+    const closeRadius = Math.max(12, distanceBetweenPlayers * 0.9); // Closer to players during duel
+    const closeHeight = 15; // Lower during duel for better visibility
+    
+    // Set a tighter circular path around the duel
+    this.setCircularFlightPath(duelCenter, closeHeight, closeRadius);
+    
+    console.log(`Eagle quickdraw flight path set - radius: ${closeRadius.toFixed(1)}, height: ${closeHeight.toFixed(1)}`);
+  }
+  
+  /**
+   * Return to normal patrol mode after quickdraw is over
+   */
+  returnToDefaultPath() {
+    this.inQuickdraw = false;
+    this.setDefaultFlightPath();
+  }
+
+  /**
    * Updates the eagle's position on its circular path
    */
   updateCircularPosition() {
@@ -206,6 +257,9 @@ export class FlyingEagle {
   activateAerialCamera() {
     if (!this.isLoaded) return;
     
+    // Enable letterbox effect for cinematic view
+    document.body.classList.add('letterbox-active');
+    
     // Ensure the camera is properly parented to the mount
     if (this.camera.parent) {
       this.camera.parent.remove(this.camera);
@@ -225,13 +279,16 @@ export class FlyingEagle {
     }
     
     this.aerialCameraActive = true;
-    console.log('Eagle angled camera activated');
+    console.log('Eagle angled camera activated with letterbox effect');
   }
 
   /**
    * Deactivates aerial camera mode, detaching camera from eagle
    */
   deactivateAerialCamera() {
+    // Remove letterbox effect
+    document.body.classList.remove('letterbox-active');
+    
     if (this.camera.parent === this.cameraMount || 
         this.camera.parent === this.model) {
       this.camera.parent.remove(this.camera);
@@ -248,13 +305,11 @@ export class FlyingEagle {
   update(deltaTime) {
     if (!this.isLoaded) return;
     
-    if (this.aerialCameraActive) {
-      // Update angle for circular flight
-      this.currentAngle += this.flightSpeed * deltaTime;
-      
-      // Update position on the circle
-      this.updateCircularPosition();
-    }
+    // Always update position - eagle always flies regardless of camera state
+    this.currentAngle += this.flightSpeed * deltaTime;
+    
+    // Update position on the circle
+    this.updateCircularPosition();
     
     // Update animations
     if (this.animationMixer) {
