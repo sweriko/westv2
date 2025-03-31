@@ -323,7 +323,7 @@ export class NetworkManager {
 
   /**
    * Sends local player position/rotation etc. to the server.
-   * @param {Object} playerData - { position, rotation, isAiming, isReloading, isSprinting, quickDrawLobbyIndex }
+   * @param {Object} playerData - { position, rotation, isAiming, isReloading, isSprinting, isShooting, quickDrawLobbyIndex }
    */
   sendUpdate(playerData) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {

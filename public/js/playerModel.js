@@ -132,9 +132,14 @@ export class ThirdPersonModel {
     this.lastPosition = new THREE.Vector3();
     this.movementSpeed = 0;
     
+    // Gun state tracking
+    this.isAiming = false;
+    this.isShooting = false;
+    
     // Animation timing - reduced for faster transitions
     this.walkBlendTime = 0.15;     // Blend between walking animations
     this.jumpBlendTime = 0.01;     // Almost immediate jump animation
+    this.gunBlendTime = 0.1;       // Gun animation blend time
     
     // Animation state protection - reduced for faster responsiveness
     this.animationCooldown = 0;
@@ -310,7 +315,8 @@ export class ThirdPersonModel {
           // Set loop mode based on animation type
           if (animation.name === 'idle' || animation.name === 'walking' || animation.name === 'running') {
             this.animations[animation.name].setLoop(THREE.LoopRepeat);
-          } else if (animation.name === 'jump') {
+          } else if (animation.name === 'jump' || animation.name === 'playeraim' || 
+                     animation.name === 'playerholstering' || animation.name === 'playershoot') {
             this.animations[animation.name].setLoop(THREE.LoopOnce);
             this.animations[animation.name].clampWhenFinished = true;
           }
@@ -814,6 +820,26 @@ export class ThirdPersonModel {
       return;
     }
     
+    // Handle aiming/shooting animations
+    if (animationsLoaded && !this.isJumping) {
+      // Track if the aiming state has changed
+      const wasAiming = this.isAiming;
+      const isAimingNow = playerData.isAiming;
+      
+      // Handle shooting animation - prioritize shooting over aim changes
+      if (isAimingNow && playerData.isShooting && !this.isShooting) {
+        this.playShootAnimation();
+      }
+      // Handle aiming animation start
+      else if (isAimingNow && !wasAiming) {
+        this.playAimAnimation();
+      }
+      // Handle holstering animation
+      else if (!isAimingNow && wasAiming) {
+        this.playHolsterAnimation();
+      }
+    }
+    
     // Update target position from network data
     if (playerData.position) {
       // Position the model on the ground, with a small offset to prevent sinking
@@ -832,7 +858,7 @@ export class ThirdPersonModel {
       }
 
       // Only process animation transitions if animations are loaded
-      if (animationsLoaded && !this.isJumping) {
+      if (animationsLoaded && !this.isJumping && !this.isAiming && !this.isShooting) {
         // Check if moving based on position change
         const isMovingNow = distance > 0.05; 
         const isRunningNow = distance > 0.3; // Threshold for running
@@ -1081,5 +1107,103 @@ export class ThirdPersonModel {
       0
     );
     this.group.add(this.rightLegHelper);
+  }
+
+  // Play the aiming animation when player draws their gun
+  playAimAnimation() {
+    // Prevent rapid animation changes
+    if (this.animationCooldown > 0) {
+      return null;
+    }
+    
+    this.isAiming = true;
+    this.animationCooldown = this.minAnimationCooldown;
+    
+    const aimAction = this.playAnimation('playeraim', this.gunBlendTime);
+    
+    // If we successfully got the animation, set up to stay on the last frame
+    if (aimAction && aimAction._clip) {
+      const duration = aimAction._clip.duration;
+      
+      // After the aiming animation completes, freeze on the last frame
+      setTimeout(() => {
+        // If still aiming, make sure we're showing the last frame
+        if (this.isAiming && !this.isShooting) {
+          // Manually set to the end frame to show the gun aimed
+          if (this.animations['playeraim']) {
+            const aimAction = this.animations['playeraim'];
+            
+            // Ensure set to the end frame and frozen
+            aimAction.reset();
+            aimAction.time = aimAction._clip.duration - 0.01;
+            aimAction.enabled = true;
+            aimAction.setEffectiveWeight(1);
+            aimAction.clampWhenFinished = true;
+            aimAction.play();
+            
+            this.currentAction = aimAction;
+          }
+        }
+      }, duration * 1000);
+    }
+    
+    return aimAction;
+  }
+  
+  // Play the holstering animation when player stops aiming
+  playHolsterAnimation() {
+    // Prevent rapid animation changes
+    if (this.animationCooldown > 0) {
+      return null;
+    }
+    
+    this.isAiming = false;
+    this.isShooting = false;
+    this.animationCooldown = this.minAnimationCooldown;
+    
+    return this.playAnimation('playerholstering', this.gunBlendTime);
+  }
+  
+  // Play the shooting animation
+  playShootAnimation() {
+    // Prevent rapid animation changes
+    if (this.animationCooldown > 0) {
+      return null;
+    }
+    
+    this.isShooting = true;
+    this.animationCooldown = this.minAnimationCooldown;
+    
+    const shootAction = this.playAnimation('playershoot', this.gunBlendTime);
+    
+    // If we successfully got the animation, set up the transition back to aim
+    if (shootAction && shootAction._clip) {
+      const duration = shootAction._clip.duration;
+      
+      // After the shooting animation completes, return to aim
+      setTimeout(() => {
+        this.isShooting = false;
+        
+        // If still aiming, show the aim animation
+        if (this.isAiming) {
+          // Use the end frame of the playeraim animation
+          if (this.animations['playeraim']) {
+            const aimAction = this.animations['playeraim'];
+            
+            // Manually set to the end frame to show the gun aimed
+            aimAction.reset();
+            aimAction.time = aimAction._clip.duration - 0.01;
+            aimAction.enabled = true;
+            aimAction.setEffectiveWeight(1);
+            aimAction.clampWhenFinished = true;
+            aimAction.play();
+            
+            this.currentAction = aimAction;
+          }
+        }
+      }, duration * 1000);
+    }
+    
+    return shootAction;
   }
 }

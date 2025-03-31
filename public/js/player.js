@@ -762,6 +762,7 @@ export class Player {
       isAiming: this.isAiming,
       isReloading: this.isReloading,
       isSprinting: this.isSprinting,
+      isShooting: this.viewmodel && this.viewmodel.animationState === 'shoot',
       health: this.health,
       quickDrawLobbyIndex: this.quickDrawLobbyIndex
     });
