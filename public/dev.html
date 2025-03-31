@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wild West Shooter - Dev Tools</title>
+    <style>
+        body {
+            background-color: #333;
+            color: #f8bb00;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        h1 {
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        .card {
+            background-color: #2c2c2c;
+            border-radius: 8px;
+            padding: 20px;
+            width: 100%;
+            max-width: 600px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            margin-bottom: 20px;
+        }
+        h2 {
+            color: #f8bb00;
+            margin-top: 0;
+        }
+        p {
+            color: #fff;
+        }
+        button {
+            background-color: #8b0000;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            margin: 10px;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #a00000;
+        }
+        .buttons {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .separator {
+            height: 1px;
+            background-color: #444;
+            width: 100%;
+            margin: 20px 0;
+        }
+        .player-frames {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+            width: 100%;
+        }
+        .player-frame {
+            width: 100%;
+            height: 400px;
+            border: 2px solid #8b0000;
+            border-radius: 8px;
+            overflow: hidden;
+            background-color: #000;
+        }
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        @media (min-width: 1024px) {
+            .player-frame {
+                width: calc(50% - 10px);
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Wild West Shooter - Development Tools</h1>
+    
+    <div class="card">
+        <h2>Testing Options</h2>
+        <p>Use these buttons to launch test instances with unique player identities:</p>
+        
+        <div class="buttons">
+            <button onclick="openGameTab()">Launch Game Tab</button>
+            <button onclick="openGameTab(true)">Launch Dev Player</button>
+            <button onclick="openSideBySide()">Open Side-by-Side</button>
+        </div>
+        
+        <div class="separator"></div>
+        
+        <h2>Side-by-Side Testing</h2>
+        <p>Test two separate player instances right here:</p>
+        
+        <div class="player-frames">
+            <div class="player-frame">
+                <iframe id="player1" src=""></iframe>
+            </div>
+            <div class="player-frame">
+                <iframe id="player2" src=""></iframe>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Base game URL
+        const baseUrl = window.location.href.replace('/dev.html', '/');
+        
+        // Function to open game in new tab
+        function openGameTab(isDev = false) {
+            const url = isDev ? `${baseUrl}?newplayer=true&t=${Date.now()}` : baseUrl;
+            window.open(url, '_blank');
+        }
+        
+        // Function to open side-by-side player frames
+        function openSideBySide() {
+            const timestamp = Date.now();
+            document.getElementById('player1').src = `${baseUrl}?newplayer=true&t=${timestamp}`;
+            document.getElementById('player2').src = `${baseUrl}?newplayer=true&t=${timestamp + 1}`;
+        }
+        
+        // Initialize the page
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Development tools ready');
+        });
+    </script>
+</body>
+</html> 

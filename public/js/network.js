@@ -70,7 +70,8 @@ export class NetworkManager {
     const params = new URLSearchParams({
       sessionId: this.sessionId,
       clientId: playerIdentity.id || '',
-      username: playerIdentity.username || ''
+      username: playerIdentity.username || '',
+      token: playerIdentity.token || '' // Add token for auth
     });
 
     // Determine correct ws:// or wss:// based on current protocol
@@ -91,6 +92,24 @@ export class NetworkManager {
     this.socket.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
+        
+        // Handle auth failures specifically
+        if (message.type === 'authFailure') {
+          console.error('Authentication failed:', message.reason);
+          // If the server rejected our token, clear it and reload
+          if (message.reason === 'invalidToken') {
+            try {
+              localStorage.removeItem('wildWestPlayerIdentity');
+              sessionStorage.removeItem('wildWestPlayerSession');
+              alert('Your session has expired. The game will reload.');
+              window.location.reload();
+            } catch (e) {
+              console.error('Failed to clear invalid token:', e);
+            }
+          }
+          return;
+        }
+        
         this.handleMessage(message);
       } catch (err) {
         console.error('Error parsing server message:', err);

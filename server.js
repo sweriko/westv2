@@ -31,8 +31,12 @@ let nextPlayerId = 1;
 console.log("Player tracking variables initialized");
 
 // New: Track persistent player identities
-const playerIdentities = new Map(); // clientId -> { username, playerId, lastSeen }
+const playerIdentities = new Map(); // clientId -> { username, playerId, token, lastSeen }
 console.log("Player identity tracking initialized");
+
+// Development mode detection - allow multiple connections in localhost
+const isDevMode = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV;
+console.log(`Server running in ${isDevMode ? 'DEVELOPMENT' : 'PRODUCTION'} mode`);
 
 // Position history tracking to reduce unnecessary corrections
 const playerPositionHistory = new Map(); // playerId -> array of recent positions
@@ -80,9 +84,18 @@ wss.on('connection', (ws, req) => {
   const sessionId = parameters.sessionId;
   const clientId = parameters.clientId;
   const username = parameters.username;
+  const token = parameters.token;
+  
+  // Check if this is a development mode connection
+  const isDev = isDevMode && (parameters.dev === 'true' || parameters.newplayer === 'true');
+  
+  if (isDev) {
+    console.log("Development mode connection detected");
+  }
 
   // If we already have this sessionId, reject as duplicate
-  if (sessionId && sessions.has(sessionId)) {
+  // Skip this check for development mode connections
+  if (sessionId && sessions.has(sessionId) && !isDev) {
     console.log(`Rejecting duplicate connection with sessionId: ${sessionId}`);
     ws.send(JSON.stringify({
       type: 'error',
@@ -96,25 +109,66 @@ wss.on('connection', (ws, req) => {
     sessions.add(sessionId);
   }
 
-  const playerId = nextPlayerId++;
-  console.log(`Player ${playerId} connected (sessionId: ${sessionId || 'none'}, username: ${username || 'Anonymous'})`);
+  // Verify player identity if clientId and token provided
+  // Skip verification for development mode connections
+  if (clientId && token && !isDev) {
+    const storedIdentity = playerIdentities.get(clientId);
+    
+    // If we have this player's identity stored already
+    if (storedIdentity) {
+      // Check if token matches
+      if (storedIdentity.token !== token) {
+        console.log(`Token mismatch for clientId: ${clientId}`);
+        ws.send(JSON.stringify({
+          type: 'authFailure',
+          reason: 'invalidToken',
+          message: 'Invalid authentication token'
+        }));
+        return ws.close(1008, 'Authentication failure');
+      }
+      
+      // Update the stored player identity
+      storedIdentity.lastSeen = Date.now();
+      storedIdentity.username = username || storedIdentity.username;
+      
+      // Use the existing player ID for this client
+      const playerId = storedIdentity.playerId;
+      console.log(`Recognized returning player ${playerId} (clientId: ${clientId}, username: ${username || storedIdentity.username})`);
+      
+      // Initialize player with recognized identity
+      initializePlayer(ws, playerId, sessionId, clientId, username || storedIdentity.username, token, isDev);
+      return;
+    }
+  }
 
-  // Store player identity information if provided
-  if (clientId) {
+  // If we reach here, it's a new player or unrecognized returning player
+  const playerId = nextPlayerId++;
+  console.log(`Player ${playerId} connected (sessionId: ${sessionId || 'none'}, username: ${username || 'Anonymous'}, isDev: ${isDev})`);
+
+  // Store player identity information if provided (unless in dev mode with newplayer=true)
+  if (clientId && !isDev) {
     playerIdentities.set(clientId, {
       username: username || 'Anonymous',
       playerId,
+      token: token || '',
       lastSeen: Date.now()
     });
     console.log(`Associated player ${playerId} with clientId ${clientId} and username ${username || 'Anonymous'}`);
   }
 
+  // Initialize the new player
+  initializePlayer(ws, playerId, sessionId, clientId, username || 'Anonymous', token, isDev);
+});
+
+// Extract player initialization to a separate function
+function initializePlayer(ws, playerId, sessionId, clientId, username, token, isDev = false) {
   // Create initial player data with health and QuickDraw info
   players.set(playerId, {
     ws,
     sessionId,
     clientId,
-    username: username || 'Anonymous',
+    username,
+    isDev, // Store dev mode flag for reference
     position: { x: 0, y: 1.6, z: 0 },
     rotation: { y: 0 },
     isAiming: false,
@@ -289,7 +343,7 @@ wss.on('connection', (ws, req) => {
           break;
       }
     } catch (err) {
-      console.error('Error processing message:', err);
+      console.error(`Error processing message from player ${playerId}:`, err);
     }
   });
 
@@ -306,7 +360,7 @@ wss.on('connection', (ws, req) => {
 
   // Update the global player count UI
   updatePlayerCount();
-});
+}
 
 // Handle player updates - removed speed/position validation
 function handlePlayerUpdate(playerId, data) {
@@ -807,50 +861,61 @@ function sendErrorToPlayer(playerId, message, fatal = false) {
 // Cleanup a disconnected or stale player
 function cleanupPlayer(playerId) {
   const player = players.get(playerId);
-  if (player) {
-    console.log(`Player ${playerId} disconnected`);
-    if (player.sessionId) {
-      sessions.delete(player.sessionId);
+  
+  if (!player) return;
+  
+  console.log(`Cleaning up player ${playerId}`);
+  
+  // If this player has a clientId, update their lastSeen time
+  if (player.clientId) {
+    const identity = playerIdentities.get(player.clientId);
+    if (identity) {
+      identity.lastSeen = Date.now();
+      console.log(`Updated lastSeen for identity ${player.clientId}`);
     }
-    
-    // Quick Draw cleanup
-    if (player.inQuickDrawQueue && player.quickDrawLobbyIndex >= 0) {
-      // Remove from the appropriate queue
-      const queueIndex = player.quickDrawLobbyIndex;
-      if (queueIndex >= 0 && queueIndex < MAX_ARENAS) {
-        const queue = quickDrawQueues[queueIndex];
-        const index = queue.indexOf(playerId);
-        if (index !== -1) {
-          queue.splice(index, 1);
-        }
-      }
-    }
-    
-    if (player.inQuickDrawDuel && player.quickDrawDuelId) {
-      // End any active duel
-      const duel = quickDrawDuels.get(player.quickDrawDuelId);
-      if (duel) {
-        // The other player wins by default
-        const winnerId = duel.player1Id === playerId ? duel.player2Id : duel.player1Id;
-        endQuickDrawDuel(player.quickDrawDuelId, winnerId);
-      }
-    }
-    
-    players.delete(playerId);
-    
-    // Anti-cheat: Clean up associated data
-    playerTimeouts.delete(playerId);
-    playerNonces.delete(playerId);
-    playerSequences.delete(playerId);
-
-    // Notify all that the player left
-    broadcastToAll({
-      type: 'playerLeft',
-      id: playerId
-    });
-
-    updatePlayerCount();
   }
+  
+  if (player.sessionId) {
+    sessions.delete(player.sessionId);
+  }
+  
+  // Quick Draw cleanup
+  if (player.inQuickDrawQueue && player.quickDrawLobbyIndex >= 0) {
+    // Remove from the appropriate queue
+    const queueIndex = player.quickDrawLobbyIndex;
+    if (queueIndex >= 0 && queueIndex < MAX_ARENAS) {
+      const queue = quickDrawQueues[queueIndex];
+      const index = queue.indexOf(playerId);
+      if (index !== -1) {
+        queue.splice(index, 1);
+      }
+    }
+  }
+  
+  if (player.inQuickDrawDuel && player.quickDrawDuelId) {
+    // End any active duel
+    const duel = quickDrawDuels.get(player.quickDrawDuelId);
+    if (duel) {
+      // The other player wins by default
+      const winnerId = duel.player1Id === playerId ? duel.player2Id : duel.player1Id;
+      endQuickDrawDuel(player.quickDrawDuelId, winnerId);
+    }
+  }
+  
+  players.delete(playerId);
+  
+  // Anti-cheat: Clean up associated data
+  playerTimeouts.delete(playerId);
+  playerNonces.delete(playerId);
+  playerSequences.delete(playerId);
+
+  // Notify all that the player left
+  broadcastToAll({
+    type: 'playerLeft',
+    id: playerId
+  });
+
+  updatePlayerCount();
 }
 
 // Broadcast a "playerCount" update to all

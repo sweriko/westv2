@@ -11,7 +11,7 @@ import { createMuzzleFlash, createSmokeEffect, createImpactEffect, preloadMuzzle
 import { QuickDraw } from './quickDraw.js';
 import { updateAmmoUI, updateHealthUI } from './ui.js';
 import { Viewmodel } from './viewmodel.js';
-import { initPlayerIdentity } from './playerIdentity.js';
+import { initPlayerIdentity, verifyIdentityWithServer } from './playerIdentity.js';
 import logger from './logger.js';
 import { FlyingEagle } from './flyingEagle.js';
 
@@ -66,7 +66,11 @@ async function init() {
     const playerIdentity = await initPlayerIdentity();
     console.log(`Welcome back, ${playerIdentity.username}! Player ID: ${playerIdentity.id}`);
     
-    // Remove tracking of preloaded content - all players load the same way now
+    // Verify identity with server (will be used in future server-side validation)
+    const verificationResult = await verifyIdentityWithServer(playerIdentity);
+    if (!verificationResult.verified) {
+      console.warn('Identity verification failed, using local identity only');
+    }
     
     // Expose player identity to window for easy access from other modules
     window.playerIdentity = playerIdentity;
@@ -370,7 +374,9 @@ async function init() {
     showGameInstructions();
     
   } catch (error) {
-    console.error('Initialization failed:', error);
+    console.error('Error during initialization:', error);
+    // Handle initialization errors gracefully
+    alert('There was an error starting the game. Please refresh the page to try again.');
   }
 }
 

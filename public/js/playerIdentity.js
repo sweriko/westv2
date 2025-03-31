@@ -1,47 +1,128 @@
 /**
  * Player Identity System
  * Handles player naming and identification with client-side persistence.
+ * Includes token-based authentication and session recovery.
  */
 
 // Generate a UUID v4 (random)
 function generateUUID() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0;
+    const r = crypto.getRandomValues(new Uint8Array(1))[0] % 16 | 0;
     const v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
 }
 
-// Get player data from localStorage or create new
+// Generate a secure token
+function generateToken() {
+  const buffer = new Uint8Array(32);
+  crypto.getRandomValues(buffer);
+  return Array.from(buffer)
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+// Check if we should bypass normal identity flow (for development/testing)
+function shouldBypassIdentity() {
+  const urlParams = new URLSearchParams(window.location.search);
+  return urlParams.has('newplayer') || urlParams.has('dev');
+}
+
+// Get player data from storage or create new
 function getPlayerIdentity() {
-  const storedData = localStorage.getItem('wildWestPlayerIdentity');
-  
-  if (storedData) {
-    try {
-      return JSON.parse(storedData);
-    } catch (e) {
-      console.error('Error parsing stored player identity:', e);
+  try {
+    // Development bypass: create a new identity if URL param is present
+    if (shouldBypassIdentity()) {
+      console.log('Development mode: Creating new player identity');
       return createNewPlayerIdentity();
     }
-  } else {
-    return createNewPlayerIdentity();
+    
+    // First try sessionStorage (for this browser tab only)
+    const sessionData = sessionStorage.getItem('wildWestPlayerSession');
+    if (sessionData) {
+      const parsedData = JSON.parse(sessionData);
+      console.log('Found session player data');
+      return parsedData;
+    }
+    
+    // Then try localStorage (for persistent storage)
+    const storedData = localStorage.getItem('wildWestPlayerIdentity');
+    if (storedData) {
+      try {
+        const parsedData = JSON.parse(storedData);
+        
+        // Verify data integrity
+        if (!parsedData.id || !parsedData.token || !parsedData.username) {
+          console.warn('Incomplete player identity found, creating new');
+          return createNewPlayerIdentity();
+        }
+        
+        // Update session storage for faster access in this tab
+        sessionStorage.setItem('wildWestPlayerSession', storedData);
+        
+        console.log('Found stored player identity');
+        return parsedData;
+      } catch (e) {
+        console.error('Error parsing stored player identity:', e);
+        return createNewPlayerIdentity();
+      }
+    } else {
+      return createNewPlayerIdentity();
+    }
+  } catch (e) {
+    // Handle private browsing mode where storage might be unavailable
+    console.error('Error accessing storage:', e);
+    return createNewPlayerIdentity(true);
   }
 }
 
 // Create new player identity
-function createNewPlayerIdentity() {
-  return {
+function createNewPlayerIdentity(ephemeral = false) {
+  // For development/testing, append timestamp to make usernames unique across tabs
+  const devSuffix = shouldBypassIdentity() ? `-${Date.now().toString().slice(-4)}` : '';
+  
+  const newIdentity = {
     id: generateUUID(),
-    username: '',
+    token: generateToken(),
+    username: devSuffix, // Empty string or dev suffix
     createdAt: Date.now(),
-    lastLogin: Date.now()
+    lastLogin: Date.now(),
+    ephemeral: ephemeral, // Flag for when storage isn't available
+    devMode: shouldBypassIdentity() // Flag to mark dev identities
   };
+  
+  console.log('Created new player identity');
+  return newIdentity;
 }
 
-// Save player data to localStorage
+// Save player data to storage
 function savePlayerIdentity(playerData) {
-  playerData.lastLogin = Date.now();
-  localStorage.setItem('wildWestPlayerIdentity', JSON.stringify(playerData));
+  try {
+    playerData.lastLogin = Date.now();
+    
+    // For development mode identities, only save to session storage
+    // to avoid overwriting the main identity in localStorage
+    if (playerData.devMode) {
+      const dataStr = JSON.stringify(playerData);
+      sessionStorage.setItem('wildWestPlayerSession', dataStr);
+      console.log('Development mode: Saved player identity to session storage only');
+      return true;
+    }
+    
+    // Always save to session storage for this tab
+    const dataStr = JSON.stringify(playerData);
+    sessionStorage.setItem('wildWestPlayerSession', dataStr);
+    
+    // Save to localStorage if not ephemeral
+    if (!playerData.ephemeral) {
+      localStorage.setItem('wildWestPlayerIdentity', dataStr);
+    }
+    
+    return true;
+  } catch (e) {
+    console.error('Failed to save player identity:', e);
+    return false;
+  }
 }
 
 // Preload game content in background while user sets their name
@@ -394,7 +475,14 @@ function promptForUsername(playerData) {
       const username = input.value.trim();
       if (username) {
         playerData.username = username;
-        savePlayerIdentity(playerData);
+        
+        // Save immediately after username is set
+        const saved = savePlayerIdentity(playerData);
+        if (!saved && !playerData.ephemeral) {
+          // Mark as ephemeral if save failed
+          playerData.ephemeral = true;
+          console.warn('Storage unavailable, using ephemeral player identity');
+        }
         
         // Remove blur from game container
         const gameContainer = document.getElementById('game-container');
@@ -432,25 +520,184 @@ function promptForUsername(playerData) {
   });
 }
 
+// Prompt to recover saved identity
+function promptIdentityRecovery(storedIdentity, newIdentity) {
+  return new Promise((resolve) => {
+    // Create modal container
+    const modal = document.createElement('div');
+    modal.className = 'identity-recovery-modal';
+    modal.style.position = 'fixed';
+    modal.style.top = '0';
+    modal.style.left = '0';
+    modal.style.width = '100%';
+    modal.style.height = '100%';
+    modal.style.backgroundColor = 'rgba(0, 0, 0, 0.6)';
+    modal.style.zIndex = '1000';
+    modal.style.display = 'flex';
+    modal.style.justifyContent = 'center';
+    modal.style.alignItems = 'center';
+    
+    // Create modal content
+    const modalContent = document.createElement('div');
+    modalContent.style.backgroundColor = '#2c2c2c';
+    modalContent.style.borderRadius = '8px';
+    modalContent.style.padding = '20px';
+    modalContent.style.width = '90%';
+    modalContent.style.maxWidth = '450px';
+    modalContent.style.boxShadow = '0 4px 10px rgba(0, 0, 0, 0.5)';
+    modalContent.style.textAlign = 'center';
+    
+    // Title
+    const title = document.createElement('h2');
+    title.textContent = 'Welcome Back, Partner!';
+    title.style.color = '#f8bb00';
+    title.style.marginBottom = '10px';
+    title.style.fontFamily = 'Western, serif';
+    
+    // Message
+    const message = document.createElement('p');
+    message.textContent = `We found your saved gunslinger, ${storedIdentity.username}. Would you like to continue with this character?`;
+    message.style.color = '#fff';
+    message.style.marginBottom = '20px';
+    
+    // Buttons container
+    const buttonsContainer = document.createElement('div');
+    buttonsContainer.style.display = 'flex';
+    buttonsContainer.style.justifyContent = 'center';
+    buttonsContainer.style.gap = '15px';
+    
+    // Yes button
+    const yesButton = document.createElement('button');
+    yesButton.textContent = 'Yes, continue';
+    yesButton.style.padding = '10px 20px';
+    yesButton.style.backgroundColor = '#336633';
+    yesButton.style.color = '#fff';
+    yesButton.style.border = 'none';
+    yesButton.style.borderRadius = '4px';
+    yesButton.style.cursor = 'pointer';
+    yesButton.style.fontWeight = 'bold';
+    
+    // No button
+    const noButton = document.createElement('button');
+    noButton.textContent = 'No, start fresh';
+    noButton.style.padding = '10px 20px';
+    noButton.style.backgroundColor = '#8b0000';
+    noButton.style.color = '#fff';
+    noButton.style.border = 'none';
+    noButton.style.borderRadius = '4px';
+    noButton.style.cursor = 'pointer';
+    noButton.style.fontWeight = 'bold';
+    
+    // Button hover effects
+    yesButton.onmouseover = () => { yesButton.style.backgroundColor = '#3c7a3c'; };
+    yesButton.onmouseout = () => { yesButton.style.backgroundColor = '#336633'; };
+    noButton.onmouseover = () => { noButton.style.backgroundColor = '#a00000'; };
+    noButton.onmouseout = () => { noButton.style.backgroundColor = '#8b0000'; };
+    
+    // Button handlers
+    yesButton.addEventListener('click', () => {
+      document.body.removeChild(modal);
+      resolve(storedIdentity);
+    });
+    
+    noButton.addEventListener('click', () => {
+      // Clear stored identity when user chooses to start fresh
+      try {
+        localStorage.removeItem('wildWestPlayerIdentity');
+      } catch (e) {
+        console.error('Error clearing stored identity:', e);
+      }
+      document.body.removeChild(modal);
+      resolve(newIdentity);
+    });
+    
+    // Assemble modal
+    buttonsContainer.appendChild(yesButton);
+    buttonsContainer.appendChild(noButton);
+    modalContent.appendChild(title);
+    modalContent.appendChild(message);
+    modalContent.appendChild(buttonsContainer);
+    modal.appendChild(modalContent);
+    document.body.appendChild(modal);
+  });
+}
+
+// Check if there's a stored identity in another storage medium (like localStorage)
+// that doesn't match our current session
+async function checkForIdentityConflict(currentIdentity) {
+  try {
+    // Skip conflict resolution in development mode
+    if (shouldBypassIdentity() || currentIdentity.devMode) {
+      return currentIdentity;
+    }
+    
+    // Only check if our current identity is new (no username yet)
+    if (currentIdentity.username) {
+      return currentIdentity;
+    }
+    
+    const storedDataStr = localStorage.getItem('wildWestPlayerIdentity');
+    if (!storedDataStr) {
+      return currentIdentity;
+    }
+    
+    const storedIdentity = JSON.parse(storedDataStr);
+    
+    // If stored identity has a username and doesn't match our current ID
+    if (storedIdentity && 
+        storedIdentity.username && 
+        storedIdentity.id !== currentIdentity.id) {
+      
+      // Ask user if they want to recover the stored identity
+      return await promptIdentityRecovery(storedIdentity, currentIdentity);
+    }
+    
+    return currentIdentity;
+  } catch (e) {
+    console.error('Error checking for identity conflict:', e);
+    return currentIdentity;
+  }
+}
+
 // Initialize player identity system
 async function initPlayerIdentity() {
+  // Get the basic identity first
   let playerData = getPlayerIdentity();
+  
+  // Check if there's a conflict with stored identity
+  playerData = await checkForIdentityConflict(playerData);
   
   // If no username, prompt for one
   if (!playerData.username) {
     playerData = await promptForUsername(playerData);
   }
   
-  // Update last login time
+  // Update last login time and save again
   playerData.lastLogin = Date.now();
   savePlayerIdentity(playerData);
   
   return playerData;
 }
 
+// Verify client identity with server
+async function verifyIdentityWithServer(playerData) {
+  // This would typically make a request to the server to verify the token
+  // For now, we'll just simulate this process
+  return new Promise(resolve => {
+    setTimeout(() => {
+      // Assume the verification was successful
+      resolve({
+        verified: true,
+        playerData: playerData
+      });
+    }, 300);
+  });
+}
+
 export { 
-  initPlayerIdentity, 
+  initPlayerIdentity,
   getPlayerIdentity, 
   savePlayerIdentity, 
-  promptForUsername
+  promptForUsername,
+  verifyIdentityWithServer
 }; 
