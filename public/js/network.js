@@ -20,6 +20,7 @@ export class NetworkManager {
     this.onOpen = null;
     this.onClose = null;
     this.onError = null;
+    this.onChatMessage = null;       // When a chat message is received
 
     // Anti-cheat callbacks
     this.onPositionCorrection = null;// When server corrects client position
@@ -283,21 +284,13 @@ export class NetworkManager {
         }
         break;
 
-      // A broadcast that someone was hit
-      case 'playerHit':
-        console.log(`Player ${message.targetId} was hit by player ${message.sourceId} in the ${message.hitZone || 'body'}`);
+      // Player hit - broadcast to all players
+      case 'playerHitBroadcast':
         if (this.onPlayerHitBroadcast) {
-          this.onPlayerHitBroadcast(
-            message.targetId,
-            message.sourceId,
-            message.hitPosition,
-            message.health,
-            message.hitZone,
-            message.damage
-          );
+          this.onPlayerHitBroadcast(message.hitData);
         }
         break;
-
+        
       // Anti-cheat: Server correction of client position
       case 'positionCorrection':
         console.log(`Received position correction:`, message.position);
@@ -333,6 +326,13 @@ export class NetworkManager {
         if (message.fatal) {
           this.connectionAttempts = this.maxConnectionAttempts; // block further reconnect
           alert(`Fatal error: ${message.message}`);
+        }
+        break;
+
+      // Chat message received
+      case 'chatMessage':
+        if (this.onChatMessage) {
+          this.onChatMessage(message.senderId, message.username, message.message);
         }
         break;
 
@@ -510,7 +510,19 @@ export class NetworkManager {
    */
   disconnect() {
     this._cleanupSocket();
-    console.log('WebSocket connection manually closed');
+  }
+  
+  /**
+   * Send a chat message to all players
+   * @param {string} message - The chat message to send
+   */
+  sendChatMessage(message) {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify({
+        type: 'chat',
+        message: message
+      }));
+    }
   }
 }
 

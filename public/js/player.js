@@ -43,6 +43,7 @@ export class Player {
     // Movement control flags
     this.canMove = true; // Whether player can move at all
     this.forceLockMovement = false; // Complete movement override (quickdraw mode)
+    this.chatActive = false; // Whether chat input is active
     
     // Sprinting flag - new addition
     this.isSprinting = false;
@@ -327,6 +328,7 @@ export class Player {
   move(deltaTime) {
     if (this.forceLockMovement) return; // Complete override for duel mode
     if (!this.canMove) return; // Movement lock (e.g. during Quick Draw)
+    if (this.chatActive) return; // Don't move when chat is active
 
     if (this.moveForward) this.velocity.z = -this.getMoveSpeed();
     else if (this.moveBackward) this.velocity.z = this.getMoveSpeed();

@@ -911,3 +911,118 @@ canvas {
     height: 120px;
   }
 }
+
+/* Chat styles */
+#chat-container {
+  position: absolute;
+  bottom: 80px;
+  left: 20px;
+  max-width: 400px;
+  height: auto;
+  max-height: 250px;
+  overflow-y: auto;
+  background-color: transparent;
+  border-radius: 5px;
+  padding: 10px;
+  font-family: Arial, sans-serif;
+  color: #fff;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  font-size: 14px;
+  scrollbar-width: none; /* Hide scrollbar for Firefox */
+  -ms-overflow-style: none; /* Hide scrollbar for IE and Edge */
+  transition: background-color 0.2s ease;
+}
+
+#chat-container.active {
+  background-color: transparent;
+  scrollbar-width: thin; /* Show scrollbar for Firefox when active */
+  scrollbar-color: rgba(255, 255, 255, 0.3) rgba(0, 0, 0, 0.2);
+}
+
+#chat-messages {
+  margin-bottom: 5px;
+  overflow-y: auto;
+  max-height: 230px;
+  display: flex;
+  flex-direction: column;
+  scrollbar-width: none; /* Hide scrollbar for Firefox */
+  -ms-overflow-style: none; /* Hide scrollbar for IE and Edge */
+}
+
+#chat-container.active #chat-messages {
+  scrollbar-width: thin; /* Show scrollbar for Firefox when active */
+  scrollbar-color: rgba(255, 255, 255, 0.3) rgba(0, 0, 0, 0.2);
+}
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+#chat-container::-webkit-scrollbar,
+#chat-messages::-webkit-scrollbar {
+  width: 0; 
+  display: none;
+}
+
+/* Show scrollbar for Chrome, Safari and Opera when active */
+#chat-container.active::-webkit-scrollbar,
+#chat-container.active #chat-messages::-webkit-scrollbar {
+  width: 6px;
+  display: block;
+  opacity: 1;
+}
+
+/* Scrollbar track and thumb styles for active chat */
+#chat-container.active::-webkit-scrollbar-track,
+#chat-container.active #chat-messages::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+}
+
+#chat-container.active::-webkit-scrollbar-thumb,
+#chat-container.active #chat-messages::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+}
+
+.chat-message {
+  margin-bottom: 5px;
+  word-wrap: break-word;
+  padding: 2px 0;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 1), 0 0 6px rgba(0, 0, 0, 0.9);
+  line-height: 1.4;
+}
+
+.username {
+  font-weight: bold;
+  margin-right: 5px;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 1), 0 0 5px rgba(0, 0, 0, 0.9);
+}
+
+#chat-input-container {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  width: 400px;
+  z-index: 1000;
+  display: none;
+}
+
+#chat-input {
+  width: 100%;
+  padding: 8px;
+  border-radius: 5px;
+  border: none;
+  background-color: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-family: Arial, sans-serif;
+  outline: none;
+}
+
+.system-message {
+  color: #ddd;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 1), 0 0 6px rgba(0, 0, 0, 0.9);
+}
+
+.hidden {
+  display: none;
+}

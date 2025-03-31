@@ -339,11 +339,16 @@ function initializePlayer(ws, playerId, sessionId, clientId, username, token, is
           handleQuickDrawDeclineChallenge(playerId, data.challengerId);
           break;
 
+        // Handle chat messages
+        case 'chat':
+          handleChatMessage(playerId, data.message);
+          break;
+
         default:
           break;
       }
     } catch (err) {
-      console.error(`Error processing message from player ${playerId}:`, err);
+      console.error(`Error handling message from player ${playerId}:`, err);
     }
   });
 
@@ -1807,3 +1812,53 @@ process.on('SIGINT', () => {
     process.exit(0);
   });
 });
+
+/**
+ * Handle chat messages from players and broadcast them
+ * @param {number} playerId - The ID of the player sending the message 
+ * @param {string} message - The chat message
+ */
+function handleChatMessage(playerId, message) {
+  // Get player info
+  const player = players.get(playerId);
+  if (!player) return;
+  
+  // Rate limiting - max one message per 2 seconds
+  const now = Date.now();
+  const timeouts = playerTimeouts.get(playerId);
+  if (timeouts) {
+    if (!timeouts.lastChat) {
+      timeouts.lastChat = 0;
+    }
+    
+    // Rate limiting
+    if (now - timeouts.lastChat < 2000) {
+      console.log(`Chat rate limited for player ${playerId}`);
+      return;
+    }
+    
+    timeouts.lastChat = now;
+  }
+  
+  // Simple message validation and sanitization
+  if (!message || typeof message !== 'string') return;
+  if (message.length > 60) message = message.substring(0, 60); // Limit message length
+  
+  // Escape HTML to prevent XSS
+  message = message
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+  
+  console.log(`Chat message from ${player.username} (${playerId}): ${message}`);
+  
+  // Broadcast the message to all players
+  broadcastToAll({
+    type: 'chatMessage',
+    senderId: playerId,
+    username: player.username,
+    message: message
+  });
+}

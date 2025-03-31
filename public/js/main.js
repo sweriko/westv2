@@ -14,6 +14,7 @@ import { Viewmodel } from './viewmodel.js';
 import { initPlayerIdentity, verifyIdentityWithServer } from './playerIdentity.js';
 import logger from './logger.js';
 import { FlyingEagle } from './flyingEagle.js';
+import { initChat, handleChatMessage, addSystemMessage } from './chat.js';
 
 // Check if device is mobile
 function isMobileDevice() {
@@ -368,6 +369,18 @@ async function init() {
       scene: scene,
       camera: camera
     });
+    
+    // Initialize chat system
+    initChat(networkManager);
+    
+    // Set up chat message handler
+    networkManager.onChatMessage = (senderId, username, message) => {
+      // Ignore messages from ourselves to prevent duplicates
+      if (senderId === localPlayer.id) return;
+      
+      // Only handle messages from other players
+      handleChatMessage({ username, message });
+    };
 
     // Start the animation loop
     animate(0);

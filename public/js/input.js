@@ -5,6 +5,8 @@
  * @param {SoundManager} soundManager - The SoundManager for audio feedback.
  */
 
+import { isChatInputActive } from './chat.js';
+
 export function initInput(renderer, player, soundManager) {
   // Track if device is mobile
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -47,6 +49,9 @@ export function initInput(renderer, player, soundManager) {
 
   // Keyboard down
   document.addEventListener('keydown', (event) => {
+    // Skip game input if chat is active
+    if (isChatInputActive()) return;
+    
     switch (event.code) {
       case 'KeyW':
         player.moveForward = true;
@@ -83,6 +88,9 @@ export function initInput(renderer, player, soundManager) {
 
   // Keyboard up
   document.addEventListener('keyup', (event) => {
+    // Skip game input if chat is active
+    if (isChatInputActive()) return;
+    
     switch (event.code) {
       case 'KeyW':
         player.moveForward = false;
