@@ -568,6 +568,33 @@ export class QuickDraw {
                                 }
                                 
                                 console.log(`[QuickDraw] Health updated: ${message.health}`);
+                                
+                                // If player health is 0, play death animation for local player
+                                if (message.health <= 0) {
+                                    // Make sure we have a local player model for death animation
+                                    if (!this.localPlayerModel) {
+                                        this.createLocalPlayerModel();
+                                    }
+                                    
+                                    // Ensure local player model is visible in aerial view
+                                    if (this.localPlayerModel) {
+                                        this.setupAndEnableAerialCamera();
+                                        this.localPlayerModel.group.visible = true;
+                                        
+                                        // Play the death animation
+                                        if (this.localPlayerModel.playDeathAnimation) {
+                                            console.log('[QuickDraw] Playing death animation for local player');
+                                            const deathResult = this.localPlayerModel.playDeathAnimation();
+                                            
+                                            // Disable player controls during death animation
+                                            if (this.localPlayer) {
+                                                this.localPlayer.canMove = false;
+                                                this.localPlayer.canAim = false;
+                                                this.localPlayer.forceLockMovement = true;
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             // Update opponent's health if needed (could be extended for UI)
                             else if (message.playerId === this.duelOpponentId) {
