@@ -242,12 +242,10 @@ export class FlyingEagle {
     const bankAngle = 0.2; // Radians - a slight bank
     this.group.rotateZ(bankAngle);
     
-    // Update the camera orientation to always look at the eagle at a constant angle
-    // This step is key to maintaining the stable camera view
-    if (this.cameraMount) {
-      // We don't need to do anything here since the camera mount is already
-      // attached to the group with fixed position relative to the eagle
-      // This ensures the camera doesn't move with the bird's flapping animation
+    // Update the camera orientation to always look at the duel center
+    if (this.cameraMount && this.inQuickdraw && this.duelCenter) {
+      // Make the camera always point at the duel center
+      this.cameraMount.lookAt(this.duelCenter);
     }
   }
 

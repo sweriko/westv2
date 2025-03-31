@@ -11,10 +11,32 @@ import { updateHealthUI } from './ui.js';
 
 export class QuickDraw {
     constructor(scene, localPlayer, networkManager, soundManager) {
+        // Assign passed parameters
         this.scene = scene;
         this.localPlayer = localPlayer;
         this.networkManager = networkManager;
         this.soundManager = soundManager;
+        
+        // Initialize state variables
+        this.inDuel = false;
+        this.inLobby = false;
+        this.duelState = 'none';
+        this.duelOpponentId = null;
+        this.pendingChallenge = null;
+        this.duelActive = false;
+        
+        // Aerial camera properties
+        this.aerialCamera = null;
+        this.aerialCameraAngle = 0;
+        this.aerialCameraActive = false;
+        this.aerialCameraPathSet = false;
+        this.originalCamera = null;
+        
+        // Flag to track when player is in death/kill animation
+        this.inDeathOrKillAnimation = false;
+        
+        // Create UI elements
+        this.createUI();
         
         // Detect mobile devices if not already set
         if (window.isMobileDevice === undefined) {
@@ -49,10 +71,6 @@ export class QuickDraw {
         }
         
         // Game state
-        this.inLobby = false;
-        this.inDuel = false;
-        this.duelOpponentId = null;
-        this.duelState = 'none'; // 'none', 'ready', 'countdown', 'draw'
         this.gunLocked = false;
         this.originalCanAim = true;
         // Record the time (in ms) until which the gun remains locked
@@ -62,9 +80,6 @@ export class QuickDraw {
         this.playerProximityRadius = 5; // 5 units radius for challenge detection
         this.nearbyPlayers = new Map(); // Map of nearby player IDs to their data
         this.challengePromptActive = false; // Whether the challenge prompt is active
-        this.pendingChallenge = null; // Store info about pending challenge
-        this.challengeAccepted = false; // Whether a challenge has been accepted
-        this.challengeUIVisible = false; // Whether challenge UI is visible
         
         // Initialize physics system for collision detection
         this.physics = new PhysicsSystem();
@@ -77,12 +92,6 @@ export class QuickDraw {
         // Make this instance globally accessible for network handlers
         window.quickDraw = this;
 
-        // Aerial camera for duel mode
-        this.aerialCamera = null;
-        this.aerialCameraActive = false;
-        this.aerialCameraAngle = 0;
-        this.aerialCameraPathSet = false; // Track whether the path has been set initially
-        
         // Third-person model for local player (only visible during aerial view)
         this.localPlayerModel = null;
     }
@@ -1488,15 +1497,30 @@ export class QuickDraw {
             }
         } 
         else if ((this.duelState === 'ready' || this.duelState === 'countdown' || this.duelState === 'none') && 
-                 this.inDuel && !this.aerialCameraActive) {
-            // If we're in ready or countdown phase but not using aerial camera, enable it
+                 this.inDuel && !this.aerialCameraActive && !this.inDeathOrKillAnimation) {
+            // Only enable aerial camera if we're not in death/kill animation
             console.log('Aerial camera not active during pre-draw phase - enabling');
             this.setupAndEnableAerialCamera();
         }
         
-        // Update aerial camera if active
-        if (this.aerialCameraActive) {
+        // Update aerial camera if active and not in death/kill animation
+        if (this.aerialCameraActive && !this.inDeathOrKillAnimation) {
             this.updateAerialCamera(deltaTime);
+        }
+        
+        // If in death/kill animation, ensure player camera is active
+        if (this.inDeathOrKillAnimation && this.localPlayer && this.localPlayer.camera) {
+            if (window.renderer) {
+                if (window.renderer.camera !== this.localPlayer.camera) {
+                    console.log('Forcing player camera during death/kill animation');
+                    window.renderer.camera = this.localPlayer.camera;
+                    
+                    // Also set the instance camera if available
+                    if (window.renderer.instance && window.renderer.instance.camera !== this.localPlayer.camera) {
+                        window.renderer.instance.camera = this.localPlayer.camera;
+                    }
+                }
+            }
         }
         
         // Update nearby players for challenges
@@ -1922,9 +1946,24 @@ export class QuickDraw {
         // Update state first to prevent any update logic from running
         this.duelState = 'none';
         
+        // Set flag to prevent switching back to aerial view
+        this.inDeathOrKillAnimation = true;
+        
         // IMPORTANT: We no longer show aerial camera after death
         // Instead, we keep the player's camera viewpoint
         console.log('[QuickDraw] Keeping player viewpoint for death scene');
+        
+        // Force player camera to be active
+        if (this.localPlayer && this.localPlayer.camera) {
+            if (window.renderer) {
+                window.renderer.camera = this.localPlayer.camera;
+                
+                // Also set the instance camera if available
+                if (window.renderer.instance) {
+                    window.renderer.instance.camera = this.localPlayer.camera;
+                }
+            }
+        }
         
         // Determine if player won or lost
         const playerWon = winnerId === this.localPlayer.id;
@@ -1945,6 +1984,11 @@ export class QuickDraw {
             // Reset force lock immediately
             this.localPlayer.forceLockMovement = false;
         }
+        
+        // Clear animation flag after the victory/defeat screen has been shown
+        setTimeout(() => {
+            this.inDeathOrKillAnimation = false;
+        }, 5000);
         
         // Server will send fullStateReset message after a delay
     }
@@ -2949,6 +2993,9 @@ export class QuickDraw {
     handleKill(message) {
         console.log(`You killed player ${message.targetId}`);
         
+        // Set death/kill animation flag
+        this.inDeathOrKillAnimation = true;
+        
         // Show kill message
         this.showMessage('KILL!', 1500, '#00FF00');
         
@@ -2959,6 +3006,21 @@ export class QuickDraw {
         
         // Create kill effect
         this.createKillEffect();
+        
+        // Ensure the local player's camera remains active
+        if (window.renderer && this.localPlayer) {
+            window.renderer.camera = this.localPlayer.camera;
+            
+            // Also set the instance camera if available
+            if (window.renderer.instance) {
+                window.renderer.instance.camera = this.localPlayer.camera;
+            }
+        }
+        
+        // Clear animation flag after a delay
+        setTimeout(() => {
+            this.inDeathOrKillAnimation = false;
+        }, 3000); // Enough time for death animation to complete
     }
 
     /**
@@ -2967,6 +3029,9 @@ export class QuickDraw {
      */
     handleDeath(message) {
         console.log(`You were killed by player ${message.killerId}`);
+        
+        // Set death/kill animation flag to prevent camera switching
+        this.inDeathOrKillAnimation = true;
         
         // Show death message
         this.showMessage('YOU DIED', 1500, '#FF0000');
@@ -2984,10 +3049,19 @@ export class QuickDraw {
             this.createLocalPlayerModel();
         }
         
-        // Ensure local player model is visible for death animation but don't switch to aerial view
+        // Keep the player's POV camera active during death
         if (this.localPlayerModel) {
-            // Keep player's own camera (first person view)
-            // We no longer switch to aerial camera here
+            // Force the local player's camera to be active
+            if (window.renderer) {
+                window.renderer.camera = this.localPlayer.camera;
+                
+                // Also set the instance camera if available
+                if (window.renderer.instance) {
+                    window.renderer.instance.camera = this.localPlayer.camera;
+                }
+            }
+            
+            // Make the model visible for other players but not in our own view
             this.localPlayerModel.group.visible = true;
             
             // Play the death animation
@@ -3008,6 +3082,11 @@ export class QuickDraw {
                 // Wait for animation to complete before server sends respawn
                 console.log(`[QuickDraw] Death animation playing, duration: ${deathAnimDuration}ms`);
                 
+                // Clear animation flag after animation completes
+                setTimeout(() => {
+                    this.inDeathOrKillAnimation = false;
+                }, deathAnimDuration + 500); // Add a bit of buffer
+                
                 // The server will send fullStateReset message after the animation duration
                 // We're ensuring the animation has time to play fully
                 
@@ -3024,9 +3103,19 @@ export class QuickDraw {
                 }
             } else {
                 console.warn('[QuickDraw] Death animation not available on player model');
+                
+                // Clear animation flag after a default delay if no animation
+                setTimeout(() => {
+                    this.inDeathOrKillAnimation = false;
+                }, 3000);
             }
         } else {
             console.warn('[QuickDraw] Could not create local player model for death animation');
+            
+            // Clear animation flag after a default delay if no model
+            setTimeout(() => {
+                this.inDeathOrKillAnimation = false;
+            }, 3000);
         }
     }
 
@@ -3310,40 +3399,20 @@ export class QuickDraw {
             this.aerialCamera = null;
         }
         
-        // Reset path set flag so it will be re-initialized for the next match
-        this.aerialCameraPathSet = false;
-        
-        // Restore player camera immediately
-        if (this.scene && this.scene.renderer) {
-            // Clear any override flags
-            this.scene.renderer.overrideCamera = null;
-            
-            // Explicitly set renderer's camera back to player camera
-            if (this.localPlayer && this.localPlayer.camera) {
-                console.log('[QuickDraw] Restoring renderer camera to player camera');
-                this.scene.renderer.camera = this.localPlayer.camera;
+        // If we're not in death animation, restore original camera
+        if (!this.inDeathOrKillAnimation && this.localPlayer && this.localPlayer.camera) {
+            // Force switch back to player camera if not in death animation
+            if (window.renderer) {
+                window.renderer.camera = this.localPlayer.camera;
                 
-                // Force a render to ensure changes take effect
-                try {
-                    this.scene.renderer.render();
-                } catch (e) {
-                    console.error('[QuickDraw] Error during forced render:', e);
+                if (window.renderer.instance) {
+                    window.renderer.instance.camera = this.localPlayer.camera;
                 }
             }
         }
         
-        // Additional global cleanup
-        if (window.renderer) {
-            if (this.localPlayer && this.localPlayer.camera) {
-                window.renderer.camera = this.localPlayer.camera;
-            }
-            delete window._renderWithCamera;
-        }
-        
-        // Make sure we clear any direct override flag
-        this._directCameraOverride = false;
-        
-        console.log('[QuickDraw] Aerial camera disabled and removed');
+        // Reset path set flag so it will be re-initialized for the next match
+        this.aerialCameraPathSet = false;
     }
 
     /**
