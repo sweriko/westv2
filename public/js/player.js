@@ -986,7 +986,7 @@ export class Player {
         if (!this.isAiming && !this.isReloading) {
           this.viewmodel.group.visible = false;
         }
-      }, 500); // Adjust timing based on holster animation length
+      }, 800); // Increased from 500ms to 800ms to allow for longer holster animation
     }
     
     this.sendNetworkUpdate(); // let others know
@@ -1047,7 +1047,7 @@ export class Player {
               // Double-check we're still not aiming and not forced visible
               this.viewmodel.group.visible = false;
             }
-          }, 500); // Adjust based on holster animation length
+          }, 800); // Increased from 500ms to 800ms to allow for longer holster animation
         }
       }
       

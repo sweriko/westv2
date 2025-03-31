@@ -20,7 +20,7 @@ export class Viewmodel {
     };
     
     // Forward clipping offset - how far forward to position model
-    this.FORWARD_CLIP = 0.16; // Positive pushes model forward
+    this.FORWARD_CLIP = 0.18; // Increased from 0.16 to push model further from camera
     
     // Effect positioning constants
     this.EFFECTS = {
@@ -680,12 +680,20 @@ export class Viewmodel {
       return;
     }
     
-    // Smooth transition to holster
+    // Force model to stay visible during the entire holster animation
+    this.forceVisible = true;
+    
+    // Smooth transition to holster with longer duration
     this._transitionTo('holster', {
-      duration: 0.15,
+      duration: 0.25, // Increased from 0.15 for smoother transition
       onComplete: () => {
-        // After holster completes, we can simply set the model to invisible
-        // No need for any idle animations
+        // Get the exact duration of the holster animation
+        const holsterDuration = this.actions.holster._clip.duration;
+        
+        // Wait for animation to complete before allowing the model to be hidden
+        setTimeout(() => {
+          this.forceVisible = false;
+        }, holsterDuration * 1000 - 50); // Small buffer before the end
       }
     });
   }
