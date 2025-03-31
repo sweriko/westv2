@@ -1396,40 +1396,119 @@ function endQuickDrawDuel(duelId, winnerId) {
   const player1 = players.get(duel.player1Id);
   const player2 = players.get(duel.player2Id);
   
-  // Update player states
-  if (player1) {
+  // First notify players of the duel result so they can show victory/defeat screen
+  if (player1 && player1.ws.readyState === WebSocket.OPEN) {
     player1.inQuickDrawDuel = false;
     player1.quickDrawDuelId = null;
+    player1.quickDrawLobbyIndex = -1;
     
-    // Notify player 1 of the result and restore position
     player1.ws.send(JSON.stringify({
       type: 'quickDrawEnd',
-      winnerId: winnerId,
-      returnPosition: player1.preQuickDrawPosition
+      winnerId: winnerId
     }));
     
-    // If player 1 lost, set their health to 0
+    // Set loser's health to 0 temporarily (for death animation)
     if (winnerId && winnerId !== duel.player1Id) {
       player1.health = 0;
     }
   }
   
-  if (player2) {
+  if (player2 && player2.ws.readyState === WebSocket.OPEN) {
     player2.inQuickDrawDuel = false;
     player2.quickDrawDuelId = null;
+    player2.quickDrawLobbyIndex = -1;
     
-    // Notify player 2 of the result and restore position
     player2.ws.send(JSON.stringify({
       type: 'quickDrawEnd',
-      winnerId: winnerId,
-      returnPosition: player2.preQuickDrawPosition
+      winnerId: winnerId
     }));
     
-    // If player 2 lost, set their health to 0
+    // Set loser's health to 0 temporarily (for death animation)
     if (winnerId && winnerId !== duel.player2Id) {
       player2.health = 0;
     }
   }
+  
+  // After a delay, fully reset both players' states and spawn them in town
+  setTimeout(() => {
+    // Full reset for player 1
+    if (player1 && players.has(duel.player1Id)) {
+      // Generate new random spawn position
+      const spawnX = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_WIDTH * 0.8;
+      const spawnY = 1.6;
+      const spawnZ = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_LENGTH * 0.8;
+      
+      // Update server-side player state
+      player1.position = { x: spawnX, y: spawnY, z: spawnZ };
+      player1.health = 100;
+      player1.bullets = player1.maxBullets;
+      player1.isReloading = false;
+      player1.isAiming = false;
+      player1.isShooting = false;
+      
+      // Send full reset command to player
+      if (player1.ws.readyState === WebSocket.OPEN) {
+        player1.ws.send(JSON.stringify({
+          type: 'fullStateReset',
+          position: player1.position,
+          health: player1.health,
+          bullets: player1.bullets
+        }));
+      }
+      
+      // Broadcast player update to all other players with fullReset flag
+      broadcastToOthers(duel.player1Id, {
+        type: 'playerUpdate',
+        id: duel.player1Id,
+        position: player1.position,
+        rotation: player1.rotation,
+        health: player1.health,
+        isAiming: false,
+        isReloading: false,
+        isShooting: false,
+        fullReset: true // Special flag to trigger full model reset on other clients
+      });
+    }
+    
+    // Full reset for player 2
+    if (player2 && players.has(duel.player2Id)) {
+      // Generate new random spawn position
+      const spawnX = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_WIDTH * 0.8;
+      const spawnY = 1.6;
+      const spawnZ = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_LENGTH * 0.8;
+      
+      // Update server-side player state
+      player2.position = { x: spawnX, y: spawnY, z: spawnZ };
+      player2.health = 100;
+      player2.bullets = player2.maxBullets;
+      player2.isReloading = false;
+      player2.isAiming = false;
+      player2.isShooting = false;
+      
+      // Send full reset command to player
+      if (player2.ws.readyState === WebSocket.OPEN) {
+        player2.ws.send(JSON.stringify({
+          type: 'fullStateReset',
+          position: player2.position,
+          health: player2.health,
+          bullets: player2.bullets
+        }));
+      }
+      
+      // Broadcast player update to all other players with fullReset flag
+      broadcastToOthers(duel.player2Id, {
+        type: 'playerUpdate',
+        id: duel.player2Id,
+        position: player2.position,
+        rotation: player2.rotation,
+        health: player2.health,
+        isAiming: false,
+        isReloading: false,
+        isShooting: false,
+        fullReset: true // Special flag to trigger full model reset on other clients
+      });
+    }
+  }, 3000); // Wait 3 seconds for victory/defeat animation before resetting
   
   // Remove the duel
   quickDrawDuels.delete(duelId);

@@ -447,6 +447,63 @@ export class QuickDraw {
                         this.handleResult(message);
                         break;
                         
+                    case 'respawn':
+                        // Handle server-initiated respawn after quickdraw match
+                        console.log('[QuickDraw] Received respawn message from server');
+                        
+                        if (this.localPlayer) {
+                            // Set player position from server
+                            if (message.position) {
+                                this.localPlayer.group.position.set(
+                                    message.position.x,
+                                    message.position.y,
+                                    message.position.z
+                                );
+                                console.log(`[QuickDraw] Player respawned at server position: (${message.position.x.toFixed(2)}, ${message.position.y.toFixed(2)}, ${message.position.z.toFixed(2)})`);
+                            }
+                            
+                            // Reset health and bullets
+                            this.localPlayer.health = message.health || 100;
+                            this.localPlayer.bullets = message.bullets || this.localPlayer.maxBullets || 6;
+                            
+                            // Reset states
+                            this.localPlayer.isReloading = false;
+                            this.localPlayer.isAiming = false;
+                            this.localPlayer.velocity.y = 0;
+                            this.localPlayer.canAim = true;
+                            this.localPlayer.canMove = true;
+                            
+                            // Update UI
+                            if (typeof updateHealthUI === 'function') {
+                                updateHealthUI(this.localPlayer);
+                            }
+                            
+                            // Make sure we're in first-person view
+                            if (this.scene && this.scene.renderer) {
+                                this.scene.renderer.camera = this.localPlayer.camera;
+                                this.scene.renderer.overrideCamera = null;
+                            }
+                            
+                            // Remove any local player model
+                            this.removeLocalPlayerModel();
+                            
+                            // Broadcast state reset to other players
+                            this.sendPlayerStateReset();
+                        }
+                        
+                        // Ensure we're not in a duel state
+                        this.inDuel = false;
+                        this.inLobby = false;
+                        this.duelState = 'none';
+                        this.duelActive = false;
+                        break;
+                        
+                    case 'fullStateReset':
+                        // New comprehensive server-directed reset 
+                        console.log('[QuickDraw] Received full state reset command from server');
+                        this.resetPlayerAndRespawn(message);
+                        break;
+                        
                     case 'quickDrawChallengeReceived':
                         this.handleChallengeReceived(message);
                         break;
@@ -1841,7 +1898,7 @@ export class QuickDraw {
         // Create overlay and play sounds
         this.showVictoryDefeatOverlay(playerWon);
         
-        // Unlock player movement immediately but leave them in position temporarily
+        // Unlock player's original movement methods right away
         // This is crucial - ensure the player isn't locked even if later code fails
         if (this.localPlayer) {
             // Restore original movement methods right away
@@ -1855,131 +1912,8 @@ export class QuickDraw {
             this.localPlayer.forceLockMovement = false;
         }
         
-        // Function for full respawn - placed here to avoid errors with networkManager.sendMessage
-        const doFullRespawn = () => {
-            console.log('[QuickDraw] Aerial death scene complete, respawning players');
-            
-            // Clear any force update interval that might be keeping movement locked
-            if (this.forceUpdateInterval) {
-                clearInterval(this.forceUpdateInterval);
-                this.forceUpdateInterval = null;
-            }
-            
-            // Reset all duel state
-            this.duelActive = false;
-            this.inDuel = false;
-            this.duelState = 'none';
-            this.inLobby = false;
-            
-            // Disable aerial camera completely
-            this.disableAerialCamera();
-            
-            // Ensure the player camera is the active camera
-            if (this.scene && this.scene.renderer) {
-                this.scene.renderer.overrideCamera = null;
-                
-                // Force a render with player camera to ensure it's properly restored
-                if (this.localPlayer && this.localPlayer.camera) {
-                    console.log('[QuickDraw] Forcing render with player camera');
-                    this.scene.renderer.camera = this.localPlayer.camera;
-                    this.scene.renderer.render();
-                }
-            }
-            
-            // Fully restore player state and camera
-            if (this.localPlayer) {
-                console.log('[QuickDraw] Unlocking player movement and restoring camera');
-                
-                // Set explicit movement flags
-                this.localPlayer.canMove = true;
-                this.localPlayer.canAim = true;
-                this.localPlayer.forceLockMovement = false;
-                this.localPlayer.forceLockRotation = false;
-                
-                // Restore player health to full
-                this.localPlayer.health = 100;
-                
-                // Set position back to spawn if applicable
-                if (this.scene && this.scene.spawnPlayer) {
-                    console.log('[QuickDraw] Respawning player at spawn point');
-                    this.scene.spawnPlayer(this.localPlayer, true);
-                }
-            }
-            
-            // Remove local player model
-            if (this.localPlayerModel) {
-                console.log('[QuickDraw] Removing local player model');
-                
-                if (this.localPlayerModel.group) {
-                    // Remove from scene if it's part of the scene
-                    if (this.localPlayerModel.group.parent) {
-                        this.localPlayerModel.group.parent.remove(this.localPlayerModel.group);
-                    }
-                    
-                    // Or try removing directly from scene
-                    if (this.scene && this.scene.scene) {
-                        this.scene.scene.remove(this.localPlayerModel.group);
-                    }
-                }
-                
-                this.localPlayerModel = null;
-            }
-            
-            // Reset gun and animation state
-            if (this.localPlayer && this.localPlayer.viewmodel) {
-                console.log('[QuickDraw] Resetting gun state');
-                this.localPlayer.viewmodel.visible = true;
-                this.localPlayer.isAiming = false;
-            }
-            
-            // Try sending network message in a safe way
-            try {
-                if (this.networkManager) {
-                    console.log('[QuickDraw] Sending respawn complete notification');
-                    
-                    // Check which method exists for sending messages
-                    if (this.networkManager.socket && this.networkManager.socket.readyState === 1) { // 1 = OPEN
-                        this.networkManager.socket.send(JSON.stringify({
-                            type: 'quickDrawRespawnComplete',
-                            playerId: this.localPlayer ? this.localPlayer.id : null
-                        }));
-                    } 
-                    else if (typeof window.socketSend === 'function') {
-                        window.socketSend({
-                            type: 'quickDrawRespawnComplete',
-                            playerId: this.localPlayer ? this.localPlayer.id : null
-                        });
-                    } else {
-                        console.log('[QuickDraw] No network method available to send respawn complete');
-                    }
-                }
-            } catch (error) {
-                console.error('[QuickDraw] Error sending respawn complete notification:', error);
-            }
-            
-            console.log('[QuickDraw] Respawn complete');
-        };
-        
-        // Wait for 2 seconds then fully respawn the players
-        this.createDuelTimeout(() => {
-            doFullRespawn();
-            
-            // Final check to ensure player is unlocked
-            if (this.localPlayer) {
-                this.localPlayer.canMove = true;
-                this.localPlayer.canAim = true;
-                this.localPlayer.forceLockMovement = false;
-                
-                console.log('[QuickDraw] FINAL VERIFICATION - Player movement unlocked, canMove =', 
-                    this.localPlayer.canMove, 'canAim =', this.localPlayer.canAim);
-            }
-        }, 2000);
-        
-        // Hide UI after 2.5 seconds to ensure it's cleared after respawn starts
-        this.createDuelTimeout(() => {
-            console.log('[QuickDraw] Clearing match UI');
-            this.clearMatchUI();
-        }, 2500);
+        // Let the aerial camera view run for a few seconds before resetting
+        // Server will send fullStateReset message after a delay
     }
 
     /**
@@ -3018,8 +2952,164 @@ export class QuickDraw {
      * @param {Object} message - The result message
      */
     handleResult(message) {
-        console.log(`Duel ended. Winner: ${message.winnerId}`);
+        console.log(`[QuickDraw] Duel ended. Winner: ${message.winnerId}`);
+        
+        // First show the victory/defeat screen and visual effects
         this.endDuel(message.winnerId);
+        
+        // The server will send a fullStateReset message after a delay
+        // This approach ensures proper synchronization between all clients
+        console.log('[QuickDraw] Waiting for server to send state reset...');
+    }
+    
+    /**
+     * Reset all player state variables
+     */
+    resetPlayerState() {
+        if (!this.localPlayer) return;
+        
+        console.log('[QuickDraw] Resetting player state completely');
+        
+        // Reset movement flags
+        this.localPlayer.canMove = true;
+        this.localPlayer.canAim = true;
+        this.localPlayer.forceLockMovement = false;
+        this.localPlayer.forceLockRotation = false;
+        
+        // Reset weapon state
+        this.localPlayer.isAiming = false;
+        this.localPlayer.isReloading = false;
+        this.localPlayer.isShooting = false;
+        this.localPlayer.bullets = this.localPlayer.maxBullets || 6;
+        
+        // Reset health
+        this.localPlayer.health = 100;
+        
+        // Reset animation state if there's a viewmodel
+        if (this.localPlayer.viewmodel) {
+            this.localPlayer.viewmodel.visible = true;
+            
+            // Reset gun position to holster
+            if (this.localPlayer.currentGunOffset && this.localPlayer.holsterOffset) {
+                this.localPlayer.currentGunOffset.copy(this.localPlayer.holsterOffset);
+            }
+            
+            // Clear any ongoing gun animation
+            if (this.localPlayer.gunAnimation) {
+                this.localPlayer.gunAnimation.reset();
+                this.localPlayer.gunAnimation = null;
+            }
+        }
+        
+        // Reset any original movement methods that might have been backed up
+        if (this.localPlayer._origMove) {
+            this.localPlayer.move = this.localPlayer._origMove;
+            this.localPlayer._origMove = null;
+        }
+        
+        // Reset quickdraw specific state
+        this.inDuel = false;
+        this.inLobby = false;
+        this.duelState = 'none';
+        this.duelOpponentId = null;
+        this.duelActive = false;
+        
+        // Update UI
+        if (typeof updateHealthUI === 'function') {
+            updateHealthUI(this.localPlayer);
+        }
+        
+        console.log('[QuickDraw] Player state reset complete');
+    }
+    
+    /**
+     * Respawn player at a random town position
+     */
+    respawnPlayerInTown() {
+        if (!this.localPlayer) return;
+        
+        console.log('[QuickDraw] Respawning player in town');
+        
+        // Use the scene's spawn function if available
+        if (this.scene && this.scene.spawnPlayer) {
+            this.scene.spawnPlayer(this.localPlayer, true);
+            console.log('[QuickDraw] Player respawned using scene spawnPlayer');
+        } else {
+            // Fallback: manual respawn at a random town position
+            const townWidth = 60;  // Taken from GAME_CONSTANTS on server
+            const townLength = 100; // Taken from GAME_CONSTANTS on server
+            
+            // Generate random position within town bounds
+            const spawnX = (Math.random() - 0.5) * townWidth * 0.8;
+            const spawnY = 1.6; // Standard player height
+            const spawnZ = (Math.random() - 0.5) * townLength * 0.8;
+            
+            // Set player position
+            this.localPlayer.group.position.set(spawnX, spawnY, spawnZ);
+            console.log(`[QuickDraw] Player respawned at random town position: (${spawnX.toFixed(2)}, ${spawnY.toFixed(2)}, ${spawnZ.toFixed(2)})`);
+        }
+        
+        // Reset velocity (especially important for y velocity)
+        this.localPlayer.velocity = new THREE.Vector3(0, 0, 0);
+        
+        // Ensure the local player's camera is active
+        if (this.scene && this.scene.renderer) {
+            this.scene.renderer.camera = this.localPlayer.camera;
+            this.scene.renderer.overrideCamera = null;
+        }
+        
+        // Remove any third-person model of the local player
+        this.removeLocalPlayerModel();
+    }
+    
+    /**
+     * Remove the local player's third-person model if it exists
+     */
+    removeLocalPlayerModel() {
+        if (this.localPlayerModel) {
+            console.log('[QuickDraw] Removing local player model');
+            
+            if (this.localPlayerModel.group) {
+                // Remove from scene if it's part of the scene
+                if (this.localPlayerModel.group.parent) {
+                    this.localPlayerModel.group.parent.remove(this.localPlayerModel.group);
+                }
+                
+                // Or try removing directly from scene
+                if (this.scene && this.scene.scene) {
+                    this.scene.scene.remove(this.localPlayerModel.group);
+                }
+            }
+            
+            this.localPlayerModel = null;
+        }
+    }
+    
+    /**
+     * Send a message to all clients to reset this player's state
+     */
+    sendPlayerStateReset() {
+        if (!this.networkManager || !this.localPlayer) return;
+        
+        console.log('[QuickDraw] Broadcasting player state reset to all clients');
+        
+        try {
+            // Send a full player state update with reset values
+            this.networkManager.socket.send(JSON.stringify({
+                type: 'playerUpdate',
+                position: this.localPlayer.group.position,
+                rotation: { y: this.localPlayer.group.rotation.y },
+                isAiming: false,
+                isReloading: false,
+                health: 100,
+                quickDrawLobbyIndex: -1,  // Not in any quickdraw lobby
+                fullReset: true  // Special flag to indicate a full state reset
+            }));
+            
+            console.log('[QuickDraw] Player state reset broadcast complete');
+        } catch (error) {
+            console.error('[QuickDraw] Error sending player state reset:', error);
+        }
     }
 
     /**
@@ -3416,5 +3506,104 @@ export class QuickDraw {
             `Grounded: (${groundedPosition.x.toFixed(2)}, ${groundedPosition.y.toFixed(2)}, ${groundedPosition.z.toFixed(2)})`);
         
         return groundedPosition;
+    }
+
+    /**
+     * Reset player state and respawn them at a random town position
+     * @param {Object} message - The reset message from the server
+     */
+    resetPlayerAndRespawn(message) {
+        console.log('[QuickDraw] Executing comprehensive player reset and respawn');
+        
+        if (!this.localPlayer) return;
+        
+        // First, clear all match UI elements
+        this.clearMatchUI();
+        
+        // Clear any active timers
+        this.clearAllDuelTimers();
+        
+        // Reset all player movement control flags
+        this.localPlayer.canMove = true;
+        this.localPlayer.canAim = true;
+        this.localPlayer.forceLockMovement = false;
+        this.localPlayer.forceLockRotation = false;
+        
+        // Reset weapon state
+        this.localPlayer.isAiming = false;
+        this.localPlayer.isReloading = false;
+        this.localPlayer.isShooting = false;
+        
+        // Set bullets and health from server message
+        this.localPlayer.health = message.health || 100;
+        this.localPlayer.bullets = message.bullets || this.localPlayer.maxBullets || 6;
+        
+        // Reset any original movement methods that might have been backed up
+        if (this.localPlayer._origMove) {
+            console.log('[QuickDraw] Restoring original move method');
+            this.localPlayer.move = this.localPlayer._origMove;
+            this.localPlayer._origMove = null;
+        }
+        
+        // Disable aerial camera completely
+        this.disableAerialCamera();
+        
+        // Ensure the player camera is the active camera
+        if (this.scene && this.scene.renderer) {
+            this.scene.renderer.overrideCamera = null;
+            this.scene.renderer.camera = this.localPlayer.camera;
+        }
+        
+        // Reset all quickdraw state flags
+        this.inDuel = false;
+        this.inLobby = false;
+        this.duelState = 'none';
+        this.duelOpponentId = null;
+        this.duelActive = false;
+        this.aerialCameraPathSet = false;
+        
+        // Remove local player model
+        this.removeLocalPlayerModel();
+        
+        // Reset gun and animation state
+        if (this.localPlayer.viewmodel) {
+            console.log('[QuickDraw] Resetting gun state');
+            this.localPlayer.viewmodel.visible = true;
+            
+            // Reset gun position to holster
+            if (this.localPlayer.currentGunOffset && this.localPlayer.holsterOffset) {
+                this.localPlayer.currentGunOffset.copy(this.localPlayer.holsterOffset);
+            }
+            
+            // Clear any ongoing gun animation
+            if (this.localPlayer.gunAnimation) {
+                this.localPlayer.gunAnimation.reset();
+                this.localPlayer.gunAnimation = null;
+            }
+        }
+        
+        // Set player position from server message
+        if (message.position) {
+            // Apply the position
+            this.localPlayer.group.position.set(
+                message.position.x,
+                message.position.y,
+                message.position.z
+            );
+            console.log(`[QuickDraw] Player respawned at position: (${message.position.x.toFixed(2)}, ${message.position.y.toFixed(2)}, ${message.position.z.toFixed(2)})`);
+            
+            // Reset velocity (especially important for y velocity)
+            this.localPlayer.velocity = new THREE.Vector3(0, 0, 0);
+        }
+        
+        // Update UI
+        if (typeof updateHealthUI === 'function') {
+            updateHealthUI(this.localPlayer);
+        }
+        
+        // Broadcast our full reset to other clients to ensure our model is refreshed on their end
+        this.sendPlayerStateReset();
+        
+        console.log('[QuickDraw] Player reset and respawn complete');
     }
 }

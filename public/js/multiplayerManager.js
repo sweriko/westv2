@@ -80,6 +80,27 @@ export class MultiplayerManager {
       if (playerId === this.localPlayerId) return; // skip ourself
       
       const playerModel = this.remotePlayers.get(playerId);
+      
+      // Check if this is a full reset request
+      if (updatedData && updatedData.fullReset === true) {
+        console.log(`[MultiplayerManager] Received full reset for player ${playerId}`);
+        
+        // If we have this player model, remove it completely
+        if (playerModel) {
+          playerModel.dispose();
+          this.remotePlayers.delete(playerId);
+          
+          // Remove username label
+          this.removePlayerLabel(playerId);
+        }
+        
+        // Create a fresh player model
+        this.addPlayer(playerId, updatedData);
+        this.notifyPlayersUpdated();
+        return;
+      }
+      
+      // Normal update
       if (playerModel) {
         playerModel.update(updatedData);
       } else if (updatedData) {
