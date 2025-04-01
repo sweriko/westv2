@@ -606,6 +606,23 @@ function handleLocalPlayerShoot(bulletStart, shootDir) {
  * @param {string|number} bulletId - Server-assigned bullet ID
  */
 function handleRemotePlayerShoot(playerId, bulletData, bulletId) {
+  // Skip effect creation if this is our own shot coming back from the server
+  if (playerId === localPlayer.id) {
+    // Just create the bullet with the server's ID without spawning effects again
+    const startPos = new THREE.Vector3(bulletData.position.x, bulletData.position.y, bulletData.position.z);
+    const dir = new THREE.Vector3(bulletData.direction.x, bulletData.direction.y, bulletData.direction.z);
+    const bullet = new Bullet(startPos, dir, bulletId);
+    
+    // Add to bullets array but skip the sound and effects
+    bullet.isLocalBullet = true;
+    bullet.sourcePlayerId = playerId;
+    bullets.push(bullet);
+    bulletMap.set(bulletId, bullet);
+    
+    return;
+  }
+  
+  // For other players' shots, spawn the bullet with full effects
   const startPos = new THREE.Vector3(bulletData.position.x, bulletData.position.y, bulletData.position.z);
   const dir = new THREE.Vector3(bulletData.direction.x, bulletData.direction.y, bulletData.direction.z);
   

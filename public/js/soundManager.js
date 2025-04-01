@@ -339,19 +339,26 @@ export class SoundManager {
    * @returns {Object|null} Sound object for further control or null if not played
    */
   playSound(name, cooldown = 0, volume = 1.0, loop = false) {
-    // Special handling for gunshot sounds on mobile to prevent duplication issues
-    if (name === "shot" && window.isMobile) {
-      // Check if we're already playing a shot sound within the last 100ms
-      const now = Date.now();
-      if (this.lastShotTime && (now - this.lastShotTime < 100)) {
-        // Skip this sound request as one is already being played
-        console.log("Skipping duplicate shot sound on mobile");
+    // Stronger duplicate protection for all sounds, especially gunshots
+    const now = Date.now();
+    
+    // Use higher default cooldown for gunshots
+    if (name === "shot") {
+      // Always use at least 150ms cooldown for gunshots to prevent duplicates
+      cooldown = Math.max(cooldown, 150);
+      
+      // Check if we're already playing a shot sound within the cooldown period
+      if (this.soundCooldowns[name] && (now - this.soundCooldowns[name] < cooldown)) {
+        console.log(`Skipping duplicate ${name} sound (cooldown still active)`);
         return null;
       }
       
       // Record the time we played this shot
       this.lastShotTime = now;
-      
+    }
+    
+    // Special handling for gunshot sounds on mobile to prevent duplication issues
+    if (name === "shot" && window.isMobile) {
       // On mobile, always use a compact sound buffer for gunshots to prevent issues
       // This helps with memory and performance on mobile devices
       if (window.isMobile && !this._mobileOptimized) {
@@ -365,9 +372,8 @@ export class SoundManager {
       return null;
     }
 
-    // Check cooldown
+    // Check cooldown for all sounds
     if (cooldown > 0) {
-      const now = Date.now();
       if (this.soundCooldowns[name] && now - this.soundCooldowns[name] < cooldown) {
         return null;
       }
