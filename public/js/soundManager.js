@@ -19,7 +19,6 @@ export class SoundManager {
     this.soundCategoryMap = {
       'shot': 'weapon',
       'aimclick': 'ui',
-      'shellejection': 'weapon',
       'reloading': 'weapon',
       'bellstart': 'ui',
       'woodimpact': 'impact',
@@ -27,7 +26,13 @@ export class SoundManager {
       'leftstep': 'footstep',
       'rightstep': 'footstep',
       'jump': 'footstep',
-      'headshotmarker': 'ui'
+      'headshotmarker': 'ui',
+      'dramatic': 'ui',
+      'eaglescream': 'ui',
+      'quickdrawending': 'ui',
+      'playerfall': 'impact',
+      'gunholster': 'weapon',
+      'ambience': 'ambient'
     };
     
     // Main mixer channels

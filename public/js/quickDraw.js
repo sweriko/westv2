@@ -432,9 +432,9 @@ export class QuickDraw {
                             this.localPlayerModel.group.visible = false;
                         }
                         
-                        // Play draw sound only
+                        // Play eagle scream for the draw command
                         if (this.soundManager) {
-                            this.soundManager.playSound("draw", 0.9);
+                            this.soundManager.playSound("eaglescream", 0, 1.0);
                         }
                         
                         // Check hit zones for proper detection
@@ -1345,11 +1345,6 @@ export class QuickDraw {
             console.log('[QuickDraw] Player aim enabled - can now draw weapon');
         }
         
-        // Play draw sound effect
-        if (this.soundManager) {
-            this.soundManager.playSound("draw", 0.9);
-        }
-        
         // Make gun visible but initially holstered - player must manually draw
         if (this.localPlayer && this.localPlayer.viewmodel) {
             this.localPlayer.viewmodel.visible = true;
@@ -1547,6 +1542,11 @@ export class QuickDraw {
         this.pendingChallenge = null;
         
         console.log(`[QuickDraw] Starting duel with opponent ${this.duelOpponentId}`);
+        
+        // Play dramatic music for the duel start
+        if (this.soundManager) {
+            this.soundManager.playSound("dramatic", 0, 0.7); // Play at 70% volume
+        }
         
         // Store original player movement and aiming states
         this.originalCanAim = this.localPlayer.canAim;
@@ -1995,11 +1995,7 @@ export class QuickDraw {
         
         // Play victory/defeat sound
         if (this.soundManager) {
-            if (playerWon) {
-                this.soundManager.playSound("victory", 0.7);
-            } else {
-                this.soundManager.playSound("defeat", 0.7);
-            }
+            this.soundManager.playSound("quickdrawending", 0, 0.8);
         }
     }
     
@@ -2964,6 +2960,11 @@ export class QuickDraw {
             if (this.localPlayerModel.playDeathAnimation) {
                 console.log('[QuickDraw] Playing death animation');
                 const deathResult = this.localPlayerModel.playDeathAnimation();
+                
+                // Play the player fall sound when death animation starts
+                if (this.soundManager) {
+                    this.soundManager.playSound("playerfall", 0, 0.8);
+                }
                 
                 // Allow the death animation to complete before reset/respawn
                 const deathAnimDuration = deathResult.duration || 1500;

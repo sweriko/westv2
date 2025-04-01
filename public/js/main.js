@@ -107,7 +107,7 @@ async function init() {
     // Load shot sounds
     soundManager.loadSound("shot", "sounds/shot.mp3");
     soundManager.loadSound("aimclick", "sounds/aimclick.mp3");
-    soundManager.loadSound("shellejection", "sounds/shellejection.mp3");
+    // replacing shellejection with the combined reloading sound
     soundManager.loadSound("reloading", "sounds/reloading.mp3");
     // Load the bell start sound for Quick Draw start signal
     soundManager.loadSound("bellstart", "sounds/bellstart.mp3");
@@ -122,6 +122,19 @@ async function init() {
     
     // Load headshot marker sound
     soundManager.loadSound("headshotmarker", "sounds/headshotmarker.mp3");
+    
+    // Load new sound effects
+    soundManager.loadSound("dramatic", "sounds/dramatic.mp3");
+    soundManager.loadSound("eaglescream", "sounds/eaglescream.mp3");
+    soundManager.loadSound("quickdrawending", "sounds/quickdrawending.mp3");
+    soundManager.loadSound("playerfall", "sounds/playerfall.mp3");
+    soundManager.loadSound("gunholster", "sounds/gunholster.mp3");
+    soundManager.loadSound("ambience", "sounds/ambience.mp3");
+    
+    // Start background ambient music loop
+    setTimeout(() => {
+      soundManager.playSound("ambience", 0, 0.4, true); // Play at lower volume in a loop
+    }, 1000); // Slight delay to ensure the sound is loaded
     
     // Preload all visual effects to prevent FPS drops on first use - for all players now
     if (!window.isMobile) {

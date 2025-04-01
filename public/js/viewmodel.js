@@ -683,6 +683,11 @@ export class Viewmodel {
     // Force model to stay visible during the entire holster animation
     this.forceVisible = true;
     
+    // Play the gun holster sound
+    if (window.localPlayer && window.localPlayer.soundManager) {
+      window.localPlayer.soundManager.playSound("gunholster", 0, 0.6);
+    }
+    
     // Smooth transition to holster with longer duration
     this._transitionTo('holster', {
       duration: 0.25, // Increased from 0.15 for smoother transition

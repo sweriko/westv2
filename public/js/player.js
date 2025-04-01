@@ -942,7 +942,6 @@ export class Player {
     }
 
     if (this.soundManager) {
-      this.soundManager.playSound("shellejection");
       this.soundManager.playSound("reloading");
     }
 
