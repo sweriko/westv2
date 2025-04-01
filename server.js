@@ -1567,18 +1567,30 @@ function generateQuickDrawStreetPositions() {
   
   console.log(`[DEBUG] QuickDraw duel - Setting player eye level to ${eyeLevel} (feet should be at ground level)`);
   
-  // Position at absolute ends of the town - no randomization
-  // This ensures they are at maximum possible distance from each other
+  // Create 5 parallel lanes with realistic spacing for a line formation
+  const numLanes = 5;
+  const laneSpacing = 3.0; // 3 meters between each lane - realistic spacing for people standing side by side
+  const totalLineWidth = (numLanes - 1) * laneSpacing; // Total width of the line formation
+  const startX = -totalLineWidth / 2; // Center the formation in the town
+  
+  // Choose a random lane (0-4)
+  const laneIndex = Math.floor(Math.random() * numLanes);
+  const laneX = startX + (laneIndex * laneSpacing);
+  
+  console.log(`[DEBUG] Chosen quickdraw lane ${laneIndex + 1} of ${numLanes} at X=${laneX.toFixed(2)}`);
+  
+  // Position at north/south of the chosen lane, maintaining the same Z position for all lanes
+  // This creates a straight line of duelists on each side
   const position1 = {
-    x: 0, // Changed from -20 to 0 (now on Z axis)
+    x: laneX,
     y: eyeLevel,
-    z: -20 // Changed from 0 to -20
+    z: -20 // North line position
   };
   
   const position2 = {
-    x: 0, // Changed from 20 to 0 (now on Z axis)
+    x: laneX,
     y: eyeLevel,
-    z: 20 // Changed from 0 to 20
+    z: 20 // South line position
   };
   
   // Calculate vector from player1 to player2
@@ -1594,10 +1606,11 @@ function generateQuickDrawStreetPositions() {
   const rotation2 = Math.atan2(-dx, -dz) + Math.PI;
   
   // Log positions
-  console.log(`[DEBUG] DUEL POSITIONS (NORTH-SOUTH LAYOUT):"`);
+  console.log(`[DEBUG] DUEL POSITIONS (LANE ${laneIndex + 1} SPAWN):`);
   console.log(`  Player1: (${position1.x.toFixed(2)}, ${position1.y.toFixed(2)}, ${position1.z.toFixed(2)}) facing ${rotation1.toFixed(4)} radians (${(rotation1 * 180 / Math.PI).toFixed(1)}°)`);
   console.log(`  Player2: (${position2.x.toFixed(2)}, ${position2.y.toFixed(2)}, ${position2.z.toFixed(2)}) facing ${rotation2.toFixed(4)} radians (${(rotation2 * 180 / Math.PI).toFixed(1)}°)`);
-  console.log(`  Exact distance between players: 40.00 meters, Vector: (${dx.toFixed(2)}, ${dz.toFixed(2)})`); // Added vector info
+  console.log(`  Lane ${laneIndex + 1} of ${numLanes}, Line Formation Width: ${totalLineWidth.toFixed(2)}m`);
+  console.log(`  Exact distance between players: 40.00 meters, Vector: (${dx.toFixed(2)}, ${dz.toFixed(2)})`);
   
   return {
     position1: position1,
