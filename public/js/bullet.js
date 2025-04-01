@@ -1,4 +1,5 @@
 import { createImpactEffect } from './effects.js';
+import { adjustBulletTrajectory, createBulletPathVisualizer } from './bullet-trajectory-config.js';
 
 /**
  * A bullet class with client-side prediction and server validation.
@@ -11,13 +12,16 @@ export class Bullet {
    * @param {string|number} bulletId - Optional server-assigned bullet ID (for remote bullets)
    */
   constructor(position, direction, bulletId = null) {
+    // Apply trajectory adjustment if needed
+    const adjustedDirection = adjustBulletTrajectory(direction);
+    
     this.mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.02, 8, 8),
       new THREE.MeshStandardMaterial({ color: 0xB8860B })
     );
     this.mesh.position.copy(position);
 
-    this.direction = direction.clone();
+    this.direction = adjustedDirection.clone();
     this.speed = 80; // speed units/second
     this.distanceTraveled = 0;
     this.maxDistance = 100;
@@ -36,7 +40,10 @@ export class Bullet {
     this.isLocalBullet = true;
     
     // Add collision detection raycaster
-    this.raycaster = new THREE.Raycaster(position.clone(), direction.clone(), 0, 0.1);
+    this.raycaster = new THREE.Raycaster(position.clone(), adjustedDirection.clone(), 0, 0.1);
+    
+    // Path visualizer has been removed
+    this.pathVisualizer = null;
   }
 
   /**

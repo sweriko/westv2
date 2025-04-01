@@ -15,6 +15,8 @@ import { initPlayerIdentity, verifyIdentityWithServer } from './playerIdentity.j
 import logger from './logger.js';
 import { FlyingEagle } from './flyingEagle.js';
 import { initChat, handleChatMessage, addSystemMessage } from './chat.js';
+import './viewmodel-config.js';
+import './bullet-trajectory-config.js';
 
 // Check if device is mobile
 function isMobileDevice() {

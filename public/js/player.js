@@ -822,9 +822,9 @@ export class Player {
     this.camera.getWorldDirection(shootDir);
 
     // Slight random spread
-    shootDir.x += (Math.random() - 0.5) * 0.02;
-    shootDir.y += (Math.random() - 0.5) * 0.02;
-    shootDir.z += (Math.random() - 0.5) * 0.02;
+    shootDir.x += (Math.random() - 0.5) * 0.0005;
+    shootDir.y += (Math.random() - 0.5) * 0.0005;
+    shootDir.z += (Math.random() - 0.5) * 0.0005;
     shootDir.normalize();
 
     // Recoil effect
