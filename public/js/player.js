@@ -95,6 +95,10 @@ export class Player {
     // Quick Draw mode
     this.canAim = true; // Whether the player is allowed to aim (used by Quick Draw)
     
+    // Alternative aiming controls
+    this.isFAiming = false; // Whether player is aiming using the F key
+    this.isFRmbPressed = false; // Whether right mouse button is pressed during F-aiming
+    
     // Store previous position to detect collision with arena boundary
     this.previousPosition = new THREE.Vector3();
 

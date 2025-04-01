@@ -69,6 +69,30 @@ export function initInput(renderer, player, soundManager) {
       case 'KeyD':
         player.moveRight = true;
         break;
+      case 'KeyF':
+        // Alternative aiming method - holding F to aim
+        if (player.canAim && !player.isFAiming) {
+          player.isFAiming = true;
+          player.isAiming = true;
+          
+          // Optionally show arms in first-person
+          if (player.arms) {
+            player.arms.setVisible(true);
+          }
+          
+          // Show and prepare crosshair for animation
+          const crosshair = document.getElementById('crosshair');
+          if (crosshair) {
+            // Reset any existing animation classes
+            crosshair.classList.remove('contract', 'expand', 'expanded');
+            crosshair.style.display = 'block';
+          }
+
+          if (soundManager) {
+            soundManager.playSound("aimclick");
+          }
+        }
+        break;
       case 'Space':
         if (player.canJump) {
           // If sprinting, jump higher
@@ -108,6 +132,33 @@ export function initInput(renderer, player, soundManager) {
       case 'KeyD':
         player.moveRight = false;
         break;
+      case 'KeyF':
+        // Stop aiming when F is released (only if F aiming was active)
+        if (player.isFAiming) {
+          player.isFAiming = false;
+          player.isAiming = false;
+          
+          if (player.arms) {
+            player.arms.setVisible(false);
+          }
+          
+          // Play contraction animation before hiding crosshair
+          const crosshair = document.getElementById('crosshair');
+          if (crosshair) {
+            // Reset any existing classes
+            crosshair.classList.remove('expand', 'expanded');
+            
+            // Add contraction animation
+            crosshair.classList.add('contract');
+            
+            // Hide crosshair after animation completes
+            setTimeout(() => {
+              crosshair.style.display = 'none';
+              crosshair.classList.remove('contract');
+            }, 250); // Match animation duration
+          }
+        }
+        break;
       case 'ShiftLeft':
       case 'ShiftRight':
         // Disable sprinting
@@ -121,25 +172,31 @@ export function initInput(renderer, player, soundManager) {
   // Mouse down
   document.addEventListener('mousedown', (event) => {
     // Right-click => Aim (only if canAim is true)
-    if (event.button === 2 && player.canAim) {
-      player.isAiming = true;
-      
-      // Optionally show arms in first-person
-      if (player.arms) {
-        player.arms.setVisible(true);
-      }
-      
-      // Show and prepare crosshair for animation
-      const crosshair = document.getElementById('crosshair');
-      if (crosshair) {
-        // Reset any existing animation classes
-        crosshair.classList.remove('contract', 'expand', 'expanded');
-        crosshair.style.display = 'block';
-        // Animation will be handled in updateAiming
-      }
+    if (event.button === 2) {
+      if (player.canAim && !player.isFAiming) {
+        // Traditional right-click aiming (only if not already F-aiming)
+        player.isAiming = true;
+        
+        // Optionally show arms in first-person
+        if (player.arms) {
+          player.arms.setVisible(true);
+        }
+        
+        // Show and prepare crosshair for animation
+        const crosshair = document.getElementById('crosshair');
+        if (crosshair) {
+          // Reset any existing animation classes
+          crosshair.classList.remove('contract', 'expand', 'expanded');
+          crosshair.style.display = 'block';
+          // Animation will be handled in updateAiming
+        }
 
-      if (soundManager) {
-        soundManager.playSound("aimclick");
+        if (soundManager) {
+          soundManager.playSound("aimclick");
+        }
+      } else if (player.isFAiming) {
+        // RMB pressed while F-aiming - prepare for shoot on release
+        player.isFRmbPressed = true;
       }
     }
     // Left-click => Shoot (only if aiming)
@@ -152,28 +209,38 @@ export function initInput(renderer, player, soundManager) {
 
   // Mouse up
   document.addEventListener('mouseup', (event) => {
-    // Stop aiming on right-click release
+    // Handle right mouse button release
     if (event.button === 2) {
-      player.isAiming = false;
-      
-      if (player.arms) {
-        player.arms.setVisible(false);
-      }
-      
-      // Play contraction animation before hiding crosshair
-      const crosshair = document.getElementById('crosshair');
-      if (crosshair) {
-        // Reset any existing classes
-        crosshair.classList.remove('expand', 'expanded');
+      if (player.isFAiming && player.isFRmbPressed) {
+        // F + RMB shoot mechanic: shoot on RMB release while holding F
+        player.isFRmbPressed = false;
         
-        // Add contraction animation
-        crosshair.classList.add('contract');
+        if (!player.isReloading) {
+          player.shoot();
+        }
+      } else if (!player.isFAiming) {
+        // Traditional right-click aim release (only if not F-aiming)
+        player.isAiming = false;
         
-        // Hide crosshair after animation completes
-        setTimeout(() => {
-          crosshair.style.display = 'none';
-          crosshair.classList.remove('contract');
-        }, 250); // Match animation duration
+        if (player.arms) {
+          player.arms.setVisible(false);
+        }
+        
+        // Play contraction animation before hiding crosshair
+        const crosshair = document.getElementById('crosshair');
+        if (crosshair) {
+          // Reset any existing classes
+          crosshair.classList.remove('expand', 'expanded');
+          
+          // Add contraction animation
+          crosshair.classList.add('contract');
+          
+          // Hide crosshair after animation completes
+          setTimeout(() => {
+            crosshair.style.display = 'none';
+            crosshair.classList.remove('contract');
+          }, 250); // Match animation duration
+        }
       }
     }
   });
