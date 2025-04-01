@@ -726,29 +726,26 @@ function spawnBullet(sourcePlayerId, position, direction, bulletId = null) {
   createMuzzleFlash(position, direction, scene, muzzleFlashOptions);
   createSmokeEffect(position, direction, scene);
   
-  // Only add smoke ring effects if not on mobile
-  if (!window.isMobile) {
-    // Add smoke ring effect
-    let smokeRing = null;
-    
-    // Try to reuse an inactive smoke ring first
-    for (let i = 0; i < smokeRings.length; i++) {
-      if (!smokeRings[i].active) {
-        smokeRing = smokeRings[i];
-        break;
-      }
+  // Add smoke ring effect (now enabled for mobile too)
+  let smokeRing = null;
+  
+  // Try to reuse an inactive smoke ring first
+  for (let i = 0; i < smokeRings.length; i++) {
+    if (!smokeRings[i].active) {
+      smokeRing = smokeRings[i];
+      break;
     }
-    
-    // If no inactive smoke ring found, create a new one if under the limit
-    if (!smokeRing && smokeRings.length < maxSmokeRings) {
-      smokeRing = new SmokeRingEffect(scene);
-      smokeRings.push(smokeRing);
-    }
-    
-    // Activate the smoke ring
-    if (smokeRing) {
-      smokeRing.create(position, direction, smokeEffectOptions);
-    }
+  }
+  
+  // If no inactive smoke ring found, create a new one if under the limit
+  if (!smokeRing && smokeRings.length < maxSmokeRings) {
+    smokeRing = new SmokeRingEffect(scene);
+    smokeRings.push(smokeRing);
+  }
+  
+  // Activate the smoke ring
+  if (smokeRing) {
+    smokeRing.create(position, direction, smokeEffectOptions);
   }
 
   // Sound: play the single shot sound

@@ -343,7 +343,7 @@ function createMobileControls(player, soundManager) {
   const acceptButton = document.createElement('div');
   acceptButton.id = 'accept-button';
   acceptButton.className = 'mobile-button';
-  acceptButton.innerText = 'A';
+  acceptButton.innerHTML = '<span style="font-size: 14px; position: absolute; top: -20px; color: white;">accept</span>A';
   acceptButton.style.position = 'fixed';
   acceptButton.style.top = '40%';
   acceptButton.style.left = '40%';
@@ -364,7 +364,7 @@ function createMobileControls(player, soundManager) {
   const declineButton = document.createElement('div');
   declineButton.id = 'decline-button';
   declineButton.className = 'mobile-button';
-  declineButton.innerText = 'D';
+  declineButton.innerHTML = '<span style="font-size: 14px; position: absolute; top: -20px; color: white;">decline</span>D';
   declineButton.style.position = 'fixed';
   declineButton.style.top = '40%';
   declineButton.style.left = '60%';
@@ -1062,12 +1062,16 @@ function ensureFullscreen() {
  */
 function createOptimizedSmokeEffect(drawCircle) {
   if (isMobileDevice()) {
-    // Completely disable the effect on mobile devices
-    drawCircle.style.display = 'none';
-    drawCircle.style.opacity = '0';
-    // Remove any existing animation classes
+    // Use mobile-optimized version
+    drawCircle.style.display = 'block';
+    drawCircle.style.width = '150px';
+    drawCircle.style.height = '150px';
+    drawCircle.style.borderWidth = '4px';
+    drawCircle.style.opacity = '0.7';
+    drawCircle.style.boxShadow = '0 0 10px rgba(255, 0, 0, 0.5)';
+    // Remove desktop animation and add mobile-optimized animation
     drawCircle.classList.remove('draw-circle-animation');
-    drawCircle.classList.remove('draw-circle-animation-mobile');
+    drawCircle.classList.add('draw-circle-animation-mobile');
   } else {
     // Desktop full version
     drawCircle.style.display = 'block';

@@ -162,11 +162,6 @@ export function createMuzzleFlash(position, direction, scene, options = null, is
  * @returns {Object} The created smoke group and particles for preloading
  */
 export function createSmokeEffect(position, direction, scene, isPreloading = false) {
-  // Skip on mobile devices
-  if (window.isMobile && !isPreloading) {
-    return;
-  }
-  
   // Create a group for the smoke particles
   const smokeGroup = new THREE.Group();
   smokeGroup.position.copy(position);
@@ -529,11 +524,6 @@ export function applyRecoil(player) {
  * @param {THREE.Scene} scene - The scene where the preloaded effect will be created
  */
 export function preloadSmokeEffect(scene) {
-  // Skip on mobile devices
-  if (window.isMobile) {
-    return;
-  }
-  
   // Create a dummy position far below the scene where it won't be visible
   const dummyPosition = new THREE.Vector3(0, -1000, 0);
   const dummyDirection = new THREE.Vector3(0, 1, 0);
@@ -573,11 +563,6 @@ export function preloadSmokeEffect(scene) {
  * @param {THREE.Scene} scene - The scene to add the preloaded effect
  */
 export function preloadMuzzleFlash(scene) {
-  // Skip on mobile devices
-  if (window.isMobile) {
-    return;
-  }
-  
   // Create a dummy position far below the scene
   const dummyPosition = new THREE.Vector3(0, -1000, 0);
   const dummyDirection = new THREE.Vector3(0, 1, 0);
