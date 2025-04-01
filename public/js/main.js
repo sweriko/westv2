@@ -69,6 +69,9 @@ async function init() {
     const playerIdentity = await initPlayerIdentity();
     console.log(`Welcome back, ${playerIdentity.username}! Player ID: ${playerIdentity.id}`);
     
+    // Check if this was a first-time user to determine when to show instructions
+    const isFirstTimeUser = playerIdentity.lastLogin === playerIdentity.createdAt;
+    
     // Verify identity with server (will be used in future server-side validation)
     const verificationResult = await verifyIdentityWithServer(playerIdentity);
     if (!verificationResult.verified) {
@@ -434,6 +437,8 @@ async function init() {
 
     // Start the animation loop
     animate(0);
+    
+    // Show game instructions for all users, first-time users will see it after name entry
     showGameInstructions();
     
   } catch (error) {
@@ -766,72 +771,61 @@ function updatePlayersMap() {
 }
 
 function showGameInstructions() {
-  const instructions = document.createElement('div');
-  instructions.id = 'instructions';
-  instructions.style.position = 'absolute';
-  instructions.style.top = '50%';
-  instructions.style.left = '50%';
-  instructions.style.transform = 'translate(-50%, -50%)';
-  instructions.style.color = 'white';
-  instructions.style.backgroundColor = 'rgba(0,0,0,0.7)';
-  instructions.style.padding = '20px';
-  instructions.style.borderRadius = '10px';
-  instructions.style.maxWidth = '500px';
-  instructions.style.textAlign = 'center';
-  instructions.style.zIndex = '1000';
+  // Determine if on mobile or desktop
+  const isMobile = window.isMobile || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   
-  instructions.innerHTML = `
-    <h2>Wild Western Shooter - Multiplayer</h2>
-    <p>WASD: Move</p>
-    <p>Shift: Sprint</p>
-    <p>Right-click: Aim</p>
-    <p>Left-click (while aiming): Shoot</p>
-    <p>R: Reload</p>
-    <p>Space: Jump</p>
-    <p>P: Toggle hit zone debug visualization</p>
-    <p><strong>Touch anywhere to start</strong></p>
-    <p><strong>New:</strong> Find the Quick Draw portal near spawn to duel other players!</p>
-    <p><strong>Hit Zones:</strong> Headshots deal 100 damage, body shots 40, and limb shots 20.</p>`;
+  // Set dimensions based on device type
+  const bannerWidth = isMobile ? '250px' : '500px';
+  const bannerHeight = isMobile ? '250px' : '500px';
+  const startPosition = isMobile ? '-250px' : '-500px';
   
-  document.getElementById('game-container').appendChild(instructions);
+  // Create the instruction banner element
+  const instructionBanner = document.createElement('div');
+  instructionBanner.id = 'instruction-banner';
+  instructionBanner.style.position = 'fixed';
+  instructionBanner.style.left = '50%';
+  instructionBanner.style.transform = 'translateX(-50%)';
+  instructionBanner.style.width = bannerWidth;
+  instructionBanner.style.height = bannerHeight;
+  instructionBanner.style.zIndex = '2000';
+  instructionBanner.style.transition = 'bottom 0.5s ease-out';
+  instructionBanner.style.bottom = startPosition; // Start completely off-screen
   
-  // Add a clear dismiss button for mobile
-  const dismissButton = document.createElement('button');
-  dismissButton.textContent = '✕';
-  dismissButton.style.position = 'absolute';
-  dismissButton.style.top = '10px';
-  dismissButton.style.right = '10px';
-  dismissButton.style.background = 'transparent';
-  dismissButton.style.border = 'none';
-  dismissButton.style.color = 'white';
-  dismissButton.style.fontSize = '24px';
-  dismissButton.style.cursor = 'pointer';
-  dismissButton.style.zIndex = '1001';
-  dismissButton.style.padding = '5px 10px';
-  dismissButton.style.touchAction = 'manipulation';
-  instructions.appendChild(dismissButton);
+  // Create the image element
+  const instructionImage = document.createElement('img');
+  instructionImage.src = isMobile ? 'models/mobilemanual.png' : 'models/desktopmanual.png';
+  instructionImage.style.width = '100%';
+  instructionImage.style.height = '100%';
+  instructionImage.style.objectFit = 'contain';
+  
+  // Add image to banner
+  instructionBanner.appendChild(instructionImage);
+  
+  // Add banner to game container
+  document.getElementById('game-container').appendChild(instructionBanner);
+  
+  // Animate the banner sliding in after a short delay
+  setTimeout(() => {
+    // Slide up to show the full image
+    instructionBanner.style.bottom = '0px';
+  }, 100);
   
   // Global function to remove instructions
   window.removeInstructions = () => {
-    if (instructions.parentNode) {
-      instructions.parentNode.removeChild(instructions);
-    }
+    // Animate the banner sliding out
+    instructionBanner.style.bottom = startPosition;
+    
+    // Remove from DOM after animation completes
+    setTimeout(() => {
+      if (instructionBanner.parentNode) {
+        instructionBanner.parentNode.removeChild(instructionBanner);
+      }
+    }, 500);
   };
   
-  // Make both the background and the button clickable/tappable to dismiss
-  dismissButton.addEventListener('click', window.removeInstructions);
-  dismissButton.addEventListener('touchstart', window.removeInstructions, {passive: false});
-  instructions.addEventListener('click', window.removeInstructions);
-  instructions.addEventListener('touchstart', window.removeInstructions, {passive: false});
-  
-  // Add global event listeners to dismiss on any interaction
+  // Add event listener to close banner on any click
+  document.addEventListener('click', window.removeInstructions, {once: true});
   document.addEventListener('touchstart', window.removeInstructions, {once: true, passive: false});
-  
-  // Prevent instructions from blocking renderer initialization on mobile
-  if (window.isMobile) {
-    // Auto-dismiss after 10 seconds on mobile
-    setTimeout(window.removeInstructions, 7000);
-  }
 }
 
 /**

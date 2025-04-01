@@ -7,7 +7,7 @@
 
 // Initialize trajectory adjustments
 window.bulletTrajectoryAdjustment = {
-  horizontal: -0.01,
+  horizontal: 0.01,
   vertical: -0.02
 };
 
