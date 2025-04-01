@@ -282,7 +282,7 @@ function createMobileControls(player, soundManager) {
   jumpButton.innerText = '↑';
   jumpButton.style.position = 'fixed';
   jumpButton.style.bottom = '30px';
-  jumpButton.style.right = '140px'; // Position to the left of right joystick
+  jumpButton.style.right = '170px'; // Moved further left from 140px to 170px
   jumpButton.style.width = '60px';
   jumpButton.style.height = '60px';
   jumpButton.style.backgroundColor = 'rgba(255, 255, 255, 0.3)';
@@ -463,8 +463,8 @@ function createMobileControls(player, soundManager) {
   // Constants for sensitivity
   const MOVE_THRESHOLD = 10; // Minimum movement in pixels before registering movement
   const MOVE_SENSITIVITY = 0.15;  // Movement speed multiplier
-  const LOOK_SENSITIVITY = 0.25;   // Look speed multiplier - further increased for mobile
-  const CAMERA_ROTATION_SENSITIVITY = 0.3; // Camera rotation sensitivity for horizontal pad
+  const LOOK_SENSITIVITY = 0.4;   // Look speed multiplier - Increased from 0.25 to 0.4 for higher sensitivity
+  const CAMERA_ROTATION_SENSITIVITY = 0.5; // Camera rotation sensitivity for horizontal pad - Increased from 0.3 to 0.5
   
   // Initial state of player
   player.moveForward = false;

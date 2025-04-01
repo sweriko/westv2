@@ -730,14 +730,21 @@ function spawnBullet(sourcePlayerId, position, direction, bulletId = null) {
   // Sound: play the single shot sound
   if (localPlayer.soundManager) {
     if (sourcePlayerId === localPlayer.id) {
-      // Play a non-spatialized gunshot for the local player to sound more immediate
-      localPlayer.soundManager.playSound("shot", 50, 1.0);
-      
-      // Also play a quieter spatialized version for better immersion
-      localPlayer.soundManager.playSoundAt("shot", position, 50, 0.5);
-    } else {
-      // For remote players, use full spatialized audio
+      // Special handling for mobile to prevent audio duplication/sync issues
+      if (window.isMobile) {
+        // On mobile, use immediate playback with no delay and higher volume
+        // This ensures only one clean sound plays
+        localPlayer.soundManager.playSound("shot", 0, 1.0);
+      } else {
+        // On desktop, play a non-spatialized gunshot for the local player
+        localPlayer.soundManager.playSound("shot", 50, 1.0);
+      }
+    } else if (!window.isMobile) {
+      // For remote players on desktop, use full spatialized audio
       localPlayer.soundManager.playSoundAt("shot", position, 50, 0.8);
+    } else {
+      // For remote players on mobile, use non-spatialized audio to prevent issues
+      localPlayer.soundManager.playSound("shot", 0, 0.8);
     }
   }
 

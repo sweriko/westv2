@@ -256,8 +256,11 @@ export class FlyingEagle {
   activateAerialCamera() {
     if (!this.isLoaded) return;
     
-    // Enable letterbox effect for cinematic view
-    document.body.classList.add('letterbox-active');
+    // Enable letterbox effect for cinematic view, but only on desktop
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    if (!isMobile) {
+      document.body.classList.add('letterbox-active');
+    }
     
     // Ensure the camera is properly parented to the mount
     if (this.camera.parent) {

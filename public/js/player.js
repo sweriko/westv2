@@ -795,7 +795,8 @@ export class Player {
           this.viewmodel.playFakeShootAnim();
           
           // Play empty gun click sound if sound manager exists
-          if (this.soundManager) {
+          if (this.soundManager && !window.isMobile) {
+            // Only play empty click on desktop - skip on mobile to avoid sound issues
             this.soundManager.playSound("empty_click");
           }
         }
@@ -829,6 +830,10 @@ export class Player {
     // Recoil effect
     applyRecoil(this);
 
+    // IMPORTANT: We do NOT play gunshot sounds here!
+    // All sound handling for shooting is done centrally in main.js's spawnBullet function
+    // to avoid duplicate sounds, especially important on mobile devices
+    
     // Call the callback to spawn bullet in main.js
     if (typeof this.onShootCallback === 'function') {
       this.onShootCallback(bulletStart, shootDir);

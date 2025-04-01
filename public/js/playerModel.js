@@ -1183,6 +1183,10 @@ export class ThirdPersonModel {
     this.isShooting = true;
     this.animationCooldown = this.minAnimationCooldown;
     
+    // IMPORTANT: NO SOUNDS are played here!
+    // All gunshot sounds are centrally managed in main.js to prevent duplication
+    // This is especially critical for mobile devices which can have audio sync issues
+    
     const shootAction = this.playAnimation('playershoot', this.gunBlendTime);
     
     // If we successfully got the animation, set up the transition back to aim

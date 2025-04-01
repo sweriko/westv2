@@ -68,8 +68,8 @@ function createChatUI() {
   if (isMobileDevice()) {
     // Position chat in top left for mobile - without dark background
     chatContainer.style.position = 'fixed';
-    chatContainer.style.top = '10px';
-    chatContainer.style.left = '10px';
+    chatContainer.style.top = '0';
+    chatContainer.style.left = '0';
     chatContainer.style.width = '60%';
     chatContainer.style.maxHeight = '30%';
     chatContainer.style.backgroundColor = 'transparent'; // No dark background

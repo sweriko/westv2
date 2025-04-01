@@ -665,15 +665,21 @@ export class Bullet {
           
           // Play headshot sound if the server reports it was a headshot
           if (this.lastHitZone === 'head') {
-            // Headshots should be clearly audible regardless of distance
-            if (this.isLocalBullet) {
-              // For local player's headshots, play non-spatialized sound for feedback
-              window.localPlayer.soundManager.playSound("headshotmarker", 100, 1.0);
-              // And a quieter spatial sound for everyone else
-              window.localPlayer.soundManager.playSoundAt("headshotmarker", position, 100, 0.5);
+            // For mobile devices, simplify audio to prevent layering
+            if (window.isMobile) {
+              // Just play one non-spatialized sound to avoid sync/double sound issues on mobile
+              window.localPlayer.soundManager.playSound("headshotmarker", 0, 0.9);
             } else {
-              // For other players' headshots, use spatial audio
-              window.localPlayer.soundManager.playSoundAt("headshotmarker", position, 100, 0.8);
+              // Headshots should be clearly audible regardless of distance
+              if (this.isLocalBullet) {
+                // For local player's headshots, play non-spatialized sound for feedback
+                window.localPlayer.soundManager.playSound("headshotmarker", 100, 1.0);
+                // And a quieter spatial sound for everyone else
+                window.localPlayer.soundManager.playSoundAt("headshotmarker", position, 100, 0.5);
+              } else {
+                // For other players' headshots, use spatial audio
+                window.localPlayer.soundManager.playSoundAt("headshotmarker", position, 100, 0.8);
+              }
             }
           }
         }
@@ -681,9 +687,12 @@ export class Bullet {
         // Determine if this is a local player's bullet impact
         const isLocalPlayerBullet = this.isLocalBullet;
         
-        // Play the impact sound with different settings based on source
-        if (impactSound && isLocalPlayerBullet) {
-          // Local player impacts should have more immediate feedback
+        // On mobile, simplify impact sounds to reduce audio overlapping
+        if (window.isMobile && impactSound) {
+          // Simpler sound approach for mobile to avoid sync issues
+          window.localPlayer.soundManager.playSound(impactSound, 0, 0.6);
+        } else if (impactSound && isLocalPlayerBullet) {
+          // Desktop: Local player impacts should have more immediate feedback
           window.localPlayer.soundManager.playSound(impactSound, 50, 0.5);
           // With a spatial component as well
           window.localPlayer.soundManager.playSoundAt(impactSound, position, 50, 0.3);
