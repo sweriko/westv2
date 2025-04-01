@@ -193,14 +193,15 @@ export class FlyingEagle {
     // Save the duel center
     this.duelCenter = duelCenter.clone();
     
-    // Calculate a closer flight radius based on player distance
-    const closeRadius = Math.max(12, distanceBetweenPlayers * 0.9); // Closer to players during duel
-    const closeHeight = 15; // Lower during duel for better visibility
+    // Calculate flight radius based on player distance
+    // Adjusted for more balanced view with reduced player distance
+    const flightRadius = Math.max(25, distanceBetweenPlayers * 1.2); // Reduced from 40 to 25 minimum and multiplier from 2.5 to 1.2
+    const flightHeight = 18; // Reduced from 25 to 18
     
-    // Set a tighter circular path around the duel
-    this.setCircularFlightPath(duelCenter, closeHeight, closeRadius);
+    // Set the circular path around the duel
+    this.setCircularFlightPath(duelCenter, flightHeight, flightRadius);
     
-    console.log(`Eagle quickdraw flight path set - radius: ${closeRadius.toFixed(1)}, height: ${closeHeight.toFixed(1)}`);
+    console.log(`Eagle quickdraw flight path set - radius: ${flightRadius.toFixed(1)}, height: ${flightHeight.toFixed(1)}`);
   }
   
   /**

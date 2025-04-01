@@ -1558,43 +1558,30 @@ function handleQuickDrawChallenge(playerId, targetPlayerId) {
  * @returns {Object} An object containing two positions and their facing rotations
  */
 function generateQuickDrawStreetPositions() {
-  // Define the street strip boundaries (narrow middle strip of town)
-  const streetMinX = -8;   // Much narrower X bounds (middle strip only)
-  const streetMaxX = 8;
-  const streetMinZ = -30;  // Keep Z bounds the same
-  const streetMaxZ = 30;
+  // Define the town boundaries
+  const townWidth = GAME_CONSTANTS.TOWN_WIDTH;
+  const townLength = GAME_CONSTANTS.TOWN_LENGTH;
   
-  // CRITICAL FIX: Set correct player eye level height 
-  // The client expects player feet at y=0, with eye level at 1.6 to 2.7 units above that
-  // This was causing players to spawn half-sunk into the ground
-  const groundLevel = 0.0;  // Ground level is always at 0
-  const eyeLevel = 2.72;     // This matches player model height in ThreeJS
+  // Fixed eye level height
+  const eyeLevel = 2.72;
   
   console.log(`[DEBUG] QuickDraw duel - Setting player eye level to ${eyeLevel} (feet should be at ground level)`);
   
-  // Generate a random position within the street bounds
-  const midX = streetMinX + Math.random() * (streetMaxX - streetMinX);
-  const midZ = streetMinZ + Math.random() * (streetMaxZ - streetMinZ);
-  
-  // Generate a random normalized direction vector
-  const angle = Math.random() * Math.PI * 2;
-  const dirX = Math.cos(angle);
-  const dirZ = Math.sin(angle);
-  
-  // Create two positions 10 meters apart along this direction
+  // Position at absolute ends of the town - no randomization
+  // This ensures they are at maximum possible distance from each other
   const position1 = {
-    x: midX - dirX * 5, // 5 meters in one direction from midpoint
-    y: eyeLevel,        // Position at eye level
-    z: midZ - dirZ * 5
+    x: 0, // Changed from -20 to 0 (now on Z axis)
+    y: eyeLevel,
+    z: -20 // Changed from 0 to -20
   };
   
   const position2 = {
-    x: midX + dirX * 5, // 5 meters in the opposite direction
-    y: eyeLevel,        // Position at eye level
-    z: midZ + dirZ * 5
+    x: 0, // Changed from 20 to 0 (now on Z axis)
+    y: eyeLevel,
+    z: 20 // Changed from 0 to 20
   };
   
-  // Calculate the vector from player1 to player2
+  // Calculate vector from player1 to player2
   const dx = position2.x - position1.x;
   const dz = position2.z - position1.z;
   
@@ -1606,11 +1593,11 @@ function generateQuickDrawStreetPositions() {
   // This is the opposite direction, so we use negative dx and dz, plus 180 degrees correction
   const rotation2 = Math.atan2(-dx, -dz) + Math.PI;
   
-  // Log explicit debug information with degree conversion
-  console.log(`[DEBUG] Duel positions:`);
+  // Log positions
+  console.log(`[DEBUG] DUEL POSITIONS (NORTH-SOUTH LAYOUT):"`);
   console.log(`  Player1: (${position1.x.toFixed(2)}, ${position1.y.toFixed(2)}, ${position1.z.toFixed(2)}) facing ${rotation1.toFixed(4)} radians (${(rotation1 * 180 / Math.PI).toFixed(1)}°)`);
   console.log(`  Player2: (${position2.x.toFixed(2)}, ${position2.y.toFixed(2)}, ${position2.z.toFixed(2)}) facing ${rotation2.toFixed(4)} radians (${(rotation2 * 180 / Math.PI).toFixed(1)}°)`);
-  console.log(`  Direction vector: (${dx.toFixed(2)}, ${dz.toFixed(2)}), length: ${Math.sqrt(dx*dx + dz*dz).toFixed(2)}`);
+  console.log(`  Exact distance between players: 40.00 meters, Vector: (${dx.toFixed(2)}, ${dz.toFixed(2)})`); // Added vector info
   
   return {
     position1: position1,
@@ -1695,6 +1682,16 @@ function handleQuickDrawAcceptChallenge(playerId, challengerId) {
     startRotation: spawnPositions.rotation2,
     movementLocked: true
   }));
+  
+  // Extra debugging to verify positions are correct in match notification
+  console.log(`[POSITION DEBUG] Match notification positions sent:
+    Challenger(${challengerId}): (${spawnPositions.position1.x}, ${spawnPositions.position1.y}, ${spawnPositions.position1.z})
+    Player(${playerId}): (${spawnPositions.position2.x}, ${spawnPositions.position2.y}, ${spawnPositions.position2.z})
+    Should be distance: ${Math.sqrt(
+      Math.pow(spawnPositions.position1.x - spawnPositions.position2.x, 2) +
+      Math.pow(spawnPositions.position1.z - spawnPositions.position2.z, 2)
+    ).toFixed(2)} meters
+  `);
   
   console.log(`Started direct Quick Draw duel ${duelId} between players ${challengerId} and ${playerId}`);
 }

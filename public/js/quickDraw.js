@@ -901,39 +901,48 @@ export class QuickDraw {
         
         // Set up the flight path for the quickdraw match
         if (window.flyingEagle) {
-            // Get player positions to determine the center of the duel
-            const player1Pos = this.localPlayer.group.position.clone();
-            const player2Pos = this.getOpponentPosition();
-            let duelCenter;
-            
-            if (player2Pos) {
-                // Calculate midpoint between players for eagle's circular path center
-                duelCenter = new THREE.Vector3(
-                    (player1Pos.x + player2Pos.x) / 2,
-                    (player1Pos.y + player2Pos.y) / 2,
-                    (player1Pos.z + player2Pos.z) / 2
-                );
+            // Wait until both players have properly spawned
+            // This ensures we get the correct positions after the quickdraw spawn
+            setTimeout(() => {
+                // Get player positions to determine the center of the duel
+                const player1Pos = this.localPlayer.group.position.clone();
+                const player2Pos = this.getOpponentPosition();
+                let duelCenter;
                 
-                // Calculate distance between players for flight radius
-                const distanceBetweenPlayers = player1Pos.distanceTo(player2Pos);
-                
-                // Use the new method to set a closer flight path for quickdraw
-                window.flyingEagle.setQuickdrawFlightPath(duelCenter, distanceBetweenPlayers);
-                
-                console.log('Eagle quickdraw flight path set - closer to players for cinematic view');
-                this.aerialCameraPathSet = true;
-            } else {
-                console.warn('Cannot find opponent position - using fallback camera position');
-                
-                // Fallback - position camera around local player only
-                duelCenter = player1Pos.clone();
-                
-                // Setup the eagle's circular flight path around the player
-                window.flyingEagle.setQuickdrawFlightPath(duelCenter, 10); // Default small distance for single player
-                
-                console.log('Eagle quickdraw flight path set to fallback position');
-                this.aerialCameraPathSet = true;
-            }
+                if (player2Pos) {
+                    // Calculate midpoint between players for eagle's circular path center
+                    duelCenter = new THREE.Vector3(
+                        (player1Pos.x + player2Pos.x) / 2,
+                        (player1Pos.y + player2Pos.y) / 2,
+                        (player1Pos.z + player2Pos.z) / 2
+                    );
+                    
+                    // Calculate distance between players for flight radius
+                    const distanceBetweenPlayers = player1Pos.distanceTo(player2Pos);
+                    
+                    // Use the new method to set a closer flight path for quickdraw
+                    window.flyingEagle.setQuickdrawFlightPath(duelCenter, distanceBetweenPlayers);
+                    
+                    console.log('Eagle quickdraw flight path set - closer to players for cinematic view');
+                    console.log(`Duel center: (${duelCenter.x.toFixed(2)}, ${duelCenter.y.toFixed(2)}, ${duelCenter.z.toFixed(2)})`);
+                    console.log(`Player1: (${player1Pos.x.toFixed(2)}, ${player1Pos.y.toFixed(2)}, ${player1Pos.z.toFixed(2)})`);
+                    console.log(`Player2: (${player2Pos.x.toFixed(2)}, ${player2Pos.y.toFixed(2)}, ${player2Pos.z.toFixed(2)})`);
+                    console.log(`Distance between players: ${distanceBetweenPlayers.toFixed(2)}`);
+                    
+                    this.aerialCameraPathSet = true;
+                } else {
+                    console.warn('Cannot find opponent position - using fallback camera position');
+                    
+                    // Fallback - position camera around local player only
+                    duelCenter = player1Pos.clone();
+                    
+                    // Setup the eagle's circular flight path around the player
+                    window.flyingEagle.setQuickdrawFlightPath(duelCenter, 10); // Default small distance for single player
+                    
+                    console.log('Eagle quickdraw flight path set to fallback position');
+                    this.aerialCameraPathSet = true;
+                }
+            }, 250); // Small delay to ensure players are in position
             
             // Use the aerial camera as the eagle's POV camera
             window.flyingEagle.camera = this.aerialCamera;
@@ -1565,6 +1574,33 @@ export class QuickDraw {
                 this.localPlayer._origMove = this.localPlayer.move;
                 this.localPlayer.move = () => {}; // No-op function
             }
+        }
+        
+        // FIXED ISSUE: Teleport player to the spawn position if provided by server
+        if (message.startPosition) {
+            // Teleport player to the provided position
+            console.log(`[QuickDraw] Teleporting player to spawn position:`, message.startPosition);
+            this.localPlayer.group.position.set(
+                message.startPosition.x,
+                message.startPosition.y,
+                message.startPosition.z
+            );
+            
+            // Reset velocity to zero
+            this.localPlayer.velocity = new THREE.Vector3(0, 0, 0);
+            
+            // Also set rotation if provided
+            if (message.startRotation !== undefined) {
+                console.log(`[QuickDraw] Setting player rotation to: ${message.startRotation}`);
+                this.localPlayer.group.rotation.y = message.startRotation;
+                
+                // Debug visualization of player direction
+                if (this.debug) {
+                    this.showFacingDirection(this.localPlayer.group.position.clone(), message.startRotation);
+                }
+            }
+        } else {
+            console.warn('[QuickDraw] No spawn position provided by server');
         }
         
         // Update the main UI health display too
