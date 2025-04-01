@@ -1174,7 +1174,6 @@ export class QuickDraw {
                     // If the model has the updateCollisionBox method, use that to update hitboxes
                     if (typeof this.updateCollisionBox === 'function') {
                         this.updateCollisionBox();
-                        console.log('Updated hit zones using updateCollisionBox');
                         
                         // Ensure hitZones mapping exists and is properly updated
                         if (!this.hitZones && (this.headHitbox || this.bodyHitbox || this.limbsHitbox)) {
@@ -1326,13 +1325,14 @@ export class QuickDraw {
                     Model: (${this.localPlayerModel.group.position.x.toFixed(2)}, ${this.localPlayerModel.group.position.y.toFixed(2)}, ${this.localPlayerModel.group.position.z.toFixed(2)})
                     On Ground: y=${correctedPosition.y.toFixed(2)}`);
             }
+            
+            // Only update hit zones if position changed or explicitly forced
+            // This avoids unnecessary updates during quickdraw when player can't move
+            if ((positionChanged || forceLog) && typeof this.localPlayerModel.updateHitZones === 'function') {
+                this.localPlayerModel.updateHitZones();
+            }
         } else {
             console.warn('Cannot update local player model - group not initialized');
-        }
-        
-        // Make sure hit boxes align with visible model
-        if (typeof this.localPlayerModel.updateHitZones === 'function') {
-            this.localPlayerModel.updateHitZones();
         }
     }
 
