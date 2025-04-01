@@ -190,11 +190,40 @@ async function init() {
     // Make localPlayer globally accessible for hit updates.
     window.localPlayer = localPlayer;
 
-    // Initialize input
-    initInput(renderer, localPlayer, soundManager);
+    // Initialize input and store mobile controls interface
+    const mobileControls = initInput(renderer, localPlayer, soundManager);
+    
+    // Make mobile controls globally accessible if on mobile
+    window.mobileControls = mobileControls;
     
     // Make scene globally accessible for physics visualization
     window.scene = scene;
+
+    // Function to check for nearby players for quickdraw on mobile
+    window.checkNearestPlayerForQuickdraw = function(player) {
+      if (!remotePlayers || !player) return null;
+      
+      const minDistance = 5; // Distance threshold to show invite button
+      let nearestPlayer = null;
+      let nearestDistance = Infinity;
+      
+      // Check all remote players
+      for (const [id, remotePlayer] of remotePlayers.entries()) {
+        // Skip if no position
+        if (!remotePlayer || !remotePlayer.group || !remotePlayer.group.position) continue;
+        
+        // Calculate distance to remote player
+        const distance = player.group.position.distanceTo(remotePlayer.group.position);
+        
+        // Update nearest player if closer
+        if (distance < minDistance && distance < nearestDistance) {
+          nearestPlayer = remotePlayer;
+          nearestDistance = distance;
+        }
+      }
+      
+      return nearestPlayer;
+    };
 
     // Initialize Quick Draw game mode after the local player is created
     quickDraw = new QuickDraw(scene, localPlayer, networkManager, soundManager);

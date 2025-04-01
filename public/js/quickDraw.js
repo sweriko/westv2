@@ -693,18 +693,39 @@ export class QuickDraw {
     }
 
     /**
-     * Updates the challenge UI based on nearby players
+     * Updates the UI based on nearby players
      */
     updateChallengeUI() {
-        if (!this.challengePrompt) return;
+        // Skip if in duel, lobby, or if there's a pending challenge
+        if (this.inDuel || this.inLobby || this.pendingChallenge) {
+            // Hide challenge prompt
+            this.challengePrompt.style.display = 'none';
+            this.challengeUIVisible = false;
+            
+            // Also hide invite button on mobile
+            if (window.mobileControls && typeof window.mobileControls.checkForNearbyPlayers === 'function') {
+                window.mobileControls.checkForNearbyPlayers(false);
+            }
+            return;
+        }
         
-        // Show/hide challenge prompt based on whether there are nearby players
+        // Update UI based on whether there are nearby players
         if (this.challengePromptActive && !this.challengeUIVisible) {
             this.challengePrompt.style.display = 'block';
             this.challengeUIVisible = true;
+            
+            // Also show invite button on mobile
+            if (window.mobileControls && typeof window.mobileControls.checkForNearbyPlayers === 'function') {
+                window.mobileControls.checkForNearbyPlayers(true);
+            }
         } else if (!this.challengePromptActive && this.challengeUIVisible) {
             this.challengePrompt.style.display = 'none';
             this.challengeUIVisible = false;
+            
+            // Also hide invite button on mobile
+            if (window.mobileControls && typeof window.mobileControls.checkForNearbyPlayers === 'function') {
+                window.mobileControls.checkForNearbyPlayers(false);
+            }
         }
     }
 
@@ -757,15 +778,20 @@ export class QuickDraw {
             challengerPosition: message.challengerPosition
         };
         
-        // Show the challenge invitation
-        this.challengeInvitation.innerHTML = `
-            <div style="margin-bottom: 15px">Player ${message.challengerId} challenges you to a Quick Draw duel!</div>
-            <div style="display: flex; justify-content: space-around; margin-top: 10px;">
-                <div style="background-color: #4CAF50; padding: 10px 20px; border-radius: 5px;">Press Enter to accept</div>
-                <div style="background-color: #F44336; padding: 10px 20px; border-radius: 5px;">Press T to decline</div>
-            </div>
-        `;
-        this.challengeInvitation.style.display = 'block';
+        // Show mobile quick draw invite UI if on mobile
+        if (window.mobileControls && typeof window.mobileControls.showQuickdrawInvite === 'function') {
+            window.mobileControls.showQuickdrawInvite();
+        } else {
+            // Show the challenge invitation for desktop
+            this.challengeInvitation.innerHTML = `
+                <div style="margin-bottom: 15px">Player ${message.challengerId} challenges you to a Quick Draw duel!</div>
+                <div style="display: flex; justify-content: space-around; margin-top: 10px;">
+                    <div style="background-color: #4CAF50; padding: 10px 20px; border-radius: 5px;">Press Enter to accept</div>
+                    <div style="background-color: #F44336; padding: 10px 20px; border-radius: 5px;">Press T to decline</div>
+                </div>
+            `;
+            this.challengeInvitation.style.display = 'block';
+        }
         
         // Play notification sound
         if (this.soundManager) {
@@ -783,6 +809,11 @@ export class QuickDraw {
         
         // Hide the invitation
         this.challengeInvitation.style.display = 'none';
+        
+        // Hide mobile invite buttons if on mobile
+        if (window.mobileControls && typeof window.mobileControls.hideQuickdrawInvite === 'function') {
+            window.mobileControls.hideQuickdrawInvite();
+        }
         
         // Hide the challenge prompt if visible
         this.challengePrompt.style.display = 'none';
@@ -809,6 +840,11 @@ export class QuickDraw {
         
         // Hide the invitation
         this.challengeInvitation.style.display = 'none';
+        
+        // Hide mobile invite buttons if on mobile
+        if (window.mobileControls && typeof window.mobileControls.hideQuickdrawInvite === 'function') {
+            window.mobileControls.hideQuickdrawInvite();
+        }
         
         // Send decline to server
         this.networkManager.sendQuickDrawDecline(this.pendingChallenge.challengerId);

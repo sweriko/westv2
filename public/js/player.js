@@ -225,7 +225,10 @@ export class Player {
   }
 
   update(deltaTime) {
-    // Store previous position before movement for collision detection
+    // Skip update if paused
+    if (window.isPaused) return;
+    
+    // Store the previous position for collision detection and footsteps
     this.previousPosition.copy(this.group.position);
     
     // Platform stability check - prevent falling through platforms 
@@ -286,12 +289,24 @@ export class Player {
     // Footstep sounds logic based on movement
     const positionBeforeMovement = this.previousPosition.clone();
     
+    // Check for nearest player for potential quickdraw on mobile
+    if (window.mobileControls && typeof window.checkNearestPlayerForQuickdraw === 'function') {
+      const nearbyPlayer = window.checkNearestPlayerForQuickdraw(this);
+      // Update mobile UI if nearby player found
+      if (window.mobileControls) {
+        window.mobileControls.checkForNearbyPlayers(nearbyPlayer !== null);
+      }
+    }
+    
     // Update camera bob (only if on ground)
     // Always update the head bob regardless of whether we're on ground
     this.updateHeadBob(deltaTime);
     
     // Update aiming effects including crosshair
     this.updateAiming(deltaTime);
+    
+    // Update footstep sounds based on movement
+    this.updateFootstepSounds(deltaTime, positionBeforeMovement);
     
     // Send periodic network updates
     const now = performance.now();
@@ -301,12 +316,10 @@ export class Player {
     }
 
     if (this.soundManager) {
-      // Update footstep sounds based on movement
-      this.updateFootstepSounds(deltaTime, positionBeforeMovement);
-      
       // Update audio listener position to follow the player's camera
       // Use precise camera position rather than group position for better audio
-      const cameraPosition = this.camera.position.clone();
+      const cameraPosition = new THREE.Vector3();
+      this.camera.getWorldPosition(cameraPosition);
       
       // Get forward direction vector from camera
       const cameraDirection = new THREE.Vector3(0, 0, -1);

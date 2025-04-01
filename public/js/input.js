@@ -3,6 +3,7 @@
  * @param {THREE.WebGLRenderer} renderer - The renderer instance.
  * @param {Player} player - The local Player instance (first-person).
  * @param {SoundManager} soundManager - The SoundManager for audio feedback.
+ * @returns {Object} The mobile controls interface if on mobile, otherwise null.
  */
 
 import { isChatInputActive } from './chat.js';
@@ -11,9 +12,12 @@ export function initInput(renderer, player, soundManager) {
   // Track if device is mobile
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   
+  // Variable to store the mobile controls interface
+  let mobileControls = null;
+  
   // Create touch controls for mobile
   if (isMobile) {
-    createMobileControls(player, soundManager);
+    mobileControls = createMobileControls(player, soundManager);
     
     // Hide all instruction elements on mobile
     hideInstructionsOnMobile();
@@ -200,6 +204,9 @@ export function initInput(renderer, player, soundManager) {
   
   // Set up a resize listener to maintain fullscreen when orientation changes
   window.addEventListener('resize', ensureFullscreen);
+
+  // Return the mobile controls interface if on mobile
+  return mobileControls;
 }
 
 /**
@@ -268,56 +275,196 @@ function createMobileControls(player, soundManager) {
   touchOverlay.style.backgroundColor = 'transparent';
   document.body.appendChild(touchOverlay);
   
-  // Create shoot button (left side)
-  const shootButton = document.createElement('div');
-  shootButton.id = 'shoot-button';
-  shootButton.className = 'mobile-button';
-  shootButton.innerText = '🔫';
-  
-  // Create jump button (right side)
+  // Create jump button (on right side, to the left of the aim/shoot joystick)
   const jumpButton = document.createElement('div');
   jumpButton.id = 'jump-button';
   jumpButton.className = 'mobile-button';
   jumpButton.innerText = '↑';
+  jumpButton.style.position = 'fixed';
+  jumpButton.style.bottom = '30px';
+  jumpButton.style.right = '140px'; // Position to the left of right joystick
+  jumpButton.style.width = '60px';
+  jumpButton.style.height = '60px';
+  jumpButton.style.backgroundColor = 'rgba(255, 255, 255, 0.3)';
+  jumpButton.style.border = '2px solid rgba(255, 255, 255, 0.5)';
+  jumpButton.style.borderRadius = '50%';
+  jumpButton.style.display = 'flex';
+  jumpButton.style.justifyContent = 'center';
+  jumpButton.style.alignItems = 'center';
+  jumpButton.style.fontSize = '24px';
+  jumpButton.style.fontWeight = 'bold';
+  jumpButton.style.color = 'white';
+  jumpButton.style.zIndex = '1000'; // Ensure it's above other elements
   
-  // Create visual joystick hint for left side
+  // Create reload button (initially hidden, shows when out of ammo)
+  const reloadButton = document.createElement('div');
+  reloadButton.id = 'reload-button';
+  reloadButton.className = 'mobile-button';
+  reloadButton.innerText = 'R';
+  reloadButton.style.position = 'fixed';
+  reloadButton.style.top = '50%';
+  reloadButton.style.left = '50%';
+  reloadButton.style.transform = 'translate(-50%, -50%)';
+  reloadButton.style.width = '80px';
+  reloadButton.style.height = '80px';
+  reloadButton.style.backgroundColor = 'rgba(255, 0, 0, 0.5)';
+  reloadButton.style.border = '2px solid rgba(255, 255, 255, 0.7)';
+  reloadButton.style.borderRadius = '50%';
+  reloadButton.style.display = 'none'; // Hidden by default
+  reloadButton.style.justifyContent = 'center';
+  reloadButton.style.alignItems = 'center';
+  reloadButton.style.fontSize = '28px';
+  reloadButton.style.fontWeight = 'bold';
+  reloadButton.style.color = 'white';
+  reloadButton.style.zIndex = '1002';
+  
+  // Create quickdraw invite button (initially hidden, shows when near players)
+  const inviteButton = document.createElement('div');
+  inviteButton.id = 'invite-button';
+  inviteButton.className = 'mobile-button';
+  inviteButton.innerText = 'E';
+  inviteButton.style.position = 'fixed';
+  inviteButton.style.bottom = '140px';
+  inviteButton.style.right = '30px';
+  inviteButton.style.width = '70px';
+  inviteButton.style.height = '70px';
+  inviteButton.style.backgroundColor = 'rgba(0, 255, 0, 0.5)';
+  inviteButton.style.border = '2px solid rgba(255, 255, 255, 0.7)';
+  inviteButton.style.borderRadius = '50%';
+  inviteButton.style.display = 'none'; // Hidden by default
+  inviteButton.style.justifyContent = 'center';
+  inviteButton.style.alignItems = 'center';
+  inviteButton.style.fontSize = '28px';
+  inviteButton.style.fontWeight = 'bold';
+  inviteButton.style.color = 'white';
+  inviteButton.style.zIndex = '1002';
+  
+  // Create quickdraw accept button (initially hidden, shows when receiving invites)
+  const acceptButton = document.createElement('div');
+  acceptButton.id = 'accept-button';
+  acceptButton.className = 'mobile-button';
+  acceptButton.innerText = 'A';
+  acceptButton.style.position = 'fixed';
+  acceptButton.style.top = '40%';
+  acceptButton.style.left = '40%';
+  acceptButton.style.width = '70px';
+  acceptButton.style.height = '70px';
+  acceptButton.style.backgroundColor = 'rgba(0, 255, 0, 0.5)';
+  acceptButton.style.border = '2px solid rgba(255, 255, 255, 0.7)';
+  acceptButton.style.borderRadius = '50%';
+  acceptButton.style.display = 'none'; // Hidden by default
+  acceptButton.style.justifyContent = 'center';
+  acceptButton.style.alignItems = 'center';
+  acceptButton.style.fontSize = '28px';
+  acceptButton.style.fontWeight = 'bold';
+  acceptButton.style.color = 'white';
+  acceptButton.style.zIndex = '1003';
+  
+  // Create quickdraw decline button (initially hidden, shows when receiving invites)
+  const declineButton = document.createElement('div');
+  declineButton.id = 'decline-button';
+  declineButton.className = 'mobile-button';
+  declineButton.innerText = 'D';
+  declineButton.style.position = 'fixed';
+  declineButton.style.top = '40%';
+  declineButton.style.left = '60%';
+  declineButton.style.width = '70px';
+  declineButton.style.height = '70px';
+  declineButton.style.backgroundColor = 'rgba(255, 0, 0, 0.5)';
+  declineButton.style.border = '2px solid rgba(255, 255, 255, 0.7)';
+  declineButton.style.borderRadius = '50%';
+  declineButton.style.display = 'none'; // Hidden by default
+  declineButton.style.justifyContent = 'center';
+  declineButton.style.alignItems = 'center';
+  declineButton.style.fontSize = '28px';
+  declineButton.style.fontWeight = 'bold';
+  declineButton.style.color = 'white';
+  declineButton.style.zIndex = '1003';
+  
+  // Create visual joystick hint for movement (left side)
   const leftControlHint = document.createElement('div');
   leftControlHint.id = 'left-control-hint';
   leftControlHint.className = 'control-hint';
+  leftControlHint.style.position = 'fixed';
   leftControlHint.style.bottom = '30px';
   leftControlHint.style.left = '30px';
+  leftControlHint.style.width = '100px';
+  leftControlHint.style.height = '100px';
+  leftControlHint.style.borderRadius = '50%';
+  leftControlHint.style.border = '2px solid rgba(255, 255, 255, 0.3)';
+  leftControlHint.style.backgroundColor = 'transparent';
   
-  // Create visual joystick hint for right side
+  // Create visual joystick hint for aiming/shooting (right side)
   const rightControlHint = document.createElement('div');
   rightControlHint.id = 'right-control-hint';
   rightControlHint.className = 'control-hint';
+  rightControlHint.style.position = 'fixed';
   rightControlHint.style.bottom = '30px';
   rightControlHint.style.right = '30px';
+  rightControlHint.style.width = '100px';
+  rightControlHint.style.height = '100px';
+  rightControlHint.style.borderRadius = '50%';
+  rightControlHint.style.border = '2px solid rgba(255, 255, 255, 0.3)';
+  rightControlHint.style.backgroundColor = 'transparent';
+  
+  // Create horizontal camera rotation area above aim joystick
+  const cameraControlHint = document.createElement('div');
+  cameraControlHint.id = 'camera-control-hint';
+  cameraControlHint.className = 'control-hint';
+  cameraControlHint.style.position = 'fixed';
+  cameraControlHint.style.bottom = '140px';
+  cameraControlHint.style.right = '30px';
+  cameraControlHint.style.width = '200px';
+  cameraControlHint.style.height = '60px';
+  cameraControlHint.style.borderRadius = '30px';
+  cameraControlHint.style.border = '2px solid rgba(255, 255, 255, 0.3)';
+  cameraControlHint.style.backgroundColor = 'transparent';
   
   // Create orientation message
   const orientationMsg = document.createElement('div');
   orientationMsg.id = 'orientation-message';
   orientationMsg.innerText = 'Please rotate to landscape mode';
+  orientationMsg.style.position = 'fixed';
+  orientationMsg.style.top = '0';
+  orientationMsg.style.left = '0';
+  orientationMsg.style.width = '100%';
+  orientationMsg.style.height = '100%';
+  orientationMsg.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+  orientationMsg.style.color = 'white';
+  orientationMsg.style.display = 'flex';
+  orientationMsg.style.justifyContent = 'center';
+  orientationMsg.style.alignItems = 'center';
+  orientationMsg.style.fontSize = '24px';
+  orientationMsg.style.zIndex = '2000';
+  orientationMsg.style.display = 'none';
   
   // Add elements to document
-  document.body.appendChild(shootButton);
   document.body.appendChild(jumpButton);
+  document.body.appendChild(reloadButton);
+  document.body.appendChild(inviteButton);
+  document.body.appendChild(acceptButton);
+  document.body.appendChild(declineButton);
   document.body.appendChild(leftControlHint);
   document.body.appendChild(rightControlHint);
+  document.body.appendChild(cameraControlHint);
   document.body.appendChild(orientationMsg);
   
   // Variables to track touch state
   let leftSideTouchId = null;
   let rightSideTouchId = null;
+  let cameraTouchId = null;
   let leftStartPos = { x: 0, y: 0 };
   let rightStartPos = { x: 0, y: 0 };
+  let cameraStartPos = { x: 0, y: 0 };
   let rightTouchStartTime = 0;
   let screenWidth = window.innerWidth;
+  let isAimingWithTouch = false;
   
   // Constants for sensitivity
   const MOVE_THRESHOLD = 10; // Minimum movement in pixels before registering movement
   const MOVE_SENSITIVITY = 0.15;  // Movement speed multiplier
   const LOOK_SENSITIVITY = 0.25;   // Look speed multiplier - further increased for mobile
+  const CAMERA_ROTATION_SENSITIVITY = 0.3; // Camera rotation sensitivity for horizontal pad
   
   // Initial state of player
   player.moveForward = false;
@@ -326,21 +473,66 @@ function createMobileControls(player, soundManager) {
   player.moveRight = false;
   player.isAiming = false;
   
-  // Monitor player bullets to auto-reload
+  // Mobile users should be sprinting by default
+  player.isSprinting = true;
+  
+  // Override auto-reload with manual reload for mobile
   const originalShoot = player.shoot;
   player.shoot = function() {
     const result = originalShoot.apply(this, arguments);
     
-    // Auto-reload when out of bullets on mobile
+    // Show reload button when out of bullets instead of auto-reloading
     if (this.bullets <= 0 && !this.isReloading) {
-      this.startReload();
+      reloadButton.style.display = 'flex';
     }
     
     return result;
   };
   
-  // Touch start handler
+  // Function to check if player is near another player for quickdraw
+  function checkForNearbyPlayers() {
+    // This function should be called from the game loop to show/hide the invite button
+    // For now, we'll just add the interface - the actual implementation will need
+    // to be connected to the multiplayer system
+  }
+  
+  // Function to handle incoming quickdraw invites
+  function showQuickdrawInvite() {
+    acceptButton.style.display = 'flex';
+    declineButton.style.display = 'flex';
+  }
+  
+  // Function to hide quickdraw invite buttons
+  function hideQuickdrawInvite() {
+    acceptButton.style.display = 'none';
+    declineButton.style.display = 'none';
+  }
+  
+  // Ensure audio context is resumed for mobile
+  function ensureAudioContextResumed() {
+    if (soundManager && soundManager.audioContext && 
+        soundManager.audioContext.state !== 'running') {
+      // Resume the audio context on first user interaction
+      soundManager.audioContext.resume().then(() => {
+        console.log('AudioContext resumed successfully');
+        // Play a silent sound to fully activate audio
+        if (soundManager.buffers['aimclick']) {
+          const silentSound = soundManager.playSound('aimclick', 0, 0.01);
+          if (silentSound && silentSound.gainNode) {
+            silentSound.gainNode.gain.value = 0.01;
+          }
+        }
+      }).catch(err => {
+        console.error('Failed to resume AudioContext:', err);
+      });
+    }
+  }
+  
+  // Touch start handler (for aiming)
   touchOverlay.addEventListener('touchstart', (e) => {
+    // Ensure audio is activated on first touch
+    ensureAudioContextResumed();
+    
     // Dismiss any instructions/info banner that might be visible
     const instructionsElement = document.getElementById('instructions');
     if (instructionsElement && instructionsElement.parentNode) {
@@ -355,24 +547,48 @@ function createMobileControls(player, soundManager) {
       // Get the screen dimensions
       const screenHeight = window.innerHeight;
       
-      // Define joystick areas - smaller hitboxes instead of full screen halves
-      // Left joystick: Bottom left quarter of screen
+      // Define joystick areas
+      // Left joystick: Bottom left corner of screen
       const leftJoystickArea = {
         x: 0,
         y: screenHeight * 0.4,
-        width: screenWidth * 0.4,
+        width: screenWidth * 0.3,
         height: screenHeight * 0.6
       };
       
-      // Right joystick: Bottom right quarter of screen
+      // Jump button area (for detection to avoid overlap)
+      const jumpButtonArea = {
+        x: screenWidth - 200,
+        y: screenHeight - 90,
+        width: 80,
+        height: 80
+      };
+      
+      // Right joystick: Bottom right corner of screen (aim/shoot)
       const rightJoystickArea = {
-        x: screenWidth * 0.6,
-        y: screenHeight * 0.4,
-        width: screenWidth * 0.4,
-        height: screenHeight * 0.6
+        x: screenWidth * 0.7,
+        y: screenHeight * 0.6,
+        width: screenWidth * 0.3,
+        height: screenHeight * 0.4
       };
       
-      // Check if touch is in left joystick area
+      // Camera rotation area: Above right joystick
+      const cameraRotationArea = {
+        x: screenWidth * 0.6,
+        y: screenHeight * 0.3,
+        width: screenWidth * 0.4,
+        height: screenHeight * 0.3
+      };
+      
+      // Skip if touch is on jump button to avoid interfering with its handler
+      if (x >= jumpButtonArea.x && 
+          x <= jumpButtonArea.x + jumpButtonArea.width &&
+          y >= jumpButtonArea.y && 
+          y <= jumpButtonArea.y + jumpButtonArea.height) {
+        continue;
+      }
+      
+      // Check if touch is in left joystick area (movement)
       if (x >= leftJoystickArea.x && 
           x <= leftJoystickArea.x + leftJoystickArea.width &&
           y >= leftJoystickArea.y && 
@@ -386,9 +602,13 @@ function createMobileControls(player, soundManager) {
           // Visual feedback - highlight active control
           leftControlHint.style.borderColor = 'rgba(255, 255, 255, 0.7)';
           leftControlHint.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+          
+          // Position the joystick where the touch started
+          leftControlHint.style.left = (x - leftControlHint.offsetWidth / 2) + 'px';
+          leftControlHint.style.bottom = (screenHeight - y - leftControlHint.offsetHeight / 2) + 'px';
         }
       } 
-      // Check if touch is in right joystick area
+      // Check if touch is in right joystick area (aim/shoot)
       else if (x >= rightJoystickArea.x && 
                x <= rightJoystickArea.x + rightJoystickArea.width &&
                y >= rightJoystickArea.y && 
@@ -404,8 +624,14 @@ function createMobileControls(player, soundManager) {
           rightControlHint.style.borderColor = 'rgba(255, 255, 255, 0.7)';
           rightControlHint.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
           
-          // Start aiming immediately on touch
+          // Position the joystick where the touch started
+          rightControlHint.style.right = (screenWidth - x - rightControlHint.offsetWidth / 2) + 'px';
+          rightControlHint.style.bottom = (screenHeight - y - rightControlHint.offsetHeight / 2) + 'px';
+          
+          // Start aiming immediately on touch - JUST set the flag
+          // Let the player's own update method handle all viewmodel positioning
           player.isAiming = true;
+          isAimingWithTouch = true;
           
           // Show and prepare crosshair for animation
           const crosshair = document.getElementById('crosshair');
@@ -413,12 +639,27 @@ function createMobileControls(player, soundManager) {
             // Reset any existing animation classes
             crosshair.classList.remove('contract', 'expand', 'expanded');
             crosshair.style.display = 'block';
-            // Animation will be handled in updateAiming
           }
           
           if (soundManager) {
             soundManager.playSound("aimclick");
           }
+        }
+      }
+      // Check if touch is in camera rotation area
+      else if (x >= cameraRotationArea.x && 
+               x <= cameraRotationArea.x + cameraRotationArea.width &&
+               y >= cameraRotationArea.y && 
+               y <= cameraRotationArea.y + cameraRotationArea.height) {
+        
+        if (cameraTouchId === null) {
+          cameraTouchId = touch.identifier;
+          cameraStartPos.x = x;
+          cameraStartPos.y = y;
+          
+          // Visual feedback - highlight active control
+          cameraControlHint.style.borderColor = 'rgba(255, 255, 255, 0.7)';
+          cameraControlHint.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
         }
       }
     }
@@ -453,12 +694,12 @@ function createMobileControls(player, soundManager) {
         }
       }
       
-      // Handle right side touch (looking)
+      // Handle right side touch (aiming + camera rotation)
       if (touch.identifier === rightSideTouchId) {
         const deltaX = touch.clientX - rightStartPos.x;
         const deltaY = touch.clientY - rightStartPos.y;
         
-        // Apply camera rotation based on touch movement - increased sensitivity
+        // Apply camera rotation - allow for 360° movement
         player.group.rotation.y -= deltaX * LOOK_SENSITIVITY * 0.01;
         player.camera.rotation.x -= deltaY * LOOK_SENSITIVITY * 0.01;
         
@@ -472,6 +713,26 @@ function createMobileControls(player, soundManager) {
         rightStartPos.x = touch.clientX;
         rightStartPos.y = touch.clientY;
       }
+      
+      // Handle camera rotation area (separate from aiming)
+      if (touch.identifier === cameraTouchId) {
+        const deltaX = touch.clientX - cameraStartPos.x;
+        const deltaY = touch.clientY - cameraStartPos.y;
+        
+        // Apply full 360° camera rotation based on touch movement
+        player.group.rotation.y -= deltaX * CAMERA_ROTATION_SENSITIVITY * 0.01;
+        player.camera.rotation.x -= deltaY * CAMERA_ROTATION_SENSITIVITY * 0.01;
+        
+        // Limit vertical rotation to avoid flipping
+        player.camera.rotation.x = Math.max(
+          -Math.PI / 2,
+          Math.min(Math.PI / 2, player.camera.rotation.x)
+        );
+        
+        // Update starting position to prevent continuous rotation
+        cameraStartPos.x = touch.clientX;
+        cameraStartPos.y = touch.clientY;
+      }
     }
     e.preventDefault();
   });
@@ -481,7 +742,7 @@ function createMobileControls(player, soundManager) {
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
       
-      // Handle left side touch end
+      // Handle left side touch end (movement)
       if (touch.identifier === leftSideTouchId) {
         leftSideTouchId = null;
         
@@ -494,12 +755,22 @@ function createMobileControls(player, soundManager) {
         // Reset visual feedback
         leftControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
         leftControlHint.style.backgroundColor = 'transparent';
+        
+        // Reset joystick position
+        leftControlHint.style.left = '30px';
+        leftControlHint.style.bottom = '30px';
       }
       
-      // Handle right side touch end
+      // Handle right side touch end (shooting on release)
       if (touch.identifier === rightSideTouchId) {
-        // Stop aiming but don't shoot
+        // Shoot when releasing the joystick if still aiming
+        if (isAimingWithTouch && player.isAiming && !player.isReloading) {
+          player.shoot();
+        }
+        
+        // Stop aiming
         player.isAiming = false;
+        isAimingWithTouch = false;
         
         // Play contraction animation before hiding crosshair
         const crosshair = document.getElementById('crosshair');
@@ -521,7 +792,20 @@ function createMobileControls(player, soundManager) {
         rightControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
         rightControlHint.style.backgroundColor = 'transparent';
         
+        // Reset joystick position
+        rightControlHint.style.right = '30px';
+        rightControlHint.style.bottom = '30px';
+        
         rightSideTouchId = null;
+      }
+      
+      // Handle camera rotation touch end
+      if (touch.identifier === cameraTouchId) {
+        cameraTouchId = null;
+        
+        // Reset visual feedback
+        cameraControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+        cameraControlHint.style.backgroundColor = 'transparent';
       }
     }
     e.preventDefault();
@@ -532,7 +816,7 @@ function createMobileControls(player, soundManager) {
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
       
-      // Reset left side touch
+      // Reset left side touch (movement)
       if (touch.identifier === leftSideTouchId) {
         leftSideTouchId = null;
         player.moveForward = false;
@@ -543,12 +827,25 @@ function createMobileControls(player, soundManager) {
         // Reset visual feedback
         leftControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
         leftControlHint.style.backgroundColor = 'transparent';
+        
+        // Reset joystick position
+        leftControlHint.style.left = '30px';
+        leftControlHint.style.bottom = '30px';
       }
       
-      // Reset right side touch
+      // Reset right side touch (aiming)
       if (touch.identifier === rightSideTouchId) {
         rightSideTouchId = null;
         player.isAiming = false;
+        isAimingWithTouch = false;
+        
+        // Reset visual feedback
+        rightControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+        rightControlHint.style.backgroundColor = 'transparent';
+        
+        // Reset joystick position
+        rightControlHint.style.right = '30px';
+        rightControlHint.style.bottom = '30px';
         
         // Play contraction animation before hiding crosshair
         const crosshair = document.getElementById('crosshair');
@@ -563,26 +860,61 @@ function createMobileControls(player, soundManager) {
           setTimeout(() => {
             crosshair.style.display = 'none';
             crosshair.classList.remove('contract');
-          }, 250); // Match animation duration
+          }, 250);
         }
+      }
+      
+      // Reset camera rotation touch
+      if (touch.identifier === cameraTouchId) {
+        cameraTouchId = null;
         
         // Reset visual feedback
-        rightControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
-        rightControlHint.style.backgroundColor = 'transparent';
+        cameraControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+        cameraControlHint.style.backgroundColor = 'transparent';
       }
     }
     e.preventDefault();
   });
   
-  // Shoot button handler
-  shootButton.addEventListener('touchstart', (e) => {
-    if (player.isAiming && !player.isReloading) {
-      player.shoot();
+  // Reload button handler
+  reloadButton.addEventListener('touchstart', (e) => {
+    if (!player.isReloading && player.bullets < player.maxBullets) {
+      player.startReload();
+      reloadButton.style.display = 'none';
     }
     e.preventDefault();
   });
   
-  // Button event handlers  
+  // Quickdraw invite button handler
+  inviteButton.addEventListener('touchstart', (e) => {
+    // Send quickdraw invite to nearby player
+    if (window.quickDraw && typeof window.quickDraw.sendChallenge === 'function') {
+      window.quickDraw.sendChallenge();
+    }
+    e.preventDefault();
+  });
+  
+  // Quickdraw accept button handler
+  acceptButton.addEventListener('touchstart', (e) => {
+    // Accept quickdraw invite
+    if (window.quickDraw && typeof window.quickDraw.acceptChallenge === 'function') {
+      window.quickDraw.acceptChallenge();
+    }
+    hideQuickdrawInvite();
+    e.preventDefault();
+  });
+  
+  // Quickdraw decline button handler
+  declineButton.addEventListener('touchstart', (e) => {
+    // Decline quickdraw invite
+    if (window.quickDraw && typeof window.quickDraw.declineChallenge === 'function') {
+      window.quickDraw.declineChallenge();
+    }
+    hideQuickdrawInvite();
+    e.preventDefault();
+  });
+  
+  // Jump button handler
   jumpButton.addEventListener('touchstart', (e) => {
     if (player.canJump) {
       player.velocity.y = player.isSprinting ? 15 : 10;
@@ -596,26 +928,15 @@ function createMobileControls(player, soundManager) {
     screenWidth = window.innerWidth;
   });
   
-  // Special handler for clicking on any instruction element to hide it
-  document.addEventListener('touchstart', (e) => {
-    const target = e.target;
-    if (target.id === 'portal-instructions' || 
-        target.id === 'proper-shootout-instructions' ||
-        (target.parentElement && 
-         (target.parentElement.id === 'portal-instructions' || 
-          target.parentElement.id === 'proper-shootout-instructions'))) {
-      
-      // Hide the instruction element
-      if (target.id) {
-        document.getElementById(target.id).style.display = 'none';
-      } else if (target.parentElement && target.parentElement.id) {
-        document.getElementById(target.parentElement.id).style.display = 'none';
-      }
-      
-      e.preventDefault();
-      e.stopPropagation();
-    }
-  }, true);
+  // Return methods to be called from the game loop
+  return {
+    checkForNearbyPlayers: function(nearbyPlayersExist) {
+      // Show/hide the invite button based on whether there are nearby players
+      inviteButton.style.display = nearbyPlayersExist ? 'flex' : 'none';
+    },
+    showQuickdrawInvite: showQuickdrawInvite,
+    hideQuickdrawInvite: hideQuickdrawInvite
+  };
 }
 
 /**

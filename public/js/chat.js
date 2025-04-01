@@ -57,11 +57,53 @@ function createChatUI() {
   chatInput.placeholder = 'Type your message...';
   chatInputContainer.appendChild(chatInput);
   
+  // Create send button for mobile
+  const sendButton = document.createElement('button');
+  sendButton.id = 'chat-send-button';
+  sendButton.textContent = 'Send';
+  sendButton.style.display = 'none'; // Initially hidden, shown only on mobile
+  chatInputContainer.appendChild(sendButton);
+  
+  // Check if mobile and apply special styling
+  if (isMobileDevice()) {
+    // Position chat in top left for mobile - without dark background
+    chatContainer.style.position = 'fixed';
+    chatContainer.style.top = '10px';
+    chatContainer.style.left = '10px';
+    chatContainer.style.width = '60%';
+    chatContainer.style.maxHeight = '30%';
+    chatContainer.style.backgroundColor = 'transparent'; // No dark background
+    chatContainer.style.zIndex = '1000';
+    
+    // Style chat input for mobile
+    chatInputContainer.style.position = 'fixed';
+    chatInputContainer.style.top = '50%';
+    chatInputContainer.style.left = '50%';
+    chatInputContainer.style.transform = 'translate(-50%, -50%)';
+    chatInputContainer.style.width = '80%';
+    chatInputContainer.style.zIndex = '1005';
+    chatInputContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.8)'; // Keep background on input container
+    chatInputContainer.style.padding = '10px';
+    chatInputContainer.style.borderRadius = '5px';
+    
+    // Show send button on mobile
+    sendButton.style.display = 'inline-block';
+    
+    // Make chat container clickable to open chat
+    chatContainer.style.cursor = 'pointer';
+    chatContainer.addEventListener('click', function() {
+      openChat();
+    });
+    
+    // Add mobile-specific message
+    addSystemMessage("Tap here to chat");
+  } else {
+    // Add desktop-specific message
+    addSystemMessage("Press \"C\" to chat with other players!");
+  }
+  
   // Adjust chat container size on window resize
   window.addEventListener('resize', updateChatPosition);
-  
-  // Add initial system message
-  addSystemMessage("Press \"C\" to chat with other players!");
 }
 
 /**
@@ -120,6 +162,19 @@ function setupChatEventListeners(networkManager) {
       }
     }
   });
+  
+  // Add event listener for send button
+  const sendButton = document.getElementById('chat-send-button');
+  if (sendButton) {
+    sendButton.addEventListener('click', function() {
+      const message = chatInput.value.trim();
+      if (message) {
+        lastSentMessage = message;
+        sendChatMessage(message, networkManager);
+      }
+      closeChat();
+    });
+  }
 }
 
 /**
@@ -129,7 +184,6 @@ function openChat() {
   isChatActive = true;
   chatInputContainer.style.display = 'block';
   chatInput.value = '';
-  chatInput.focus();
   
   // Add active class to chat container for styling
   chatContainer.classList.add('active');
@@ -141,6 +195,21 @@ function openChat() {
   
   // Disable game controls while chat is active
   disableGameControls();
+  
+  // Special handling for mobile keyboards
+  if (isMobileDevice()) {
+    // Need a slight delay to ensure the input shows properly before focusing
+    setTimeout(() => {
+      chatInput.focus();
+      // Try to force the keyboard to show on mobile
+      chatInput.click();
+      chatInput.setAttribute('readonly', false);
+      // Some mobile browsers need readOnly to be toggled
+      chatInput.readOnly = false;
+    }, 100);
+  } else {
+    chatInput.focus();
+  }
 }
 
 /**
@@ -318,26 +387,96 @@ export function isChatInputActive() {
 }
 
 /**
- * Update the chat position based on screen size
+ * Update chat container position based on screen size
  */
 export function updateChatPosition() {
-  const isMobile = window.innerWidth <= 768;
+  if (!chatContainer) return;
+  
+  const isMobile = isMobileDevice();
   
   if (isMobile) {
-    chatContainer.style.maxWidth = '80%';
-    chatInputContainer.style.width = '80%';
+    // Mobile positioning - top left corner, transparent background
+    chatContainer.style.position = 'fixed';
+    chatContainer.style.top = '10px';
+    chatContainer.style.left = '10px';
+    chatContainer.style.width = '60%';
+    chatContainer.style.maxHeight = '30%';
+    chatContainer.style.backgroundColor = 'transparent';
+    chatContainer.style.overflow = 'auto';
+    
+    // Style input for mobile
+    if (chatInputContainer) {
+      chatInputContainer.style.position = 'fixed';
+      chatInputContainer.style.top = '50%';
+      chatInputContainer.style.left = '50%';
+      chatInputContainer.style.transform = 'translate(-50%, -50%)';
+      chatInputContainer.style.width = '80%';
+      chatInputContainer.style.maxWidth = '400px';
+      chatInputContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+      chatInputContainer.style.padding = '10px';
+      chatInputContainer.style.borderRadius = '5px';
+    }
+    
+    // Show send button on mobile
+    const sendButton = document.getElementById('chat-send-button');
+    if (sendButton) {
+      sendButton.style.display = 'inline-block';
+      sendButton.style.marginLeft = '10px';
+      sendButton.style.padding = '5px 10px';
+      sendButton.style.backgroundColor = '#4CAF50';
+      sendButton.style.color = 'white';
+      sendButton.style.border = 'none';
+      sendButton.style.borderRadius = '3px';
+    }
+    
+    // Style chat input for mobile
+    if (chatInput) {
+      chatInput.style.width = 'calc(100% - 80px)';
+      chatInput.style.padding = '8px';
+      chatInput.style.fontSize = '16px'; // Larger font size for mobile
+    }
   } else {
-    chatContainer.style.maxWidth = '400px';
-    chatInputContainer.style.width = '400px';
+    // Desktop positioning - bottom left corner
+    const gameHeight = window.innerHeight;
+    const chatHeight = Math.min(gameHeight * 0.25, 200); // Max 25% of game height or 200px
+    
+    chatContainer.style.position = 'absolute';
+    chatContainer.style.bottom = '80px';
+    chatContainer.style.left = '20px';
+    chatContainer.style.width = '400px';
+    chatContainer.style.maxHeight = `${chatHeight}px`;
+    
+    // Style input for desktop
+    if (chatInputContainer) {
+      chatInputContainer.style.position = 'absolute';
+      chatInputContainer.style.bottom = '20px';
+      chatInputContainer.style.left = '20px';
+      chatInputContainer.style.width = '400px';
+      chatInputContainer.style.backgroundColor = 'transparent';
+      chatInputContainer.style.transform = 'none';
+    }
+    
+    // Hide send button on desktop
+    const sendButton = document.getElementById('chat-send-button');
+    if (sendButton) {
+      sendButton.style.display = 'none';
+    }
+    
+    // Style chat input for desktop
+    if (chatInput) {
+      chatInput.style.width = '100%';
+      chatInput.style.padding = '5px';
+      chatInput.style.fontSize = '14px';
+    }
   }
-  
-  // Adjust height based on message count
-  if (messageCount > 5) {
-    // Switch to fixed-height scrollable mode
-    chatContainer.style.height = '250px';
-    chatMessages.style.maxHeight = '230px';
-  } else {
-    // Auto height for few messages
-    chatContainer.style.height = 'auto';
-  }
+}
+
+/**
+ * Check if the user is on a mobile device
+ * @returns {boolean} True if on mobile device
+ */
+function isMobileDevice() {
+  return (window.innerWidth <= 1024 || 'ontouchstart' in window || 
+          navigator.maxTouchPoints > 0 || 
+          /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
 } 
