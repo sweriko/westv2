@@ -3,8 +3,8 @@
  * Allows runtime adjustment of viewmodel position and scale
  */
 
-// Enable debug mode
-window.debugMode = true;
+// Disable debug mode for production
+window.debugMode = false;
 
 // Initialize viewmodel configuration when window loads
 window.addEventListener('load', () => {

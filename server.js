@@ -11,8 +11,8 @@ console.log("URL loaded");
 const app = express();
 console.log("Express app created");
 
-// Port default 8080 to match your previous Cloudflare Tunnel config
-const PORT = process.env.PORT || 8080;
+// Standard HTTP port for the server
+const PORT = process.env.PORT || 80;
 console.log("Port set to", PORT);
 
 // Serve static files from "public"
@@ -34,8 +34,8 @@ console.log("Player tracking variables initialized");
 const playerIdentities = new Map(); // clientId -> { username, playerId, token, lastSeen }
 console.log("Player identity tracking initialized");
 
-// Development mode detection - allow multiple connections in localhost
-const isDevMode = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV;
+// Production mode
+const isDevMode = false;
 console.log(`Server running in ${isDevMode ? 'DEVELOPMENT' : 'PRODUCTION'} mode`);
 
 // Position history tracking to reduce unnecessary corrections

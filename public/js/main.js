@@ -51,7 +51,7 @@ let maxSmokeRings = 10; // Limit to prevent performance issues
 
 // Add a flag to track debug visualization mode
 window.showHitZoneDebug = false;
-window.showTownColliders = true; // Enable by default to help with debugging
+window.showTownColliders = false; // Disable for production
 
 // Create a global renderer object to allow camera switching
 window.renderer = {
@@ -82,7 +82,7 @@ async function init() {
     window.playerIdentity = playerIdentity;
     
     // Set debug mode flag
-    window.debugMode = false; // Set to true to enable verbose console logging
+    window.debugMode = false; // Disabled for production
     
     // Initialize logger UI if in debug mode
     if (window.debugMode) {

@@ -13,34 +13,21 @@ export class Logger {
       physics: false // Toggle physics-related logs
     };
     
-    // Initialize from localStorage if available
-    this.loadSettings();
+    // Production mode - don't load from localStorage
   }
   
   /**
    * Load logger settings from localStorage
    */
   loadSettings() {
-    try {
-      const savedSettings = localStorage.getItem('logger_settings');
-      if (savedSettings) {
-        const parsed = JSON.parse(savedSettings);
-        this.levels = { ...this.levels, ...parsed };
-      }
-    } catch (e) {
-      console.error('Error loading logger settings:', e);
-    }
+    // Disabled for production
   }
   
   /**
    * Save current settings to localStorage
    */
   saveSettings() {
-    try {
-      localStorage.setItem('logger_settings', JSON.stringify(this.levels));
-    } catch (e) {
-      console.error('Error saving logger settings:', e);
-    }
+    // Disabled for production
   }
   
   /**
