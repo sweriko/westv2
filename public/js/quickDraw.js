@@ -432,8 +432,7 @@ export class QuickDraw {
                             this.localPlayerModel.group.visible = false;
                         }
                         
-                        // Display draw message and play sound
-                        this.showMessage('DRAW!', 2000, 'red');
+                        // Play draw sound only
                         if (this.soundManager) {
                             this.soundManager.playSound("draw", 0.9);
                         }
@@ -731,9 +730,6 @@ export class QuickDraw {
             this.challengePrompt.style.display = 'none';
             this.challengeUIVisible = false;
             
-            // Show "Challenge sent" message
-            this.showMessage('Challenge sent!', 2000);
-            
             // Send challenge to server
             this.networkManager.sendQuickDrawChallenge(nearestPlayerId);
             
@@ -788,14 +784,16 @@ export class QuickDraw {
         // Hide the invitation
         this.challengeInvitation.style.display = 'none';
         
+        // Hide the challenge prompt if visible
+        this.challengePrompt.style.display = 'none';
+        this.challengeUIVisible = false;
+        this.challengePromptActive = false;
+        
         // Store challenger id before clearing
         const challengerId = this.pendingChallenge.challengerId;
         
         // Send acceptance to server
         this.networkManager.sendQuickDrawAccept(challengerId);
-        
-        // Show message
-        this.showMessage('Challenge accepted!', 1000);
         
         console.log(`Accepted Quick Draw challenge from player ${challengerId}`);
         
@@ -826,9 +824,6 @@ export class QuickDraw {
      * @param {Object} message - The acceptance message
      */
     handleChallengeAccepted(message) {
-        // Show message
-        this.showMessage('Challenge accepted!', 1000);
-        
         console.log(`Player ${message.targetId} accepted your Quick Draw challenge`);
         
         // Wait for server to respond with match details
@@ -839,9 +834,6 @@ export class QuickDraw {
      * @param {Object} message - The decline message
      */
     handleChallengeDeclined(message) {
-        // Show message
-        this.showMessage('Challenge declined', 2000);
-        
         console.log(`Player ${message.targetId} declined your Quick Draw challenge`);
     }
 
@@ -852,74 +844,10 @@ export class QuickDraw {
         this.duelState = 'ready';
         this.updateStatusIndicator();
         
-        // For iOS/Safari and mobile devices - create a fixed fullscreen message
-        if (window.isMobileDevice || /iPad|iPhone|iPod/.test(navigator.userAgent)) {
-            // Create iOS-friendly fullscreen overlay for READY message
-            const readyOverlay = document.createElement('div');
-            readyOverlay.style.position = 'fixed';
-            readyOverlay.style.top = '0';
-            readyOverlay.style.left = '0';
-            readyOverlay.style.width = '100%';
-            readyOverlay.style.height = '100%';
-            readyOverlay.style.display = 'flex';
-            readyOverlay.style.alignItems = 'center';
-            readyOverlay.style.justifyContent = 'center';
-            readyOverlay.style.backgroundColor = 'rgba(255, 193, 7, 0.3)';
-            readyOverlay.style.zIndex = '9999';
-            
-            // Create text element inside the overlay
-            const readyText = document.createElement('div');
-            readyText.textContent = 'READY?';
-            readyText.style.fontSize = '120px';
-            readyText.style.fontWeight = 'bold';
-            readyText.style.fontFamily = 'Arial, sans-serif';
-            readyText.style.color = 'white';
-            readyText.style.textShadow = '0 0 20px #FFC107, 0 0 40px #FFC107';
-            
-            readyOverlay.appendChild(readyText);
-            document.body.appendChild(readyOverlay);
-            
-            // Use a simple animation for better visibility
-            setTimeout(() => {
-                readyText.style.transition = 'transform 0.2s ease-in-out';
-                readyText.style.transform = 'scale(1.2)';
-                setTimeout(() => {
-                    readyText.style.transform = 'scale(1)';
-                }, 200);
-            }, 100);
-            
-            // Remove overlay after 1 second
-            setTimeout(() => {
-                if (readyOverlay.parentNode) {
-                    readyOverlay.parentNode.removeChild(readyOverlay);
-                }
-            }, 1000);
+        // Set a timer to play sound only
+        if (this.soundManager) {
+            this.soundManager.playSound("bellcountdown", 0.7);
         }
-        
-        // Also show in standard message overlay as backup
-        this.messageOverlay.textContent = 'READY?';
-        this.messageOverlay.style.display = 'block';
-        
-        // Enhanced styling for desktop
-        this.messageOverlay.style.fontSize = '64px';
-        this.messageOverlay.style.color = '#FFFFFF';
-        
-        // Use a slight scale animation
-        this.messageOverlay.style.transition = 'transform 0.2s ease-in-out';
-        this.messageOverlay.style.transform = 'translate(-50%, -50%) scale(1)';
-        
-        // Trigger animation
-        setTimeout(() => {
-            this.messageOverlay.style.transform = 'translate(-50%, -50%) scale(1.1)';
-            setTimeout(() => {
-                this.messageOverlay.style.transform = 'translate(-50%, -50%) scale(1)';
-            }, 200);
-        }, 10);
-        
-        // Hide after 1 second
-        setTimeout(() => {
-            this.hideMessage();
-        }, 1000);
     }
 
     /**
@@ -1408,9 +1336,6 @@ export class QuickDraw {
             console.log('[QuickDraw] Player aim enabled - can now draw weapon');
         }
         
-        // Show the draw message
-        this.showMessage('DRAW!', 2000, 'red');
-        
         // Play draw sound effect
         if (this.soundManager) {
             this.soundManager.playSound("draw", 0.9);
@@ -1642,78 +1567,13 @@ export class QuickDraw {
             }
         }
         
-        // Create and enable aerial camera immediately when match is found
-        this.setupAndEnableAerialCamera();
-        
-        console.log(`[QuickDraw] Match found! Your opponent is player ${message.opponentId}`);
-        
-        // Teleport player to the start position
-        if (message.startPosition) {
-            console.log('[QuickDraw] Original start position from server:', message.startPosition);
-            
-            // Ground the player position by determining the correct height at the spawn point
-            const groundedPosition = this.groundPlayerPosition(message.startPosition);
-            
-            // Apply the properly grounded position
-            this.localPlayer.group.position.set(
-                groundedPosition.x,
-                groundedPosition.y,
-                groundedPosition.z
-            );
-            
-            // Debug log the grounded player position
-            console.log(`[QuickDraw] Player position set to grounded position: (${groundedPosition.x.toFixed(2)}, ${groundedPosition.y.toFixed(2)}, ${groundedPosition.z.toFixed(2)})`);
-            console.log(`[QuickDraw] Player feet should be at y=${(groundedPosition.y - 2.72).toFixed(2)}`);
-            
-            // Set rotation to face the opponent
-            if (message.startRotation !== undefined) {
-                // Apply the exact rotation from the server
-                console.log(`Setting player rotation to: ${message.startRotation.toFixed(4)} radians (${(message.startRotation * 180 / Math.PI).toFixed(1)}°)`);
-                
-                // In THREE.js, rotation.y represents rotation around the Y-axis (in radians)
-                // The server calculates this angle to make players face each other
-                this.localPlayer.group.rotation.y = message.startRotation;
-                
-                // Debug visualization - draw a direction arrow for 5 seconds
-                if (this.debug) {
-                    this.showFacingDirection(groundedPosition, message.startRotation);
-                }
-            }
-            
-            // Update local player model position after teleporting
-            if (this.localPlayerModel && !this.localPlayerModel.loading) {
-                this.updateLocalPlayerModel(true);
-            }
-            
-            // Force holstered gun state
-            if (this.localPlayer.viewmodel) {
-                this.localPlayer.isAiming = false;
-                if (this.localPlayer.currentGunOffset) {
-                    this.localPlayer.currentGunOffset.copy(this.localPlayer.holsterOffset);
-                }
-            }
-            
-            // Fix hit zones for the local player in QuickDraw mode
-            this.fixHitZonesForQuickDraw();
-        } else {
-            console.warn('[QuickDraw] No start position in match found message');
-        }
-        
-        // Reset player health to full at the start of the duel
-        this.localPlayer.health = 100;
-        
-        // Show health bar with full health
-        this.updateHealthBar(100);
-        this.healthBarContainer.style.display = 'block';
-        
         // Update the main UI health display too
         if (typeof updateHealthUI === 'function') {
             updateHealthUI(this.localPlayer);
         }
         
-        // Update status indicator and show match found message
+        // Update status indicator
         this.updateStatusIndicator();
-        this.showMessage(`Duel vs. Player ${message.opponentId}`, 2000);
         
         // Mark as ready after showing message
         this.createDuelTimeout(() => {

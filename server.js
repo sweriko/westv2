@@ -1144,7 +1144,7 @@ function startQuickDrawDuel(duelId) {
     return; // Invalid duel
   }
   
-  duel.state = 'ready';
+  duel.state = 'countdown';
   
   const player1 = players.get(duel.player1Id);
   const player2 = players.get(duel.player2Id);
@@ -1154,30 +1154,21 @@ function startQuickDrawDuel(duelId) {
     return;
   }
   
-  // Show "READY?" message to both players
-  player1.ws.send(JSON.stringify({ type: 'quickDrawReady' }));
-  player2.ws.send(JSON.stringify({ type: 'quickDrawReady' }));
+  // Send countdown signal immediately
+  player1.ws.send(JSON.stringify({ type: 'quickDrawCountdown' }));
+  player2.ws.send(JSON.stringify({ type: 'quickDrawCountdown' }));
   
-  // After 1 second, start the countdown
-  setTimeout(() => {
+  // Set a random time for the draw signal (1-8 seconds)
+  const drawTime = 1000 + Math.floor(Math.random() * 7000);
+  duel.drawTimeout = setTimeout(() => {
     if (quickDrawDuels.has(duelId)) {
-      duel.state = 'countdown';
-      player1.ws.send(JSON.stringify({ type: 'quickDrawCountdown' }));
-      player2.ws.send(JSON.stringify({ type: 'quickDrawCountdown' }));
-      
-      // Set a random time for the draw signal (1-8 seconds)
-      const drawTime = 1000 + Math.floor(Math.random() * 7000);
-      duel.drawTimeout = setTimeout(() => {
-        if (quickDrawDuels.has(duelId)) {
-          sendDrawSignal(duelId);
-        }
-      }, drawTime);
+      sendDrawSignal(duelId);
     }
-  }, 1000);
+  }, drawTime);
 }
 
 /**
- * Send the "DRAW!" signal to both players.
+ * Update the game state to "draw" phase without sending a visual message.
  * @param {string} duelId - The duel ID
  */
 function sendDrawSignal(duelId) {
@@ -1198,11 +1189,11 @@ function sendDrawSignal(duelId) {
     return;
   }
   
-  // Send draw signal to both players
+  // Send draw signal to both players without visual text
   player1.ws.send(JSON.stringify({ type: 'quickDrawDraw' }));
   player2.ws.send(JSON.stringify({ type: 'quickDrawDraw' }));
   
-  console.log(`Draw signal sent for duel ${duelId} in arena ${duel.arenaIndex + 1}`);
+  console.log(`Draw signal sent for duel ${duelId}`);
 }
 
 /**
