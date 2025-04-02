@@ -721,8 +721,8 @@ export class ThirdPersonModel {
     }
     
     // If we're here, the bullet is inside the overall collision box but not in any specific zone
-    // We consider this a grazing hit with no damage
-    return { hit: false, zone: null, damage: 0 };
+    // Instead of returning no hit, we'll count it as a partial body hit with reduced damage
+    return { hit: true, zone: 'body', damage: 30 };
   }
 
   /**

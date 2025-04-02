@@ -1126,6 +1126,8 @@ export class Player {
           crosshair.classList.add('expanded');
         }, 250); // Match animation duration
       }
+      
+      // IMPORTANT: Don't modify transform - leave the inline style working
     }
   }
 

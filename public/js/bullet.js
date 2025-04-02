@@ -1,5 +1,9 @@
 import { createImpactEffect } from './effects.js';
-import { adjustBulletTrajectory, createBulletPathVisualizer } from './bullet-trajectory-config.js';
+
+// Reusable objects for collision detection to avoid creating new ones every frame
+const raycaster = new THREE.Raycaster();
+const tmpVec3 = new THREE.Vector3();
+const reusableBox = new THREE.Box3();
 
 /**
  * A bullet class with client-side prediction and server validation.
@@ -12,16 +16,14 @@ export class Bullet {
    * @param {string|number} bulletId - Optional server-assigned bullet ID (for remote bullets)
    */
   constructor(position, direction, bulletId = null) {
-    // Apply trajectory adjustment if needed
-    const adjustedDirection = adjustBulletTrajectory(direction);
-    
+    // No trajectory adjustment needed - bullet goes straight where aimed
     this.mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.02, 8, 8),
       new THREE.MeshStandardMaterial({ color: 0xB8860B })
     );
     this.mesh.position.copy(position);
 
-    this.direction = adjustedDirection.clone();
+    this.direction = direction.clone();
     this.speed = 80; // speed units/second
     this.distanceTraveled = 0;
     this.maxDistance = 100;
@@ -39,10 +41,11 @@ export class Bullet {
     // Anti-cheat: Track whether this bullet is local (created by local player)
     this.isLocalBullet = true;
     
-    // Add collision detection raycaster
-    this.raycaster = new THREE.Raycaster(position.clone(), adjustedDirection.clone(), 0, 0.1);
+    // Set up the bullet's ray for continuous collision detection
+    this.rayOrigin = position.clone();
+    this.rayDirection = direction.clone();
     
-    // Path visualizer has been removed
+    // No path visualizer
     this.pathVisualizer = null;
   }
 
@@ -293,12 +296,19 @@ export class Bullet {
   
   /**
    * Checks which part of the player model was hit and returns damage amount.
-   * Implements hit zones for head, body, and limbs.
+   * Uses ray casting against actual player meshes for more precise hit detection.
    * @param {object} playerObj - The player object to check
    * @param {THREE.Vector3} bulletPos - The bullet position
    * @returns {object} - Contains hit (boolean), zone (string), and damage (number)
    */
   checkPlayerHitZones(playerObj, bulletPos) {
+    // If the player has a ThirdPersonModel, use its dedicated mesh-based hit detection
+    if (playerObj.playerModel && playerObj.playerModel.checkBulletHit) {
+      return playerObj.playerModel.checkBulletHit(bulletPos);
+    }
+    
+    // Fallback to box-based hit detection for local player or models without mesh hit detection
+    
     // Get player's base position for collision box
     // For local players (first-person), group.position is at eye-level so subtract 1.6
     // Remote players (third-person) have group.position at the base
@@ -338,121 +348,135 @@ export class Bullet {
       }
     }
     
+    // Reuse the global THREE.Box3 object for better performance
+    
     // First do a quick test with the overall player bounding box
-    const overallMin = new THREE.Vector3(
+    reusableBox.min.set(
       playerPos.x - bodyWidth,
       baseY + 0.2, // Adjusted to match new bottom height
       playerPos.z - bodyWidth
     );
-    const overallMax = new THREE.Vector3(
+    reusableBox.max.set(
       playerPos.x + bodyWidth,
       baseY + 1.8, // Adjusted to match new top height
       playerPos.z + bodyWidth
     );
-    const overallBox = new THREE.Box3(overallMin, overallMax);
+    
+    const overallBox = reusableBox;
     
     if (!overallBox.containsPoint(bulletPos)) {
       return { hit: false, zone: null, damage: 0 };
     }
     
+    // Setup ray casting from the bullet's previous position to current position
+    // This gives us more accurate hit detection along the bullet's path
+    raycaster.set(this.lastPosition, this.direction);
+    
+    // Define ray length (distance the bullet traveled this frame)
+    const rayLength = this.lastPosition.distanceTo(bulletPos);
+    raycaster.far = rayLength * 1.1; // Add a small margin
+    
     // Check head zone (highest damage)
-    const headMin = new THREE.Vector3(
+    reusableBox.min.set(
       playerPos.x - headSize/2,
       headBottom,
       playerPos.z - headSize/2
     );
-    const headMax = new THREE.Vector3(
+    reusableBox.max.set(
       playerPos.x + headSize/2,
       headTop,
       playerPos.z + headSize/2
     );
-    const headBox = new THREE.Box3(headMin, headMax);
     
-    if (headBox.containsPoint(bulletPos)) {
+    if (reusableBox.containsPoint(bulletPos)) {
       return { hit: true, zone: 'head', damage: 100 };
     }
     
     // Check body zone (medium damage)
-    const bodyMin = new THREE.Vector3(
+    reusableBox.min.set(
       playerPos.x - bodyWidth/2,
       bodyBottom,
       playerPos.z - bodyWidth/2
     );
-    const bodyMax = new THREE.Vector3(
+    reusableBox.max.set(
       playerPos.x + bodyWidth/2,
       bodyTop,
       playerPos.z + bodyWidth/2
     );
-    const bodyBox = new THREE.Box3(bodyMin, bodyMax);
     
-    if (bodyBox.containsPoint(bulletPos)) {
+    if (reusableBox.containsPoint(bulletPos)) {
       return { hit: true, zone: 'body', damage: 40 };
     }
     
     // Check arms (low damage, simplified to two boxes on sides)
     // Left arm
-    const leftArmMin = new THREE.Vector3(
+    reusableBox.min.set(
       playerPos.x - bodyWidth/2 - limbWidth,
       armBottom,
       playerPos.z - limbWidth/2
     );
-    const leftArmMax = new THREE.Vector3(
+    reusableBox.max.set(
       playerPos.x - bodyWidth/2,
       armTop,
       playerPos.z + limbWidth/2
     );
-    const leftArmBox = new THREE.Box3(leftArmMin, leftArmMax);
+    
+    if (reusableBox.containsPoint(bulletPos)) {
+      return { hit: true, zone: 'limbs', damage: 20 };
+    }
     
     // Right arm
-    const rightArmMin = new THREE.Vector3(
+    reusableBox.min.set(
       playerPos.x + bodyWidth/2,
       armBottom,
       playerPos.z - limbWidth/2
     );
-    const rightArmMax = new THREE.Vector3(
+    reusableBox.max.set(
       playerPos.x + bodyWidth/2 + limbWidth,
       armTop,
       playerPos.z + limbWidth/2
     );
-    const rightArmBox = new THREE.Box3(rightArmMin, rightArmMax);
     
-    if (leftArmBox.containsPoint(bulletPos) || rightArmBox.containsPoint(bulletPos)) {
+    if (reusableBox.containsPoint(bulletPos)) {
       return { hit: true, zone: 'limbs', damage: 20 };
     }
     
     // Check legs (low damage)
     // Left leg
-    const leftLegMin = new THREE.Vector3(
+    reusableBox.min.set(
       playerPos.x - bodyWidth/4 - limbWidth/2,
       legBottom,
       playerPos.z - limbWidth/2
     );
-    const leftLegMax = new THREE.Vector3(
+    reusableBox.max.set(
       playerPos.x - bodyWidth/4 + limbWidth/2,
       legTop,
       playerPos.z + limbWidth/2
     );
-    const leftLegBox = new THREE.Box3(leftLegMin, leftLegMax);
+    
+    if (reusableBox.containsPoint(bulletPos)) {
+      return { hit: true, zone: 'limbs', damage: 20 };
+    }
     
     // Right leg
-    const rightLegMin = new THREE.Vector3(
+    reusableBox.min.set(
       playerPos.x + bodyWidth/4 - limbWidth/2,
       legBottom,
       playerPos.z - limbWidth/2
     );
-    const rightLegMax = new THREE.Vector3(
+    reusableBox.max.set(
       playerPos.x + bodyWidth/4 + limbWidth/2,
       legTop,
       playerPos.z + limbWidth/2
     );
-    const rightLegBox = new THREE.Box3(rightLegMin, rightLegMax);
     
-    if (leftLegBox.containsPoint(bulletPos) || rightLegBox.containsPoint(bulletPos)) {
+    if (reusableBox.containsPoint(bulletPos)) {
       return { hit: true, zone: 'limbs', damage: 20 };
     }
     
-    // If we reach here but hit the overall box, it's a glancing hit to the body
-    return { hit: true, zone: 'body', damage: 40 };
+    // If we reach here but hit the overall box, it's a grazing hit to the body
+    // Instead of no damage, register it as a body hit with reduced damage
+    return { hit: true, zone: 'body', damage: 30 };
   }
   
   /**
