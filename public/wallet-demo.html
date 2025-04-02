@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phantom Wallet Demo</title>
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background-color: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+    
+    h1 {
+      color: #333;
+    }
+    
+    .info-section {
+      margin-top: 20px;
+      padding: 15px;
+      background-color: #f0f0f0;
+      border-radius: 6px;
+    }
+    
+    .info-section h2 {
+      margin-top: 0;
+      font-size: 18px;
+    }
+    
+    .wallet-info {
+      display: none;
+    }
+    
+    .wallet-info.active {
+      display: block;
+    }
+    
+    #wallet-address {
+      word-break: break-all;
+      font-family: monospace;
+      padding: 8px;
+      background-color: #e5e5e5;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Phantom Wallet Integration Demo</h1>
+    
+    <div class="info-section">
+      <h2>About This Demo</h2>
+      <p>This page demonstrates a simple Phantom wallet integration for Solana. You can connect your wallet using the purple button in the top-right corner.</p>
+    </div>
+    
+    <div class="info-section wallet-info" id="wallet-info">
+      <h2>Connected Wallet Information</h2>
+      <p><strong>Wallet Address:</strong></p>
+      <div id="wallet-address">Not connected</div>
+      
+      <p><strong>Connection Status:</strong> <span id="connection-status">Disconnected</span></p>
+    </div>
+  </div>
+  
+  <!-- Load Solana Web3.js from CDN -->
+  <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
+  
+  <!-- Load our Phantom Wallet Adapter -->
+  <script type="module">
+    import phantomWalletAdapter from './js/phantom-wallet.js';
+    
+    // Initialize the adapter when the page loads
+    document.addEventListener('DOMContentLoaded', () => {
+      // Initialize the wallet adapter
+      phantomWalletAdapter.init();
+      
+      // Set up event listeners to update UI when wallet connects
+      document.addEventListener('walletConnected', (e) => {
+        updateWalletInfo(e.detail.publicKey);
+      });
+      
+      // Try to auto-connect if previously connected
+      if (phantomWalletAdapter.isPhantomInstalled()) {
+        const provider = window.phantom?.solana;
+        if (provider) {
+          provider.on('connect', (publicKey) => {
+            phantomWalletAdapter.wallet = provider;
+            phantomWalletAdapter.publicKey = publicKey.toString();
+            phantomWalletAdapter.isConnected = true;
+            phantomWalletAdapter.updateConnectButtonStatus(true);
+            updateWalletInfo(publicKey.toString());
+          });
+          
+          provider.on('disconnect', () => {
+            phantomWalletAdapter.wallet = null;
+            phantomWalletAdapter.publicKey = null;
+            phantomWalletAdapter.isConnected = false;
+            phantomWalletAdapter.updateConnectButtonStatus(false);
+            updateWalletInfo(null);
+          });
+        }
+      }
+      
+      // Custom event listeners for wallet adapter
+      phantomWalletAdapter.onConnect = (publicKey) => {
+        updateWalletInfo(publicKey);
+      };
+      
+      phantomWalletAdapter.onDisconnect = () => {
+        updateWalletInfo(null);
+      };
+    });
+    
+    // Update the wallet info UI
+    function updateWalletInfo(publicKey) {
+      const walletInfoSection = document.getElementById('wallet-info');
+      const walletAddressElem = document.getElementById('wallet-address');
+      const connectionStatusElem = document.getElementById('connection-status');
+      
+      if (publicKey) {
+        walletInfoSection.classList.add('active');
+        walletAddressElem.textContent = publicKey;
+        connectionStatusElem.textContent = 'Connected';
+        connectionStatusElem.style.color = 'green';
+      } else {
+        walletInfoSection.classList.remove('active');
+        walletAddressElem.textContent = 'Not connected';
+        connectionStatusElem.textContent = 'Disconnected';
+        connectionStatusElem.style.color = 'red';
+      }
+    }
+  </script>
+</body>
+</html> 

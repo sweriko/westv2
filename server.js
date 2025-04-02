@@ -19,6 +19,12 @@ console.log("Port set to", PORT);
 app.use(express.static('public'));
 console.log("Static file serving configured");
 
+// Add a specific route for the wallet demo page
+app.get('/wallet', (req, res) => {
+  res.sendFile(__dirname + '/public/wallet-demo.html');
+  console.log("Wallet demo page requested");
+});
+
 const server = http.createServer(app);
 console.log("HTTP server created");
 const wss = new WebSocket.Server({ server, clientTracking: true });

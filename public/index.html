@@ -86,8 +86,19 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
   <!-- Cannon.js for physics (non-ES module version) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+  <!-- Solana Web3.js -->
+  <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
   <!-- Main JS as ES6 module -->
   <script type="module" src="js/main.js"></script>
+  <!-- Phantom Wallet integration -->
+  <script type="module">
+    import phantomWalletAdapter from './js/phantom-wallet.js';
+    
+    // Initialize the Phantom wallet adapter when the page loads
+    document.addEventListener('DOMContentLoaded', () => {
+      phantomWalletAdapter.init();
+    });
+  </script>
   
   <!-- Letterbox effect for cinematic eagle camera view -->
   <div class="letterbox-top"></div>
