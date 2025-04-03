@@ -99,7 +99,7 @@ function createChatUI() {
     addSystemMessage("Tap here to chat");
   } else {
     // Add desktop-specific message
-    addSystemMessage("Press \"C\" to chat with other players!");
+    addSystemMessage("Press \"Enter\" to chat with other players!");
   }
   
   // Adjust chat container size on window resize
@@ -117,11 +117,16 @@ function setupChatEventListeners(networkManager) {
   
   // Add keydown event listener for chat activation
   document.addEventListener('keydown', (event) => {
-    // Press C to toggle chat input
-    if (event.code === 'KeyC') {
+    // Press Enter to toggle chat input
+    if (event.code === 'Enter') {
       event.preventDefault();
       
       if (isChatActive) {
+        const message = chatInput.value.trim();
+        if (message) {
+          lastSentMessage = message; // Store last sent message to prevent duplication
+          sendChatMessage(message, networkManager);
+        }
         closeChat();
       } else {
         openChat();
@@ -131,17 +136,6 @@ function setupChatEventListeners(networkManager) {
     
     // If chat is active, handle chat-specific keys
     if (isChatActive) {
-      // Submit message on Enter
-      if (event.code === 'Enter') {
-        const message = chatInput.value.trim();
-        if (message) {
-          lastSentMessage = message; // Store last sent message to prevent duplication
-          sendChatMessage(message, networkManager);
-        }
-        closeChat();
-        event.preventDefault();
-      }
-      
       // Close chat on Escape
       if (event.code === 'Escape') {
         closeChat();
