@@ -11,6 +11,33 @@ console.log("URL loaded");
 const app = express();
 console.log("Express app created");
 
+// Add Telegram Bot API support
+const TelegramBot = require('node-telegram-bot-api');
+console.log("Telegram Bot API loaded");
+
+// Use environment variable for the bot token from Replit Secrets
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || 'YOUR_TELEGRAM_BOT_TOKEN';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || 1517919597; // Numeric ID for @erikszo
+
+// Initialize the Telegram bot
+const telegramBot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
+console.log("Telegram bot initialized");
+
+// Function to send Telegram notifications
+function sendTelegramNotification(message) {
+  try {
+    telegramBot.sendMessage(TELEGRAM_CHAT_ID, message)
+      .then(() => {
+        console.log(`Notification sent to ${TELEGRAM_CHAT_ID}: ${message}`);
+      })
+      .catch((error) => {
+        console.error(`Failed to send Telegram notification: ${error.message}`);
+      });
+  } catch (error) {
+    console.error(`Error in Telegram notification: ${error.message}`);
+  }
+}
+
 // Standard HTTP port for the server
 const PORT = process.env.PORT || 80;
 console.log("Port set to", PORT);
@@ -141,6 +168,11 @@ wss.on('connection', (ws, req) => {
       const playerId = storedIdentity.playerId;
       console.log(`Recognized returning player ${playerId} (clientId: ${clientId}, username: ${username || storedIdentity.username})`);
       
+      // Send Telegram notification for returning player
+      if (!isDev) {
+        sendTelegramNotification(`🔄 Player reconnected: ${username || storedIdentity.username} (ID: ${playerId})`);
+      }
+      
       // Initialize player with recognized identity
       initializePlayer(ws, playerId, sessionId, clientId, username || storedIdentity.username, token, isDev);
       return;
@@ -160,6 +192,9 @@ wss.on('connection', (ws, req) => {
       lastSeen: Date.now()
     });
     console.log(`Associated player ${playerId} with clientId ${clientId} and username ${username || 'Anonymous'}`);
+    
+    // Send Telegram notification for new player
+    sendTelegramNotification(`🎮 New player joined: ${username || 'Anonymous'} (ID: ${playerId})`);
   }
 
   // Initialize the new player
@@ -919,6 +954,12 @@ function cleanupPlayer(playerId) {
   playerTimeouts.delete(playerId);
   playerNonces.delete(playerId);
   playerSequences.delete(playerId);
+  playerPositionHistory.delete(playerId);
+  
+  // Send Telegram notification for player disconnect
+  if (player.username && !player.isDev) {
+    sendTelegramNotification(`👋 Player left: ${player.username} (ID: ${playerId})`);
+  }
 
   // Notify all that the player left
   broadcastToAll({
@@ -1160,6 +1201,9 @@ function startQuickDrawDuel(duelId) {
     return;
   }
   
+  // Send Telegram notification for Quick Draw duel
+  sendTelegramNotification(`🤠 Quick Draw duel started between ${player1.username} and ${player2.username} in arena ${duel.arenaIndex + 1}`);
+  
   // Send countdown signal immediately
   player1.ws.send(JSON.stringify({ type: 'quickDrawCountdown' }));
   player2.ws.send(JSON.stringify({ type: 'quickDrawCountdown' }));
@@ -1398,16 +1442,37 @@ function endQuickDrawDuel(duelId, winnerId) {
     return; // Invalid duel
   }
   
+  // Get player objects for notification
+  const player1 = players.get(duel.player1Id);
+  const player2 = players.get(duel.player2Id);
+  
+  // Determine the winner username for notification
+  let winnerUsername = 'Unknown';
+  let loserUsername = 'Unknown';
+  
+  if (winnerId) {
+    // If we have a winner, determine usernames
+    if (winnerId === duel.player1Id && player1) {
+      winnerUsername = player1.username;
+      loserUsername = player2 ? player2.username : 'Disconnected player';
+    } else if (winnerId === duel.player2Id && player2) {
+      winnerUsername = player2.username;
+      loserUsername = player1 ? player1.username : 'Disconnected player';
+    }
+    
+    // Send Telegram notification about duel result
+    sendTelegramNotification(`🏆 Quick Draw duel ended: ${winnerUsername} defeated ${loserUsername} in arena ${duel.arenaIndex + 1}`);
+  } else {
+    // No winner (both disconnected or other reason)
+    sendTelegramNotification(`🚫 Quick Draw duel ended with no winner in arena ${duel.arenaIndex + 1}`);
+  }
+  
   console.log(`Ending Quick Draw duel ${duelId} with winner: ${winnerId || 'none'}`);
   
   // Clear any pending timeouts
   if (duel.drawTimeout) {
     clearTimeout(duel.drawTimeout);
   }
-  
-  // Get the players
-  const player1 = players.get(duel.player1Id);
-  const player2 = players.get(duel.player2Id);
   
   // First notify players of the duel result so they can show victory/defeat screen
   if (player1 && player1.ws.readyState === WebSocket.OPEN) {
