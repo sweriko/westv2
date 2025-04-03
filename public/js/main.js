@@ -15,6 +15,8 @@ import { initPlayerIdentity, verifyIdentityWithServer } from './playerIdentity.j
 import logger from './logger.js';
 import { FlyingEagle } from './flyingEagle.js';
 import { initChat, handleChatMessage, addSystemMessage } from './chat.js';
+import { BotManager } from './botPlayer.js';
+console.log("Bot player module loaded");
 import './viewmodel-config.js';
 
 // Check if device is mobile
@@ -42,6 +44,7 @@ let renderer, camera;
 let multiplayerManager;
 let quickDraw;
 let physics;
+let botManager; // Bot manager reference
 let lastTime = 0;
 
 // Smoke ring effects
@@ -384,6 +387,23 @@ async function init() {
           }, 50);
         }
       }
+      
+      // Spawn a bot with the B key
+      if (event.code === 'KeyB' && !event.ctrlKey && !event.shiftKey) {
+        if (window.botManager) {
+          try {
+            const bot = window.botManager.spawnFixedBot(`Bot_${Math.floor(Math.random() * 1000)}`);
+            console.log(`Bot spawned with ID: ${bot.id}`);
+            
+            // Show a system message if the chat system is available
+            if (typeof addSystemMessage === 'function') {
+              addSystemMessage("Bot spawned in town center");
+            }
+          } catch (error) {
+            console.error("Failed to spawn bot:", error);
+          }
+        }
+      }
     });
 
     // Make Bullet constructor globally available for hit zone debug creation
@@ -434,6 +454,20 @@ async function init() {
       handleChatMessage({ username, message });
     };
 
+    // Initialize bot manager
+    botManager = new BotManager(scene);
+    window.botManager = botManager; // Make globally accessible
+    
+    // Spawn a bot in the town center with fixed parameters
+    setTimeout(() => {
+      try {
+        const townBot = botManager.spawnFixedBot("TownGuard");
+        console.log("Bot spawned:", townBot.id);
+      } catch (error) {
+        console.error("Failed to spawn bot:", error);
+      }
+    }, 2000); // Wait 2 seconds to ensure everything is properly loaded
+    
     // Start the animation loop
     animate(0);
     
@@ -530,6 +564,11 @@ function animate(time) {
   if (window.flyingEagle) {
     // Always update eagle's flight path
     window.flyingEagle.update(deltaTime);
+  }
+
+  // Update bot animations through bot manager
+  if (botManager) {
+    // Bot manager handles its own internal updates
   }
 
   // CAMERA SELECTION LOGIC:

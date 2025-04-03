@@ -202,7 +202,7 @@ export class NetworkManager {
 
       // Another player joined
       case 'playerJoined':
-        console.log(`Player ${message.id} joined`);
+        console.log(`Player ${message.id} joined${message.isBot ? ' (BOT)' : ''}`);
         if (this.onPlayerJoined) {
           this.onPlayerJoined(message);
         }
@@ -213,7 +213,9 @@ export class NetworkManager {
           isAiming: false,
           isShooting: false,
           isReloading: false,
-          quickDrawLobbyIndex: message.quickDrawLobbyIndex || -1
+          quickDrawLobbyIndex: message.quickDrawLobbyIndex || -1,
+          isBot: message.isBot || false, // Track if this is a bot player
+          username: message.username || `Player_${message.id}`
         });
         break;
 
@@ -245,9 +247,35 @@ export class NetworkManager {
               message.health !== undefined ? message.health : existing.health;
             existing.isDying =
               message.isDying !== undefined ? message.isDying : existing.isDying;
+            existing.isBot =
+              message.isBot !== undefined ? message.isBot : existing.isBot;
+            existing.isWalking =
+              message.isWalking !== undefined ? message.isWalking : existing.isWalking;
+          } else {
+            // If this is a new player we hadn't seen before
+            this.otherPlayers.set(message.id, {
+              id: message.id,
+              position: message.position || { x: 0, y: 0, z: 0 },
+              rotation: message.rotation || { y: 0 },
+              isAiming: message.isAiming || false,
+              isShooting: message.isShooting || false,
+              isReloading: message.isReloading || false, 
+              quickDrawLobbyIndex: message.quickDrawLobbyIndex || -1,
+              health: message.health || 100,
+              isDying: message.isDying || false,
+              isBot: message.isBot || false,
+              isWalking: message.isWalking || false,
+              username: message.username || `Player_${message.id}`
+            });
+            
+            // Notify about this newly discovered player
+            if (this.onPlayerJoined) {
+              this.onPlayerJoined(this.otherPlayers.get(message.id));
+            }
           }
-          if (this.onPlayerUpdate) {
-            this.onPlayerUpdate(message.id, existing);
+          
+          if (this.onPlayerUpdate && message.id !== this.playerId) {
+            this.onPlayerUpdate(message.id, existing || this.otherPlayers.get(message.id));
           }
         }
         break;

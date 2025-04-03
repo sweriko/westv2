@@ -66,12 +66,14 @@ export class MultiplayerManager {
 
     networkManager.onPlayerJoined = (playerData) => {
       if (playerData && playerData.id !== this.localPlayerId) {
+        console.log(`Player joined: ${playerData.id}${playerData.isBot ? ' (BOT)' : ''}`);
         this.addPlayer(playerData.id, playerData);
         this.notifyPlayersUpdated();
       }
     };
 
     networkManager.onPlayerLeft = (playerId) => {
+      console.log(`Player left: ${playerId}`);
       this.removePlayer(playerId);
       this.notifyPlayersUpdated();
     };
@@ -339,45 +341,90 @@ export class MultiplayerManager {
   }
 
   addPlayer(playerId, data) {
-    const playerModel = new ThirdPersonModel(this.scene, playerId);
-    playerModel.update(data);
-    this.remotePlayers.set(playerId, playerModel);
+    if (!this.remotePlayers.has(playerId)) {
+      console.log(`Adding new ${data.isBot ? 'bot' : 'player'} model for ID: ${playerId}, Username: ${data.username || 'Unknown'}`);
+      
+      // Check if the player ID looks like a bot ID
+      const isBot = data.isBot || (typeof playerId === 'string' && playerId.startsWith('bot_'));
+      
+      const playerModel = new ThirdPersonModel(this.scene, playerId);
+      playerModel.isBot = isBot; // Flag to identify bots
+      
+      // For bots, ensure model is immediately visible
+      if (isBot && playerModel.playerModel) {
+        playerModel.playerModel.visible = true;
+        playerModel.playerModel.traverse(child => {
+          if (child.isMesh) {
+            child.visible = true;
+            child.frustumCulled = false;
+          }
+        });
+      }
+      
+      this.remotePlayers.set(playerId, playerModel);
+      this.createPlayerLabel(playerId, data.username || `Player_${playerId}`);
+    }
     
-    // Create a username label for this player
-    this.createPlayerLabel(playerId, data.username || `Player ${playerId}`);
-    
-    return playerModel;
+    // Update player with latest data
+    const player = this.remotePlayers.get(playerId);
+    if (player && data) {
+      player.update(data);
+    }
   }
 
   createPlayerLabel(playerId, username) {
-    // Create DOM label
-    const label = document.createElement('div');
-    label.className = 'player-username-label';
-    label.textContent = username;
-    label.style.position = 'absolute';
-    label.style.padding = '2px 8px';
-    label.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-    label.style.color = 'white';
-    label.style.borderRadius = '4px';
-    label.style.fontSize = '14px';
-    label.style.fontWeight = 'bold';
-    label.style.textAlign = 'center';
-    label.style.transition = 'opacity 0.3s';
-    label.style.zIndex = '5';
-    label.style.pointerEvents = 'none';
-    label.style.transform = 'translate(-50%, -100%)';
-    label.style.textShadow = '1px 1px 2px rgba(0, 0, 0, 0.8)';
-    
-    // Add to DOM
-    const container = document.getElementById('player-labels-container');
-    if (container) {
-      container.appendChild(label);
-    } else {
-      document.body.appendChild(label);
+    // Check if we already have a label for this player
+    if (this.playerLabels.has(playerId)) {
+      // Just update the label text if it exists
+      const labelData = this.playerLabels.get(playerId);
+      if (labelData && labelData.div) {
+        labelData.div.textContent = username;
+      }
+      return;
     }
     
-    // Store reference
-    this.playerLabels.set(playerId, { div: label });
+    // Get the player model
+    const playerModel = this.remotePlayers.get(playerId);
+    const isBot = playerModel && playerModel.isBot;
+    
+    // Create new HTML element for the player label
+    const labelElement = document.createElement('div');
+    labelElement.classList.add('player-label');
+    
+    // Style for bot vs player
+    if (isBot) {
+      labelElement.classList.add('bot-label');
+      labelElement.textContent = `🤖 ${username}`;
+    } else {
+      labelElement.textContent = username;
+    }
+    
+    // Apply general label styling
+    labelElement.style.position = 'absolute';
+    labelElement.style.color = 'white';
+    labelElement.style.fontFamily = 'Arial, sans-serif';
+    labelElement.style.fontSize = '14px';
+    labelElement.style.fontWeight = 'bold';
+    labelElement.style.textShadow = '1px 1px 2px black';
+    labelElement.style.padding = '3px 6px';
+    labelElement.style.borderRadius = '4px';
+    labelElement.style.backgroundColor = isBot ? 'rgba(50, 150, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)';
+    labelElement.style.pointerEvents = 'none';
+    labelElement.style.userSelect = 'none';
+    labelElement.style.zIndex = '10';
+    
+    // Get the container
+    const container = document.getElementById('player-labels-container');
+    if (container) {
+      container.appendChild(labelElement);
+    } else {
+      document.body.appendChild(labelElement);
+    }
+    
+    // Store label data
+    this.playerLabels.set(playerId, {
+      div: labelElement
+    });
   }
 
   removePlayer(playerId) {

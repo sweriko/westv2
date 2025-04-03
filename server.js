@@ -63,6 +63,10 @@ const sessions = new Set();   // tracks sessionIds to prevent duplicate connecti
 let nextPlayerId = 1;
 console.log("Player tracking variables initialized");
 
+// Track bot players (new)
+const botPlayers = new Map(); // botId -> { position, rotation, health, ... }
+console.log("Bot player tracking initialized");
+
 // New: Track persistent player identities
 const playerIdentities = new Map(); // clientId -> { username, playerId, token, lastSeen }
 console.log("Player identity tracking initialized");
@@ -383,6 +387,16 @@ function initializePlayer(ws, playerId, sessionId, clientId, username, token, is
         // Handle chat messages
         case 'chat':
           handleChatMessage(playerId, data.message);
+          break;
+
+        // Handle bot player updates
+        case 'bot_update':
+          handleBotUpdate(data);
+          break;
+        
+        // Handle bot player removal
+        case 'bot_remove':
+          handleBotRemove(data);
           break;
 
         default:
@@ -1933,4 +1947,87 @@ function handleChatMessage(playerId, message) {
     username: player.username,
     message: message
   });
+}
+
+// Handle bot player updates
+function handleBotUpdate(data) {
+  if (!data.id) return;
+  
+  // Update or create bot entry
+  const botId = data.id;
+  const existingBot = botPlayers.get(botId);
+  
+  if (existingBot) {
+    // Update existing bot data
+    Object.assign(existingBot, {
+      position: data.position,
+      rotation: data.rotation,
+      health: data.health,
+      isWalking: data.isWalking,
+      isAiming: data.isAiming,
+      isShooting: data.isShooting,
+      username: data.username || existingBot.username,
+      lastUpdated: Date.now()
+    });
+  } else {
+    // Create new bot entry
+    botPlayers.set(botId, {
+      id: botId,
+      position: data.position,
+      rotation: data.rotation,
+      health: data.health || 100,
+      isWalking: data.isWalking || false,
+      isAiming: data.isAiming || false,
+      isShooting: data.isShooting || false,
+      username: data.username || 'Bot',
+      lastUpdated: Date.now()
+    });
+    
+    // Broadcast bot joined to all players
+    broadcastToAll({
+      type: 'playerJoined',
+      id: botId,
+      username: data.username || 'Bot',
+      position: data.position,
+      rotation: data.rotation,
+      health: data.health || 100,
+      isWalking: data.isWalking || false,
+      isAiming: data.isAiming || false,
+      isShooting: data.isShooting || false,
+      isBot: true
+    });
+  }
+  
+  // Broadcast bot update to all players
+  broadcastToAll({
+    type: 'playerUpdate',
+    id: botId,
+    position: data.position,
+    rotation: data.rotation,
+    health: data.health,
+    isWalking: data.isWalking,
+    isAiming: data.isAiming,
+    isShooting: data.isShooting,
+    isBot: true
+  });
+}
+
+// Handle bot player removal
+function handleBotRemove(data) {
+  if (!data.id) return;
+  
+  const botId = data.id;
+  
+  // Remove bot from tracking
+  if (botPlayers.has(botId)) {
+    botPlayers.delete(botId);
+    
+    // Broadcast bot left to all players
+    broadcastToAll({
+      type: 'playerLeft',
+      id: botId
+    });
+    
+    console.log(`Bot ${botId} removed from the server`);
+  }
 }
