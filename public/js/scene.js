@@ -1,11 +1,15 @@
 // /public/js/scene.js
 export let scene;
 import { DesertTerrain } from './desertTerrain.js';
+import { TumbleweedManager } from './tumbleweed.js';
 
 // Adding skybox references for animation
 let skyMesh;
 let groundMesh;
 const SKYBOX_ROTATION_SPEED = 0.00001; // Much slower rotation speed
+
+// Add tumbleweed manager
+let tumbleweedManager;
 
 /**
  * Initializes the Three.js scene, camera, and renderer.
@@ -381,6 +385,11 @@ export function updateFPS(renderer, camera, deltaTime) {
     skyMesh.rotation.y += SKYBOX_ROTATION_SPEED * deltaTime * 1000; // Convert to milliseconds
   }
   
+  // Update tumbleweeds if manager exists
+  if (tumbleweedManager) {
+    tumbleweedManager.update(deltaTime);
+  }
+  
   // Update FPS counter
   const fpsCounter = document.getElementById('fps-counter');
   if (fpsCounter && deltaTime > 0) {
@@ -401,6 +410,9 @@ function createDesertTerrain() {
     
     // Store terrain instance for potential access later
     window.desertTerrain = desertTerrain;
+    
+    // Initialize tumbleweed manager after terrain is created
+    initializeTumbleweedManager();
   } else {
     // If town dimensions aren't available yet, wait for them
     console.log("Waiting for town dimensions before creating desert terrain...");
@@ -412,8 +424,25 @@ function createDesertTerrain() {
         
         // Store terrain instance for potential access later
         window.desertTerrain = desertTerrain;
+        
+        // Initialize tumbleweed manager after terrain is created
+        initializeTumbleweedManager();
+        
         clearInterval(checkInterval);
       }
     }, 100);
+  }
+}
+
+/**
+ * Initializes the tumbleweed manager
+ */
+function initializeTumbleweedManager() {
+  if (window.townDimensions) {
+    console.log("Initializing tumbleweed manager...");
+    tumbleweedManager = new TumbleweedManager(scene, window.townDimensions);
+    
+    // Store manager instance for potential access later
+    window.tumbleweedManager = tumbleweedManager;
   }
 }

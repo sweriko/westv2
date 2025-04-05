@@ -201,7 +201,8 @@ function preloadGameContent() {
     const modelURLs = [
       'models/town.glb',
       'models/viewmodel.glb',
-      'models/playermodel.glb'
+      'models/playermodel.glb',
+      'models/tumbleweed.glb'
     ];
     
     // Track loading progress
