@@ -2171,6 +2171,9 @@ export class QuickDraw {
             }
         }
         
+        // Ensure letterbox effect is removed immediately
+        document.body.classList.remove('letterbox-active');
+        
         // Determine if player won or lost
         const playerWon = winnerId === this.localPlayer.id;
         
@@ -2202,7 +2205,10 @@ export class QuickDraw {
             
             // Restore nametags after death animation
             this.restorePlayerNametags();
-        }, 4000);
+            
+            // Double-check that letterbox effect is removed after animation
+            document.body.classList.remove('letterbox-active');
+        }, 3000);
         
         // Server will send fullStateReset message after a delay
     }
@@ -2352,8 +2358,10 @@ export class QuickDraw {
             this.soundManager.playSound("quickdrawending", 0, 0.8);
         }
         
-        // Auto-fade out the overlay faster (after 3 seconds instead of 5)
+        // Auto-fade out the overlay faster (after 2 seconds instead of 2.5)
         setTimeout(() => {
+            // Apply smoother fade out transition
+            resultOverlay.style.transition = 'opacity 0.8s ease-out';
             resultOverlay.style.opacity = '0';
             
             // Remove from DOM after fade out
@@ -2371,7 +2379,7 @@ export class QuickDraw {
                 // Hide message overlay too
                 this.hideMessage();
             }, 1000);
-        }, 2500);
+        }, 2000);
     }
     
     /**
@@ -3300,8 +3308,11 @@ export class QuickDraw {
         // Set death/kill animation flag to prevent camera switching
         this.inDeathOrKillAnimation = true;
         
-        // Show death message
-        this.showMessage('YOU DIED', 1500, '#FF0000');
+        // Skip showing "YOU DIED" message if this is a duel death (we'll show DEFEAT instead)
+        if (!this.inDuel) {
+            // Show death message only for non-duel deaths
+            this.showMessage('YOU DIED', 1500, '#FF0000');
+        }
         
         // Play death sound
         if (this.soundManager) {
@@ -3456,6 +3467,9 @@ export class QuickDraw {
         
         // Ensure player nametags are restored
         this.restorePlayerNametags();
+        
+        // Ensure letterbox effect is removed
+        document.body.classList.remove('letterbox-active');
         
         // Reset quickdraw specific state
         this.inDuel = false;
@@ -4104,6 +4118,9 @@ export class QuickDraw {
         
         // Always restore nametags when cleaning up
         this.restorePlayerNametags();
+        
+        // Ensure letterbox effect is removed
+        document.body.classList.remove('letterbox-active');
         
         // Clear all duel-related timers
         this.clearAllDuelTimers();

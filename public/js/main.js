@@ -328,6 +328,12 @@ async function init() {
     networkManager.onDeath = (killerId) => {
       console.log(`You were killed by player ${killerId}`);
       
+      // Skip death message if in QuickDraw duel (defeat message is shown instead)
+      if (window.quickDraw && window.quickDraw.inDuel) {
+        console.log('In QuickDraw duel, skipping automatic death message');
+        return;
+      }
+      
       // Show death message
       const deathMessage = document.createElement('div');
       deathMessage.innerText = 'YOU DIED';
