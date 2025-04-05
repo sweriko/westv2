@@ -15,8 +15,8 @@ import { initPlayerIdentity, verifyIdentityWithServer } from './playerIdentity.j
 import logger from './logger.js';
 import { FlyingEagle } from './flyingEagle.js';
 import { initChat, handleChatMessage, addSystemMessage } from './chat.js';
-import { BotManager } from './botPlayer.js';
-console.log("Bot player module loaded");
+import { initNpcManager, npcManager } from './npcManager.js';
+console.log("NPC Manager module loaded");
 import './viewmodel-config.js';
 
 // Check if device is mobile
@@ -44,7 +44,6 @@ let renderer, camera;
 let multiplayerManager;
 let quickDraw;
 let physics;
-let botManager; // Bot manager reference
 let lastTime = 0;
 
 // Smoke ring effects
@@ -95,10 +94,13 @@ async function init() {
     // Detect if we're on a mobile device
     window.isMobile = isMobileDevice();
     
-    // Setup scene - use the scene from initScene instead of creating a new one
+    // Initialize scene - use the scene from initScene instead of creating a new one
     const sceneSetup = initScene();
     camera = sceneSetup.camera;
     renderer = sceneSetup.renderer;
+    
+    // Initialize NPC manager with the scene
+    const npcManagerInstance = initNpcManager(scene);
     
     // Set up global renderer access for camera switching
     window.renderer.instance = renderer;
@@ -388,21 +390,14 @@ async function init() {
         }
       }
       
-      // Spawn a bot with the B key
+      // Reload weapon with the R key
+      if (event.code === 'KeyR' && !quickDraw.inDuel) {
+        localPlayer.reloadWeapon();
+      }
+      
+      // No longer spawn bots with the B key as NPCs are now server-controlled
       if (event.code === 'KeyB' && !event.ctrlKey && !event.shiftKey) {
-        if (window.botManager) {
-          try {
-            const bot = window.botManager.spawnFixedBot(`Bot_${Math.floor(Math.random() * 1000)}`);
-            console.log(`Bot spawned with ID: ${bot.id}`);
-            
-            // Show a system message if the chat system is available
-            if (typeof addSystemMessage === 'function') {
-              addSystemMessage("Bot spawned in town center");
-            }
-          } catch (error) {
-            console.error("Failed to spawn bot:", error);
-          }
-        }
+        console.log("NPCs are now server-controlled and cannot be spawned from the client");
       }
     });
 
@@ -454,19 +449,9 @@ async function init() {
       handleChatMessage({ username, message });
     };
 
-    // Initialize bot manager
-    botManager = new BotManager(scene);
-    window.botManager = botManager; // Make globally accessible
-    
-    // Spawn a bot in the town center with fixed parameters
-    setTimeout(() => {
-      try {
-        const townBot = botManager.spawnFixedBot("TownGuard");
-        console.log("Bot spawned:", townBot.id);
-      } catch (error) {
-        console.error("Failed to spawn bot:", error);
-      }
-    }, 2000); // Wait 2 seconds to ensure everything is properly loaded
+    // Make NPC manager globally accessible
+    window.npcManager = npcManagerInstance;
+    console.log("NPCs are now handled by the server");
     
     // Start the animation loop
     animate(0);
@@ -566,9 +551,9 @@ function animate(time) {
     window.flyingEagle.update(deltaTime);
   }
 
-  // Update bot animations through bot manager
-  if (botManager) {
-    // Bot manager handles its own internal updates
+  // Update NPCs through npc manager
+  if (window.npcManager) {
+    // NPC manager handles its own internal updates
   }
 
   // CAMERA SELECTION LOGIC:

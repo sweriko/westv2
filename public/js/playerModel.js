@@ -774,6 +774,9 @@ export class ThirdPersonModel {
     
     // Skip animation updates if animations aren't loaded yet
     const animationsLoaded = this.animations && Object.keys(this.animations).length > 0;
+    
+    // Check if this is an NPC or Bot
+    const isAIControlled = this.isBot || this.isNpc || playerData.isBot || playerData.isNpc;
 
     // Handle death animation if the player is dying
     if (animationsLoaded && playerData.isDying && !this.isDying) {
@@ -851,10 +854,21 @@ export class ThirdPersonModel {
     
     // Update target position from network data
     if (playerData.position) {
-      // Position the model on the ground, with a small offset to prevent sinking
+      // Choose the right height adjustment based on entity type
+      let heightAdjustment = 0;
+      
+      if (isAIControlled) {
+        // NPCs/Bots need the same height adjustment as players to prevent floating
+        heightAdjustment = -2.72; // Same as players to keep NPCs grounded
+      } else {
+        // Regular player adjustment to prevent sinking
+        heightAdjustment = -2.72; // Adjusted for 70% taller player model (1.6 * 1.7)
+      }
+      
+      // Position the model on the ground, with appropriate height adjustment
       const newPos = new THREE.Vector3(
         playerData.position.x,
-        playerData.position.y - 2.72, // Adjusted for 70% taller player model (1.6 * 1.7)
+        playerData.position.y + heightAdjustment,
         playerData.position.z
       );
       
@@ -868,8 +882,11 @@ export class ThirdPersonModel {
 
       // Only process animation transitions if animations are loaded
       if (animationsLoaded && !this.isJumping && !this.isAiming && !this.isShooting) {
-        // Check if moving based on position change
-        const isMovingNow = distance > 0.05; 
+        // Check if moving based on position change or explicit walking flag
+        const isMovingNow = isAIControlled ? 
+                          (playerData.isWalking || false) : // Use isWalking flag for AI
+                          (distance > 0.05);               // Use distance for players
+        
         const isRunningNow = distance > 0.3; // Threshold for running
         
         // Handle animation state transitions

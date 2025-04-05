@@ -142,12 +142,11 @@
   <!-- Vibe Jam 2025 entrant badge -->
   <a target="_blank" href="https://jam.pieter.com" style="font-family: 'system-ui', sans-serif; position: fixed; bottom: -1px; right: -1px; padding: 7px; font-size: 14px; font-weight: bold; background: #fff; color: #000; text-decoration: none; z-index: 10; border-top-left-radius: 12px; z-index: 10000; border: 1px solid #fff;">🕹️ Vibe Jam 2025</a>
 
-  <!-- Add a button for admin controls to the side of the chat container -->
+  <!-- Admin controls for developers -->
   <div id="admin-controls" class="hidden">
-    <h3>Bot Controls</h3>
-    <div class="admin-buttons">
-      <button id="spawn-bot-btn">Spawn Bot</button>
-      <button id="remove-bots-btn">Remove All Bots</button>
+    <div class="admin-panel">
+      <h3>Admin Controls</h3>
+      <p>NPCs are now server-controlled. Bot controls have been removed.</p>
     </div>
   </div>
 
@@ -159,37 +158,6 @@
         const adminControls = document.getElementById('admin-controls');
         adminControls.classList.toggle('hidden');
       }
-    });
-    
-    // Initialize bot controls when the game is loaded
-    document.addEventListener('DOMContentLoaded', function() {
-      // Wait for window.botManager to be available
-      const initBotControls = function() {
-        if (!window.botManager) {
-          setTimeout(initBotControls, 500);
-          return;
-        }
-        
-        const spawnBotBtn = document.getElementById('spawn-bot-btn');
-        const removeBotsBtn = document.getElementById('remove-bots-btn');
-        
-        if (spawnBotBtn) {
-          spawnBotBtn.addEventListener('click', function() {
-            const botName = `TownBot_${Math.floor(Math.random() * 1000)}`;
-            window.botManager.spawnTownBot(botName);
-            console.log(`Bot ${botName} spawned`);
-          });
-        }
-        
-        if (removeBotsBtn) {
-          removeBotsBtn.addEventListener('click', function() {
-            window.botManager.removeAllBots();
-            console.log('All bots removed');
-          });
-        }
-      };
-      
-      initBotControls();
     });
   </script>
 </body>

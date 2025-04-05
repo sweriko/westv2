@@ -33,10 +33,16 @@ export class MultiplayerManager {
     this.initNetwork();
   }
   
+  /**
+   * Creates the container for player username labels
+   */
   createLabelContainer() {
-    // Create a container for all player labels if it doesn't exist
-    if (!document.getElementById('player-labels-container')) {
-      const container = document.createElement('div');
+    // Check if container already exists
+    let container = document.getElementById('player-labels-container');
+    
+    if (!container) {
+      // Create a new container
+      container = document.createElement('div');
       container.id = 'player-labels-container';
       container.style.position = 'absolute';
       container.style.top = '0';
@@ -45,8 +51,19 @@ export class MultiplayerManager {
       container.style.height = '100%';
       container.style.pointerEvents = 'none';
       container.style.overflow = 'hidden';
-      document.body.appendChild(container);
+      container.style.zIndex = '10';
+      
+      // Add to the game container
+      const gameContainer = document.getElementById('game-container');
+      if (gameContainer) {
+        gameContainer.appendChild(container);
+      } else {
+        document.body.appendChild(container);
+      }
     }
+    
+    // Store the reference to the container
+    this.labelContainer = container;
   }
   
   initNetwork() {
@@ -66,7 +83,7 @@ export class MultiplayerManager {
 
     networkManager.onPlayerJoined = (playerData) => {
       if (playerData && playerData.id !== this.localPlayerId) {
-        console.log(`Player joined: ${playerData.id}${playerData.isBot ? ' (BOT)' : ''}`);
+        console.log(`Player joined: ${playerData.id}${playerData.isNpc ? ' (NPC)' : (playerData.isBot ? ' (BOT)' : '')}`);
         this.addPlayer(playerData.id, playerData);
         this.notifyPlayersUpdated();
       }
@@ -111,6 +128,33 @@ export class MultiplayerManager {
       
       // Normal update
       if (playerModel) {
+        // For NPCs/Bots, cache the latest network data to use in the animation update
+        if (updatedData && (playerModel.isBot || playerModel.isNpc || (updatedData.isNpc || updatedData.isBot))) {
+          // Cache the network data for use in the animation update
+          playerModel._cachedNetworkData = {
+            ...updatedData,
+            isNpc: updatedData.isNpc || playerModel.isNpc,
+            isBot: updatedData.isBot || playerModel.isBot
+          };
+          
+          // Ensure isNpc/isBot flags are set on the model
+          playerModel.isNpc = playerModel._cachedNetworkData.isNpc;
+          playerModel.isBot = playerModel._cachedNetworkData.isBot;
+          
+          // If the NPC is walking, direct to walking animation immediately
+          if (updatedData.isWalking && !playerModel.isWalking) {
+            playerModel.isWalking = true;
+            if (playerModel.directToWalking) {
+              playerModel.directToWalking(false);
+            }
+          } else if (!updatedData.isWalking && playerModel.isWalking) {
+            playerModel.isWalking = false;
+            if (playerModel.directToIdle) {
+              playerModel.directToIdle();
+            }
+          }
+        }
+        
         playerModel.update(updatedData);
       } else if (updatedData) {
         // If we don't have this model yet, create it
@@ -340,91 +384,122 @@ export class MultiplayerManager {
     }
   }
 
-  addPlayer(playerId, data) {
-    if (!this.remotePlayers.has(playerId)) {
-      console.log(`Adding new ${data.isBot ? 'bot' : 'player'} model for ID: ${playerId}, Username: ${data.username || 'Unknown'}`);
-      
-      // Check if the player ID looks like a bot ID
-      const isBot = data.isBot || (typeof playerId === 'string' && playerId.startsWith('bot_'));
-      
-      const playerModel = new ThirdPersonModel(this.scene, playerId);
-      playerModel.isBot = isBot; // Flag to identify bots
-      
-      // For bots, ensure model is immediately visible
-      if (isBot && playerModel.playerModel) {
-        playerModel.playerModel.visible = true;
-        playerModel.playerModel.traverse(child => {
-          if (child.isMesh) {
-            child.visible = true;
-            child.frustumCulled = false;
-          }
-        });
-      }
-      
-      this.remotePlayers.set(playerId, playerModel);
-      this.createPlayerLabel(playerId, data.username || `Player_${playerId}`);
+  /**
+   * Adds a remote player to the scene with proper model
+   * @param {number} playerId - ID of the player to add
+   * @param {Object} initialData - Initial player data from server
+   */
+  addPlayer(playerId, initialData = {}) {
+    // Skip if we already have this player
+    if (this.remotePlayers.has(playerId)) return;
+    
+    console.log(`Adding remote player ${playerId} to scene`);
+    
+    // Create new player model
+    const playerModel = new ThirdPersonModel(this.scene, playerId);
+    
+    // Set bot/NPC flag if this is not a human player
+    playerModel.isBot = initialData.isBot || false;
+    playerModel.isNpc = initialData.isNpc || false;
+    
+    // Track if this is an AI-controlled character
+    const isAiControlled = playerModel.isBot || playerModel.isNpc;
+    
+    // Add to tracking map - used by main.js for bullet hit detection
+    this.remotePlayers.set(playerId, playerModel);
+    
+    // Set initial position if provided
+    if (initialData.position) {
+      playerModel.targetPosition.set(
+        initialData.position.x, 
+        initialData.position.y, 
+        initialData.position.z
+      );
+      playerModel.group.position.copy(playerModel.targetPosition);
     }
     
-    // Update player with latest data
-    const player = this.remotePlayers.get(playerId);
-    if (player && data) {
-      player.update(data);
+    // Set initial rotation if provided
+    if (initialData.rotation && initialData.rotation.y !== undefined) {
+      playerModel.targetRotation = initialData.rotation.y;
+      playerModel.group.rotation.y = initialData.rotation.y;
     }
+    
+    // For NPCs/Bots, ensure model is prepared correctly and animation is initialized
+    if (isAiControlled) {
+      // Store the network data for future updates
+      playerModel._cachedNetworkData = { ...initialData };
+      
+      // Ensure animations load and initialize correctly
+      setTimeout(() => {
+        // Set initial animation state based on data
+        if (initialData.isWalking && playerModel.directToWalking) {
+          playerModel.isWalking = true;
+          playerModel.directToWalking(false);
+        } else if (playerModel.directToIdle) {
+          playerModel.isWalking = false;
+          playerModel.directToIdle();
+        }
+      }, 500); // Delay slightly to ensure model is loaded
+    }
+    
+    // Create username label
+    this.createPlayerLabel(playerId, initialData.username || `Player_${playerId}`, isAiControlled);
+    
+    return playerModel;
   }
 
-  createPlayerLabel(playerId, username) {
-    // Check if we already have a label for this player
-    if (this.playerLabels.has(playerId)) {
-      // Just update the label text if it exists
-      const labelData = this.playerLabels.get(playerId);
-      if (labelData && labelData.div) {
-        labelData.div.textContent = username;
-      }
-      return;
-    }
+  /**
+   * Creates a floating username label for a player
+   * @param {number} playerId - ID of the player
+   * @param {string} username - Username to display
+   * @param {boolean} isAiControlled - Whether this is a bot or NPC
+   */
+  createPlayerLabel(playerId, username, isAiControlled = false) {
+    // Remove any existing label first
+    this.removePlayerLabel(playerId);
     
-    // Get the player model
-    const playerModel = this.remotePlayers.get(playerId);
-    const isBot = playerModel && playerModel.isBot;
+    // Create label container
+    const div = document.createElement('div');
+    div.className = 'player-label';
     
-    // Create new HTML element for the player label
-    const labelElement = document.createElement('div');
-    labelElement.classList.add('player-label');
+    // Style the label
+    div.style.position = 'absolute';
+    div.style.color = 'white';
+    div.style.fontFamily = 'Arial, sans-serif';
+    div.style.fontSize = '14px';
+    div.style.fontWeight = 'bold';
+    div.style.textShadow = '1px 1px 2px black';
+    div.style.padding = '3px 6px';
+    div.style.borderRadius = '4px';
+    div.style.pointerEvents = 'none';
+    div.style.userSelect = 'none';
+    div.style.zIndex = '10';
     
-    // Style for bot vs player
-    if (isBot) {
-      labelElement.classList.add('bot-label');
-      labelElement.textContent = `🤖 ${username}`;
+    // Add special styling for AI-controlled characters
+    if (isAiControlled) {
+      div.classList.add('ai-controlled');
+      div.style.backgroundColor = 'rgba(50, 150, 255, 0.5)'; // Blue background for NPCs
+      div.textContent = `🤖 ${username}`; // Add robot emoji to indicate NPC
     } else {
-      labelElement.textContent = username;
+      div.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'; // Regular background for players
+      div.textContent = username;
     }
     
-    // Apply general label styling
-    labelElement.style.position = 'absolute';
-    labelElement.style.color = 'white';
-    labelElement.style.fontFamily = 'Arial, sans-serif';
-    labelElement.style.fontSize = '14px';
-    labelElement.style.fontWeight = 'bold';
-    labelElement.style.textShadow = '1px 1px 2px black';
-    labelElement.style.padding = '3px 6px';
-    labelElement.style.borderRadius = '4px';
-    labelElement.style.backgroundColor = isBot ? 'rgba(50, 150, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)';
-    labelElement.style.pointerEvents = 'none';
-    labelElement.style.userSelect = 'none';
-    labelElement.style.zIndex = '10';
+    // Add to DOM
+    this.labelContainer.appendChild(div);
     
-    // Get the container
-    const container = document.getElementById('player-labels-container');
-    if (container) {
-      container.appendChild(labelElement);
-    } else {
-      document.body.appendChild(labelElement);
+    // Create THREE.js object to position the label in 3D space
+    const labelObject = new THREE.Object3D();
+    labelObject.position.y = 2.2; // Position above player head
+    
+    // Store references for updating
+    this.playerLabels.set(playerId, { div, labelObject });
+    
+    // If we have this player model, add the label object to it
+    const model = this.remotePlayers.get(playerId);
+    if (model && model.group) {
+      model.group.add(labelObject);
     }
-    
-    // Store label data
-    this.playerLabels.set(playerId, {
-      div: labelElement
-    });
   }
 
   removePlayer(playerId) {
@@ -439,88 +514,93 @@ export class MultiplayerManager {
   }
   
   removePlayerLabel(playerId) {
-    const labelInfo = this.playerLabels.get(playerId);
-    if (labelInfo && labelInfo.div) {
-      if (labelInfo.div.parentNode) {
-        labelInfo.div.parentNode.removeChild(labelInfo.div);
+    const labelData = this.playerLabels.get(playerId);
+    if (labelData) {
+      // Remove the div from DOM
+      if (labelData.div && labelData.div.parentNode) {
+        labelData.div.parentNode.removeChild(labelData.div);
       }
+      
+      // Remove the 3D object from the player model
+      const model = this.remotePlayers.get(playerId);
+      if (model && model.group && labelData.labelObject) {
+        model.group.remove(labelData.labelObject);
+      }
+      
+      // Remove from tracking
       this.playerLabels.delete(playerId);
     }
   }
 
   update(deltaTime) {
-    // Update all player models
-    for (const [playerId, playerModel] of this.remotePlayers.entries()) {
-      playerModel.animateMovement(deltaTime);
-      
-      // Update player label positions
-      this.updateLabelPosition(playerId, playerModel);
+    // Update player models
+    for (const [id, playerModel] of this.remotePlayers.entries()) {
+      if (playerModel) {
+        // Make sure we call the animateMovement method to update animations
+        if (playerModel.animateMovement) {
+          playerModel.animateMovement(deltaTime);
+        }
+        
+        // Also call the general update method if it exists
+        if (playerModel.update) {
+          // For NPCs/Bots, make sure we're passing the animation state correctly
+          if (playerModel.isBot || playerModel.isNpc) {
+            // Check for cached data that was received in onPlayerUpdate
+            const cachedData = playerModel._cachedNetworkData;
+            if (cachedData) {
+              playerModel.update(cachedData);
+            }
+          } else {
+            playerModel.update(deltaTime);
+          }
+        }
+      }
     }
+    
+    // Update player labels
+    this.updatePlayerLabels();
   }
   
-  updateLabelPosition(playerId, playerModel) {
-    const labelInfo = this.playerLabels.get(playerId);
-    if (!labelInfo || !labelInfo.div) return;
+  updatePlayerLabels() {
+    const tempVector = new THREE.Vector3();
+    const canvas = document.querySelector('canvas');
     
-    const label = labelInfo.div;
+    if (!canvas) return;
     
-    // Hide player names if in a quickdraw match
-    if (window.quickDraw && window.quickDraw.inDuel) {
-      label.style.display = 'none';
-      return;
-    }
+    // Get camera for projection
+    const camera = window.renderer && window.renderer.camera ? 
+                  window.renderer.camera : 
+                  this.scene.getObjectByProperty('type', 'PerspectiveCamera');
     
-    // Get player position
-    if (playerModel) {
-      // Use model property if available, otherwise fall back to group
-      const modelObj = playerModel.playerModel || playerModel.model || playerModel.group;
+    if (!camera) return;
+    
+    this.playerLabels.forEach((labelData, playerId) => {
+      const { div, labelObject } = labelData;
+      if (!div) return;
       
-      if (!modelObj) {
-        label.style.display = 'none';
-        return;
+      const model = this.remotePlayers.get(playerId);
+      if (!model || !model.group) return;
+      
+      // Get world position
+      tempVector.setFromMatrixPosition(labelObject.matrixWorld);
+      
+      // Project to 2D screen coordinates
+      tempVector.project(camera);
+      
+      // Convert to CSS coordinates
+      const x = (tempVector.x * 0.5 + 0.5) * canvas.clientWidth;
+      const y = (-(tempVector.y * 0.5) + 0.5) * canvas.clientHeight;
+      
+      // Check if label is in front of the camera
+      if (tempVector.z > 1) {
+        div.style.display = 'none';
+      } else {
+        div.style.display = 'block';
+        div.style.transform = `translate(-50%, -50%)`;
+        div.style.left = `${x}px`;
+        div.style.top = `${y}px`;
       }
-      
-      const playerPos = new window.THREE.Vector3();
-      modelObj.getWorldPosition(playerPos);
-      
-      // Add height offset to position the label above the player's head
-      playerPos.y += 2.2;
-      
-      // Convert 3D position to screen coordinates
-      const camera = window.camera || (window.localPlayer && window.localPlayer.camera);
-      if (!camera) return;
-      
-      // Project position to screen space
-      const widthHalf = window.innerWidth / 2;
-      const heightHalf = window.innerHeight / 2;
-      
-      // Clone position to avoid modifying the original
-      const projectedPos = playerPos.clone();
-      projectedPos.project(camera);
-      
-      // Convert to screen coordinates
-      const x = (projectedPos.x * widthHalf) + widthHalf;
-      const y = -(projectedPos.y * heightHalf) + heightHalf;
-      
-      // Check if player is behind camera
-      if (projectedPos.z > 1) {
-        label.style.display = 'none';
-        return;
-      }
-      
-      // Update label position
-      label.style.display = 'block';
-      label.style.left = `${x}px`;
-      label.style.top = `${y}px`;
-      
-      // Distance fading (fade out when too far)
-      const distance = playerPos.distanceTo(camera.position);
-      const maxDistance = 30;
-      const opacity = 1 - Math.min(Math.max(0, (distance - 15) / maxDistance), 0.9);
-      label.style.opacity = opacity.toString();
-    } else {
-      label.style.display = 'none';
-    }
+    });
   }
 
   notifyPlayersUpdated() {

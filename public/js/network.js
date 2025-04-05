@@ -202,7 +202,7 @@ export class NetworkManager {
 
       // Another player joined
       case 'playerJoined':
-        console.log(`Player ${message.id} joined${message.isBot ? ' (BOT)' : ''}`);
+        console.log(`Player ${message.id} joined${message.isNpc ? ' (NPC)' : (message.isBot ? ' (BOT)' : '')}`);
         if (this.onPlayerJoined) {
           this.onPlayerJoined(message);
         }
@@ -214,7 +214,8 @@ export class NetworkManager {
           isShooting: false,
           isReloading: false,
           quickDrawLobbyIndex: message.quickDrawLobbyIndex || -1,
-          isBot: message.isBot || false, // Track if this is a bot player
+          isBot: message.isBot || false, // Legacy bot flag
+          isNpc: message.isNpc || false, // New NPC flag
           username: message.username || `Player_${message.id}`
         });
         break;
@@ -249,6 +250,8 @@ export class NetworkManager {
               message.isDying !== undefined ? message.isDying : existing.isDying;
             existing.isBot =
               message.isBot !== undefined ? message.isBot : existing.isBot;
+            existing.isNpc =
+              message.isNpc !== undefined ? message.isNpc : existing.isNpc;
             existing.isWalking =
               message.isWalking !== undefined ? message.isWalking : existing.isWalking;
           } else {
@@ -264,6 +267,7 @@ export class NetworkManager {
               health: message.health || 100,
               isDying: message.isDying || false,
               isBot: message.isBot || false,
+              isNpc: message.isNpc || false,
               isWalking: message.isWalking || false,
               username: message.username || `Player_${message.id}`
             });
