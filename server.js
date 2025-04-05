@@ -2121,7 +2121,7 @@ function updateNpcWalkingBehavior(npcId) {
         npc.isIdle = true;
         npc.isWalking = false;
       }
-      return;
+      return; // Exit early for paused NPCs - preserves initial rotation
     }
   }
   
@@ -2228,12 +2228,52 @@ setInterval(() => {
   });
 }, NPC_UPDATE_INTERVAL);
 
+/**
+ * Convert degrees to radians
+ * @param {number} degrees - Angle in degrees
+ * @returns {number} The angle in radians
+ */
+function degToRad(degrees) {
+  return degrees * (Math.PI / 180);
+}
+
 // Spawn initial NPCs when server starts
 setTimeout(() => {
   try {
-    spawnTownNpc("Sheriff");
-    spawnTownNpc("Bartender");
-    spawnTownNpc("Cowboy");
+    // Create the sheriff with static position (standing still)
+    const sheriffPosition = { x: 0, y: 2.72, z: -5 }; // Position sheriff somewhere in town
+    createNpc({
+      name: "Sheriff",
+      position: sheriffPosition,
+      rotation: { y: degToRad(45) }, // Facing east (90 degrees)
+      path: {
+        points: [sheriffPosition], // Single point path = standing still
+        currentTarget: 0,
+        pauseTime: 1000000, // Very long pause time to keep idle
+        isPaused: true, // Start in paused mode
+        pauseTimer: 0,
+        lastPauseTime: 0
+      }
+    });
+    
+    // Create the bartender with static position (standing still)
+    const bartenderPosition = { x: 3, y: 2.72, z: 2 }; // Position bartender in middle of town
+    createNpc({
+      name: "Bartender",
+      position: bartenderPosition,
+      rotation: { y: degToRad(180) }, // Facing south (180 degrees)
+      path: {
+        points: [bartenderPosition], // Single point path = standing still
+        currentTarget: 0,
+        pauseTime: 1000000, // Very long pause time to keep idle
+        isPaused: true, // Start in paused mode
+        pauseTimer: 0,
+        lastPauseTime: 0
+      }
+    });
+    
+    // Cowboy has been removed per request
+    
     console.log("Initial NPCs spawned");
   } catch (error) {
     console.error("Failed to spawn initial NPCs:", error);

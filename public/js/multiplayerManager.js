@@ -479,7 +479,7 @@ export class MultiplayerManager {
     if (isAiControlled) {
       div.classList.add('ai-controlled');
       div.style.backgroundColor = 'rgba(50, 150, 255, 0.5)'; // Blue background for NPCs
-      div.textContent = `🤖 ${username}`; // Add robot emoji to indicate NPC
+      div.textContent = username; // Remove robot emoji, just use the name
     } else {
       div.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'; // Regular background for players
       div.textContent = username;
