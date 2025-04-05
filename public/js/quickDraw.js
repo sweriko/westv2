@@ -207,46 +207,71 @@ export class QuickDraw {
         this.challengePrompt = document.createElement('div');
         this.challengePrompt.id = 'quick-draw-challenge-prompt';
         this.challengePrompt.style.position = 'absolute';
-        this.challengePrompt.style.top = '75%';
+        this.challengePrompt.style.bottom = '20%';
         this.challengePrompt.style.left = '50%';
-        this.challengePrompt.style.transform = 'translate(-50%, -50%)';
-        this.challengePrompt.style.color = 'white';
-        this.challengePrompt.style.fontSize = '24px';
-        this.challengePrompt.style.fontWeight = 'bold';
-        this.challengePrompt.style.textAlign = 'center';
-        this.challengePrompt.style.padding = '15px 20px';
-        this.challengePrompt.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-        this.challengePrompt.style.borderRadius = '10px';
-        this.challengePrompt.style.display = 'none';
+        this.challengePrompt.style.transform = 'translate(-50%, 0) rotate(-2deg)';
+        this.challengePrompt.style.width = '350px';
+        this.challengePrompt.style.height = '100px';
+        this.challengePrompt.style.background = 'url("/textures/wooden_sign.png") no-repeat center center';
+        this.challengePrompt.style.backgroundSize = 'contain';
+        this.challengePrompt.style.display = 'flex';
+        this.challengePrompt.style.alignItems = 'center';
+        this.challengePrompt.style.justifyContent = 'center';
         this.challengePrompt.style.zIndex = '1000';
-        this.challengePrompt.textContent = 'Press E to challenge to a Quick Draw duel';
-        document.getElementById('game-container').appendChild(this.challengePrompt);
         
-        // Challenge invitation - shown when receiving a challenge
+        const promptText = document.createElement('div');
+        promptText.textContent = 'Press E to DUEL';
+        promptText.style.fontFamily = 'Western, "Wanted M54", serif';
+        promptText.style.fontSize = '28px';
+        promptText.style.fontWeight = 'bold';
+        promptText.style.color = '#FFD700';
+        promptText.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
+        
+        this.challengePrompt.appendChild(promptText);
+        document.getElementById('game-container').appendChild(this.challengePrompt);
+        this.challengePrompt.style.display = 'none'; // Hide initially
+        
+        // Add gentle swing animation
+        const promptAnimation = document.createElement('style');
+        promptAnimation.textContent = `
+            @keyframes prompt-swing {
+                0% { transform: translate(-50%, 0) rotate(-2deg); }
+                50% { transform: translate(-50%, 0) rotate(1deg); }
+                100% { transform: translate(-50%, 0) rotate(-2deg); }
+            }
+            #quick-draw-challenge-prompt {
+                animation: prompt-swing 3s ease-in-out infinite;
+            }
+        `;
+        document.head.appendChild(promptAnimation);
+        
+        // Add responsive styles for the invitation panel
+        const inviteStyles = document.createElement('style');
+        inviteStyles.textContent = `
+            @media screen and (max-width: 768px) {
+                #quick-draw-invitation {
+                    width: 90% !important;
+                    height: auto !important;
+                    aspect-ratio: 500/333;
+                }
+            }
+        `;
+        document.head.appendChild(inviteStyles);
+        
+        // Create the invitation panel - just using the image
         this.challengeInvitation = document.createElement('div');
         this.challengeInvitation.id = 'quick-draw-invitation';
         this.challengeInvitation.style.position = 'absolute';
-        this.challengeInvitation.style.top = '40%';
+        this.challengeInvitation.style.top = '50%';
         this.challengeInvitation.style.left = '50%';
         this.challengeInvitation.style.transform = 'translate(-50%, -50%)';
-        this.challengeInvitation.style.color = 'white';
-        this.challengeInvitation.style.fontSize = '28px';
-        this.challengeInvitation.style.fontWeight = 'bold';
-        this.challengeInvitation.style.textAlign = 'center';
-        this.challengeInvitation.style.padding = '20px 25px';
-        this.challengeInvitation.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
-        this.challengeInvitation.style.borderRadius = '10px';
-        this.challengeInvitation.style.border = '2px solid #FF6B00';
-        this.challengeInvitation.style.boxShadow = '0 0 15px rgba(255, 107, 0, 0.7)';
-        this.challengeInvitation.style.display = 'none';
+        this.challengeInvitation.style.width = '500px';
+        this.challengeInvitation.style.height = '333px';
+        this.challengeInvitation.style.background = 'url("/models/invitepanel.png") no-repeat center center';
+        this.challengeInvitation.style.backgroundSize = 'contain';
         this.challengeInvitation.style.zIndex = '1100';
-        this.challengeInvitation.innerHTML = `
-            <div style="margin-bottom: 15px">Player X challenges you to a Quick Draw duel!</div>
-            <div style="display: flex; justify-content: space-around; margin-top: 10px;">
-                <div style="background-color: #4CAF50; padding: 10px 20px; border-radius: 5px;">Press Enter to accept</div>
-                <div style="background-color: #F44336; padding: 10px 20px; border-radius: 5px;">Press T to decline</div>
-            </div>
-        `;
+        this.challengeInvitation.style.display = 'none'; // Hide initially
+        
         document.getElementById('game-container').appendChild(this.challengeInvitation);
         
         // Add keyboard event listener for challenge interactions
@@ -717,7 +742,7 @@ export class QuickDraw {
         
         // Update UI based on whether there are nearby players
         if (this.challengePromptActive && !this.challengeUIVisible) {
-            this.challengePrompt.style.display = 'block';
+            this.challengePrompt.style.display = 'flex'; // Use flex instead of block
             this.challengeUIVisible = true;
             
             // Also show invite button on mobile
@@ -784,18 +809,15 @@ export class QuickDraw {
             challengerPosition: message.challengerPosition
         };
         
+        // Explicitly hide the "Press E to Duel" challenge prompt
+        this.challengePrompt.style.display = 'none';
+        this.challengeUIVisible = false;
+        
         // Show mobile quick draw invite UI if on mobile
         if (window.mobileControls && typeof window.mobileControls.showQuickdrawInvite === 'function') {
             window.mobileControls.showQuickdrawInvite();
         } else {
             // Show the challenge invitation for desktop
-            this.challengeInvitation.innerHTML = `
-                <div style="margin-bottom: 15px">Player ${message.challengerId} challenges you to a Quick Draw duel!</div>
-                <div style="display: flex; justify-content: space-around; margin-top: 10px;">
-                    <div style="background-color: #4CAF50; padding: 10px 20px; border-radius: 5px;">Press Enter to accept</div>
-                    <div style="background-color: #F44336; padding: 10px 20px; border-radius: 5px;">Press T to decline</div>
-                </div>
-            `;
             this.challengeInvitation.style.display = 'block';
         }
         
@@ -857,8 +879,6 @@ export class QuickDraw {
         
         // Clear the pending challenge
         this.pendingChallenge = null;
-        
-        console.log('Declined Quick Draw challenge');
     }
 
     /**
