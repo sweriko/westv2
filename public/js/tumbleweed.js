@@ -65,6 +65,58 @@ export class Tumbleweed {
      * Loads the tumbleweed model and animations
      */
     loadTumbleweedModel() {
+      // Check if we have a preloaded tumbleweed model
+      if (window.preloadedModels && (window.preloadedModels.tumbleweed || window.preloadedModels.tumbleweed_clone)) {
+        try {
+          // Use the clone version to avoid reference issues
+          const preloadedModel = window.preloadedModels.tumbleweed_clone || window.preloadedModels.tumbleweed;
+          const gltf = {
+            scene: preloadedModel.scene.clone(),
+            animations: preloadedModel.animations
+          };
+          
+          this.model = gltf.scene;
+          
+          // Position at origin of group
+          this.model.position.set(0, 0, 0);
+          
+          // Make tumbleweed larger (1.5-2.5x original size)
+          const scale = 1.5 + Math.random() * 1.0;
+          this.model.scale.set(scale, scale, scale);
+          
+          // Add the model to the group
+          this.group.add(this.model);
+          
+          // Setup shadows and materials
+          this.model.traverse(child => {
+            if (child.isMesh) {
+              child.castShadow = true;
+              child.receiveShadow = true;
+              
+              // Ensure materials are set up correctly
+              if (child.material) {
+                if (child.isSkinnedMesh) {
+                  child.material.skinning = true;
+                }
+                child.material.needsUpdate = true;
+              }
+            }
+          });
+          
+          // Set up animations if they exist
+          if (gltf.animations && gltf.animations.length > 0) {
+            this.setupAnimations(gltf.animations);
+          }
+          
+          this.isLoaded = true;
+          return; // Exit early since we've handled the model
+        } catch (e) {
+          console.error('Error using preloaded tumbleweed model:', e);
+          // Fall through to regular loading method if preloaded model fails
+        }
+      }
+      
+      // Fallback to regular loading if preloaded model isn't available or fails
       const loader = new THREE.GLTFLoader();
       
       loader.load('models/tumbleweed.glb', 
@@ -134,8 +186,6 @@ export class Tumbleweed {
         
         // If this is the tumble animation, play it on loop
         if (animation.name === 'tumble') {
-          console.log('Found tumble animation, playing on loop');
-          
           // Optimize animation for smooth looping
           this.animations[animation.name].setLoop(THREE.LoopRepeat);
           this.animations[animation.name].clampWhenFinished = false;
@@ -163,46 +213,39 @@ export class Tumbleweed {
     update(deltaTime) {
       if (!this.isLoaded) return;
       
-      // Cap delta time to avoid large jumps after lag
+      // Cap delta time to avoid large jumps
       const cappedDelta = Math.min(deltaTime, 0.1);
       
-      // Update animation mixer
+      // Update speed change timer
+      this.speedChangeTimer += cappedDelta;
+      if (this.speedChangeTimer >= this.speedChangeInterval) {
+        this.speedChangeTimer = 0;
+        this.targetSpeed = this.baseSpeed * (this.minSpeedMultiplier + Math.random() * (this.maxSpeedMultiplier - this.minSpeedMultiplier));
+        this.speedChangeInterval = 2 + Math.random() * 3; // Vary interval as well
+      }
+      
+      // Update bounce phase timer
+      this.bouncePhaseTimer += cappedDelta;
+      if (this.bouncePhaseTimer >= this.bouncePhaseInterval) {
+        this.bouncePhaseTimer = 0;
+        this.isBouncing = Math.random() < 0.7; // 70% chance to bounce
+        this.targetBounceHeight = this.isBouncing ? this.bounceHeight : 0;
+        this.bouncePhaseInterval = 3 + Math.random() * 5; // Vary interval
+      }
+      
+      // Update animation mixer if it exists
       if (this.animationMixer) {
         this.animationMixer.update(cappedDelta);
       }
       
-      // Update speed variation - now only changes the target speed
-      this.speedChangeTimer += cappedDelta;
-      if (this.speedChangeTimer >= this.speedChangeInterval) {
-        // Generate new random speed multiplier
-        const multiplier = this.minSpeedMultiplier + Math.random() * (this.maxSpeedMultiplier - this.minSpeedMultiplier);
-        this.targetSpeed = this.baseSpeed * multiplier;
-        
-        // Reset the timer with some randomness
-        this.speedChangeTimer = 0;
-        this.speedChangeInterval = 2 + Math.random() * 3;
-      }
-      
-      // Smoothly interpolate current speed toward target speed
+      // Smoothly transition speed
       const speedDiff = this.targetSpeed - this.currentSpeed;
       if (Math.abs(speedDiff) > 0.0001) {
         const step = Math.min(Math.abs(speedDiff), this.speedTransitionRate * cappedDelta);
         this.currentSpeed += Math.sign(speedDiff) * step;
       }
       
-      // Update bounce phase - now only changes target bounce height
-      this.bouncePhaseTimer += cappedDelta;
-      if (this.bouncePhaseTimer >= this.bouncePhaseInterval) {
-        // Toggle bounce state
-        this.isBouncing = !this.isBouncing;
-        this.targetBounceHeight = this.isBouncing ? this.bounceHeight : 0;
-        
-        // Reset the timer with some randomness
-        this.bouncePhaseTimer = 0;
-        this.bouncePhaseInterval = 3 + Math.random() * 5;
-      }
-      
-      // Smoothly interpolate current bounce height toward target
+      // Smoothly transition bounce height
       const bounceDiff = this.targetBounceHeight - this.currentBounceHeight;
       if (Math.abs(bounceDiff) > 0.0001) {
         const step = Math.min(Math.abs(bounceDiff), this.bounceTransitionRate * cappedDelta);
@@ -271,11 +314,16 @@ export class Tumbleweed {
       this.scene = scene;
       this.townDimensions = townDimensions;
       this.tumbleweeds = [];
-      this.spawnTimer = 0;
-      this.spawnInterval = 5 + Math.random() * 8; // Shorter interval: 5-13 seconds (was 15-40)
-      this.maxTumbleweeds = 12; // Increased maximum number (was 6)
+      this.tumbleweedPool = []; // Pool of inactive tumbleweeds for reuse
       
-      // Immediately spawn some initial tumbleweeds
+      // Maximum tumbleweeds on screen at once
+      this.maxTumbleweeds = 10;
+      
+      // Spawn timer variables - ticks up each frame
+      this.spawnTimer = 0;
+      this.spawnInterval = 5 + Math.random() * 3; // 5-8 second spawn interval
+      
+      // Initial spawn
       this.initialSpawn();
     }
   
@@ -289,6 +337,40 @@ export class Tumbleweed {
         this.spawnTumbleweed();
       }
       console.log(`Initially spawned ${initialCount} tumbleweeds`);
+    }
+  
+    /**
+     * Gets a tumbleweed from the pool or creates a new one
+     */
+    getTumbleweed(position, direction) {
+      let tumbleweed;
+      
+      // Check if we have any inactive tumbleweeds in the pool
+      if (this.tumbleweedPool.length > 0) {
+        // Reuse a tumbleweed from the pool
+        tumbleweed = this.tumbleweedPool.pop();
+        
+        // Reset tumbleweed properties
+        tumbleweed.position.copy(position);
+        tumbleweed.direction.copy(direction);
+        tumbleweed.group.position.copy(position);
+        tumbleweed.distanceTraveled = 0;
+        tumbleweed.currentSpeed = tumbleweed.baseSpeed;
+        tumbleweed.targetSpeed = tumbleweed.currentSpeed;
+        tumbleweed.currentBounceHeight = 0;
+        tumbleweed.targetBounceHeight = tumbleweed.isBouncing ? tumbleweed.bounceHeight : 0;
+        
+        // Random rotation speed for variety
+        tumbleweed.rotationSpeed = 0.5 + Math.random() * 0.5;
+        
+        // Add back to scene
+        this.scene.add(tumbleweed.group);
+      } else {
+        // Create a new tumbleweed
+        tumbleweed = new Tumbleweed(this.scene, position, direction);
+      }
+      
+      return tumbleweed;
     }
   
     /**
@@ -332,13 +414,28 @@ export class Tumbleweed {
         Math.sin(directionAngle)
       ).normalize();
       
-      // Create and add the tumbleweed
-      const tumbleweed = new Tumbleweed(this.scene, position, direction);
+      // Get a tumbleweed from the pool or create a new one
+      const tumbleweed = this.getTumbleweed(position, direction);
       this.tumbleweeds.push(tumbleweed);
       
       // Reset spawn timer with some randomness
       this.spawnTimer = 0;
-      this.spawnInterval = 5 + Math.random() * 8; // Shorter interval: 5-13 seconds
+    }
+  
+    /**
+     * Recycles a tumbleweed by removing it from the scene and adding to the pool
+     * @param {Tumbleweed} tumbleweed - The tumbleweed to recycle
+     * @param {number} index - Index in the active tumbleweeds array
+     */
+    recycleTumbleweed(tumbleweed, index) {
+      // Remove from active list
+      this.tumbleweeds.splice(index, 1);
+      
+      // Remove from scene but don't destroy
+      this.scene.remove(tumbleweed.group);
+      
+      // Add to pool for reuse
+      this.tumbleweedPool.push(tumbleweed);
     }
   
     /**
@@ -352,14 +449,35 @@ export class Tumbleweed {
         this.spawnTumbleweed();
       }
       
-      // Update all tumbleweeds and remove those that are too far
+      // Update all tumbleweeds and recycle those that are too far
       for (let i = this.tumbleweeds.length - 1; i >= 0; i--) {
         const shouldRemove = this.tumbleweeds[i].update(deltaTime);
         
         if (shouldRemove) {
-          this.tumbleweeds[i].remove();
-          this.tumbleweeds.splice(i, 1);
+          // Instead of removing completely, recycle it
+          this.recycleTumbleweed(this.tumbleweeds[i], i);
         }
       }
+    }
+    
+    /**
+     * Cleanup all resources when no longer needed
+     */
+    dispose() {
+      // Properly remove all active tumbleweeds
+      for (let i = 0; i < this.tumbleweeds.length; i++) {
+        this.tumbleweeds[i].remove();
+      }
+      
+      // Clear active tumbleweeds
+      this.tumbleweeds = [];
+      
+      // Properly remove all pooled tumbleweeds
+      for (let i = 0; i < this.tumbleweedPool.length; i++) {
+        this.tumbleweedPool[i].remove();
+      }
+      
+      // Clear the pool
+      this.tumbleweedPool = [];
     }
   } 

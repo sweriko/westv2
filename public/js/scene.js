@@ -440,9 +440,30 @@ function createDesertTerrain() {
 function initializeTumbleweedManager() {
   if (window.townDimensions) {
     console.log("Initializing tumbleweed manager...");
+    
+    // Dispose of the previous manager if it exists
+    if (tumbleweedManager) {
+      tumbleweedManager.dispose();
+    }
+    
     tumbleweedManager = new TumbleweedManager(scene, window.townDimensions);
     
     // Store manager instance for potential access later
     window.tumbleweedManager = tumbleweedManager;
   }
+}
+
+/**
+ * Cleans up resources when switching scene or closing
+ */
+export function cleanupScene() {
+  console.log("Cleaning up scene resources...");
+  
+  // Dispose of tumbleweed manager
+  if (tumbleweedManager) {
+    tumbleweedManager.dispose();
+    tumbleweedManager = null;
+  }
+  
+  // Clean up other resources as needed
 }
