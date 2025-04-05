@@ -352,6 +352,30 @@ export class NetworkManager {
         }
         break;
 
+      // Player death notification - when this player is killed
+      case 'death':
+        console.log(`You were killed by player ${message.killerId}`);
+        if (this.onDeath) {
+          this.onDeath(message.killerId);
+        }
+        break;
+        
+      // Kill notification - when this player kills another player
+      case 'kill':
+        console.log(`You killed player ${message.targetId}`);
+        if (this.onKill) {
+          this.onKill(message.targetId);
+        }
+        break;
+        
+      // Player death notification - for other players in the game
+      case 'playerDeath':
+        console.log(`Player ${message.id} was killed by player ${message.killedById}`);
+        if (this.onPlayerDeath) {
+          this.onPlayerDeath(message.id, message.killedById);
+        }
+        break;
+
       // Generic error from server
       case 'error':
         console.error('Server error:', message.message);

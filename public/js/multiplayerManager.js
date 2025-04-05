@@ -95,6 +95,18 @@ export class MultiplayerManager {
       this.notifyPlayersUpdated();
     };
 
+    // Add handler for player death events
+    networkManager.onPlayerDeath = (playerId, killedById) => {
+      console.log(`Player ${playerId} was killed by player ${killedById}`);
+      
+      // Find the player model and play death animation
+      const playerModel = this.remotePlayers.get(playerId);
+      if (playerModel && typeof playerModel.playDeathAnimation === 'function') {
+        console.log(`Playing death animation for player ${playerId}`);
+        playerModel.playDeathAnimation();
+      }
+    };
+
     networkManager.onPlayerUpdate = (playerId, updatedData) => {
       if (playerId === this.localPlayerId) return; // skip ourself
       
@@ -124,6 +136,13 @@ export class MultiplayerManager {
         console.log(`[MultiplayerManager] Playing death animation for remote player ${playerId}`);
         playerModel.playDeathAnimation();
         return; // Skip normal update as death animation takes precedence
+      }
+      
+      // Check if player animation state should be reset (after respawn)
+      if (updatedData && updatedData.resetAnimationState === true && playerModel && typeof playerModel.resetAnimationState === 'function') {
+        console.log(`[MultiplayerManager] Resetting animation state for player ${playerId}`);
+        playerModel.resetAnimationState();
+        // Continue with normal update
       }
       
       // Normal update

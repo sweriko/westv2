@@ -1266,4 +1266,72 @@ export class ThirdPersonModel {
       duration: 1500 // Default fallback duration in milliseconds
     };
   }
+
+  /**
+   * Resets all animation states - useful when respawning or between matches
+   */
+  resetAnimationState() {
+    console.log(`Resetting animation state for player ${this.playerId}`);
+    
+    // Reset all animation state flags
+    this.isDying = false;
+    this.isAiming = false;
+    this.isShooting = false;
+    this.isWalking = false;
+    this.isRunning = false;
+    this.isJumping = false;
+    
+    // Stop all active animations and reset mixer
+    if (this.animationMixer) {
+      this.animationMixer.stopAllAction();
+    }
+    
+    // Reset all animations
+    if (this.animations) {
+      for (const name in this.animations) {
+        const action = this.animations[name];
+        if (action) {
+          action.reset();
+          if (action.isRunning()) {
+            action.stop();
+          }
+        }
+      }
+    }
+    
+    // Reset current and previous actions
+    this.currentAction = null;
+    this.previousAction = null;
+    
+    // Play idle animation if available
+    if (this.animations && this.animations['idle']) {
+      this.playAnimation('idle', 0.1);
+    }
+  }
+
+  /**
+   * Disposes of all resources
+   */
+  dispose() {
+    // First reset animation state
+    this.resetAnimationState();
+    
+    // Remove all models
+    if (this.playerModel) {
+      this.group.remove(this.playerModel);
+    }
+    
+    // Remove any helpers
+    if (this.headHelper) this.group.remove(this.headHelper);
+    if (this.bodyHelper) this.group.remove(this.bodyHelper);
+    if (this.leftArmHelper) this.group.remove(this.leftArmHelper);
+    if (this.rightArmHelper) this.group.remove(this.rightArmHelper);
+    if (this.leftLegHelper) this.group.remove(this.leftLegHelper);
+    if (this.rightLegHelper) this.group.remove(this.rightLegHelper);
+    
+    // Remove from scene
+    if (this.group.parent) {
+      this.group.parent.remove(this.group);
+    }
+  }
 }

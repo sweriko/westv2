@@ -321,6 +321,86 @@ async function init() {
       }
     };
 
+    // Handle local player death
+    networkManager.onDeath = (killerId) => {
+      console.log(`You were killed by player ${killerId}`);
+      
+      // Show death message
+      const deathMessage = document.createElement('div');
+      deathMessage.innerText = 'YOU DIED';
+      deathMessage.style.position = 'fixed';
+      deathMessage.style.top = '50%';
+      deathMessage.style.left = '50%';
+      deathMessage.style.transform = 'translate(-50%, -50%)';
+      deathMessage.style.color = '#FF0000';
+      deathMessage.style.fontSize = '36px';
+      deathMessage.style.fontWeight = 'bold';
+      deathMessage.style.zIndex = '1000';
+      document.getElementById('game-container').appendChild(deathMessage);
+      
+      // Create a red overlay effect
+      const deathOverlay = document.createElement('div');
+      deathOverlay.style.position = 'fixed';
+      deathOverlay.style.top = '0';
+      deathOverlay.style.left = '0';
+      deathOverlay.style.width = '100%';
+      deathOverlay.style.height = '100%';
+      deathOverlay.style.backgroundColor = 'rgba(255, 0, 0, 0.3)';
+      deathOverlay.style.zIndex = '999';
+      document.getElementById('game-container').appendChild(deathOverlay);
+      
+      // Disable player controls during death animation
+      if (localPlayer) {
+        localPlayer.canMove = false;
+        localPlayer.canAim = false;
+        
+        // Play death animation on local player model if it exists
+        if (localPlayer.model && typeof localPlayer.model.playDeathAnimation === 'function') {
+          localPlayer.model.playDeathAnimation();
+        }
+        
+        // Play death sound
+        if (localPlayer.soundManager) {
+          localPlayer.soundManager.playSound("playerfall", 0, 0.8);
+        }
+      }
+      
+      // Remove message and overlay after animation
+      setTimeout(() => {
+        if (deathMessage.parentNode) {
+          deathMessage.parentNode.removeChild(deathMessage);
+        }
+        if (deathOverlay.parentNode) {
+          deathOverlay.parentNode.removeChild(deathOverlay);
+        }
+      }, 2000); // Match the server respawn delay
+    };
+    
+    // Handle when the local player kills someone
+    networkManager.onKill = (targetId) => {
+      console.log(`You killed player ${targetId}`);
+      
+      // Show kill message
+      const killMessage = document.createElement('div');
+      killMessage.innerText = 'KILL!';
+      killMessage.style.position = 'fixed';
+      killMessage.style.top = '50%';
+      killMessage.style.left = '50%';
+      killMessage.style.transform = 'translate(-50%, -50%)';
+      killMessage.style.color = '#00FF00';
+      killMessage.style.fontSize = '36px';
+      killMessage.style.fontWeight = 'bold';
+      killMessage.style.zIndex = '1000';
+      document.getElementById('game-container').appendChild(killMessage);
+      
+      // Remove message after a short time
+      setTimeout(() => {
+        if (killMessage.parentNode) {
+          killMessage.parentNode.removeChild(killMessage);
+        }
+      }, 1500);
+    };
+
     // Listen for updates to the remotePlayers map so we can refresh the master map
     multiplayerManager.onRemotePlayersUpdated = () => {
       updatePlayersMap();
@@ -392,7 +472,7 @@ async function init() {
       
       // Reload weapon with the R key
       if (event.code === 'KeyR' && !quickDraw.inDuel) {
-        localPlayer.reloadWeapon();
+        localPlayer.startReload();
       }
       
       // No longer spawn bots with the B key as NPCs are now server-controlled

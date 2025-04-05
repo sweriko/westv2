@@ -797,8 +797,37 @@ function handlePlayerDeath(playerId, killedById) {
     return;
   }
   
-  // Respawn the player
-  respawnPlayer(playerId);
+  // Send death notification to all clients
+  broadcastToAll({
+    type: 'playerDeath',
+    id: playerId,
+    killedById: killedById
+  });
+  
+  // Send death notification to the killed player
+  if (player.ws && player.ws.readyState === WebSocket.OPEN) {
+    player.ws.send(JSON.stringify({
+      type: 'death',
+      killerId: killedById
+    }));
+  }
+  
+  // Send kill notification to the killer
+  const killer = players.get(killedById);
+  if (killer && killer.ws && killer.ws.readyState === WebSocket.OPEN) {
+    killer.ws.send(JSON.stringify({
+      type: 'kill',
+      targetId: playerId
+    }));
+  }
+  
+  // Delay respawn to allow death animation to complete
+  setTimeout(() => {
+    // Check if player is still connected
+    if (players.has(playerId)) {
+      respawnPlayer(playerId);
+    }
+  }, 2000); // 2 second delay for death animation
 }
 
 // Anti-cheat: Respawn a player
@@ -843,7 +872,9 @@ function respawnPlayer(playerId) {
     position: player.position,
     health: player.health,
     isReloading: false,
-    isAiming: false
+    isAiming: false,
+    isDying: false,             // Explicitly reset death animation state
+    resetAnimationState: true   // Special flag to trigger animation reset on clients
   });
 }
 
@@ -1493,20 +1524,43 @@ function endQuickDrawDuel(duelId, winnerId) {
     clearTimeout(duel.drawTimeout);
   }
   
-  // First notify players of the duel result so they can show victory/defeat screen
+  // First notify players of the duel result
   if (player1 && player1.ws.readyState === WebSocket.OPEN) {
     player1.inQuickDrawDuel = false;
     player1.quickDrawDuelId = null;
     player1.quickDrawLobbyIndex = -1;
     
+    // Send standard QuickDraw end notification
     player1.ws.send(JSON.stringify({
       type: 'quickDrawEnd',
       winnerId: winnerId
     }));
     
-    // Set loser's health to 0 temporarily (for death animation)
+    // If this player lost, also send death notification
     if (winnerId && winnerId !== duel.player1Id) {
+      // Set loser's health to 0
       player1.health = 0;
+      
+      // Send death notification (same as regular deaths)
+      player1.ws.send(JSON.stringify({
+        type: 'death',
+        killerId: winnerId
+      }));
+      
+      // Broadcast death animation to all clients
+      broadcastToAll({
+        type: 'playerDeath',
+        id: duel.player1Id,
+        killedById: winnerId
+      });
+    }
+    
+    // If this player won, send kill notification
+    if (winnerId && winnerId === duel.player1Id) {
+      player1.ws.send(JSON.stringify({
+        type: 'kill',
+        targetId: duel.player2Id
+      }));
     }
   }
   
@@ -1515,100 +1569,61 @@ function endQuickDrawDuel(duelId, winnerId) {
     player2.quickDrawDuelId = null;
     player2.quickDrawLobbyIndex = -1;
     
+    // Send standard QuickDraw end notification
     player2.ws.send(JSON.stringify({
       type: 'quickDrawEnd',
       winnerId: winnerId
     }));
     
-    // Set loser's health to 0 temporarily (for death animation)
+    // If this player lost, also send death notification
     if (winnerId && winnerId !== duel.player2Id) {
+      // Set loser's health to 0
       player2.health = 0;
-    }
-  }
-  
-  // After a delay, fully reset both players' states and spawn them in town
-  setTimeout(() => {
-    // Full reset for player 1
-    if (player1 && players.has(duel.player1Id)) {
-      // Generate new random spawn position
-      const spawnX = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_WIDTH * 0.8;
-      const spawnY = 1.6;
-      const spawnZ = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_LENGTH * 0.8;
       
-      // Update server-side player state
-      player1.position = { x: spawnX, y: spawnY, z: spawnZ };
-      player1.health = 100;
-      player1.bullets = player1.maxBullets;
-      player1.isReloading = false;
-      player1.isAiming = false;
-      player1.isShooting = false;
+      // Send death notification (same as regular deaths)
+      player2.ws.send(JSON.stringify({
+        type: 'death',
+        killerId: winnerId
+      }));
       
-      // Send full reset command to player
-      if (player1.ws.readyState === WebSocket.OPEN) {
-        player1.ws.send(JSON.stringify({
-          type: 'fullStateReset',
-          position: player1.position,
-          health: player1.health,
-          bullets: player1.bullets
-        }));
-      }
-      
-      // Broadcast player update to all other players with fullReset flag
-      broadcastToOthers(duel.player1Id, {
-        type: 'playerUpdate',
-        id: duel.player1Id,
-        position: player1.position,
-        rotation: player1.rotation,
-        health: player1.health,
-        isAiming: false,
-        isReloading: false,
-        isShooting: false,
-        fullReset: true // Special flag to trigger full model reset on other clients
+      // Broadcast death animation to all clients
+      broadcastToAll({
+        type: 'playerDeath',
+        id: duel.player2Id,
+        killedById: winnerId
       });
     }
     
-    // Full reset for player 2
-    if (player2 && players.has(duel.player2Id)) {
-      // Generate new random spawn position
-      const spawnX = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_WIDTH * 0.8;
-      const spawnY = 1.6;
-      const spawnZ = (Math.random() - 0.5) * GAME_CONSTANTS.TOWN_LENGTH * 0.8;
-      
-      // Update server-side player state
-      player2.position = { x: spawnX, y: spawnY, z: spawnZ };
-      player2.health = 100;
-      player2.bullets = player2.maxBullets;
-      player2.isReloading = false;
-      player2.isAiming = false;
-      player2.isShooting = false;
-      
-      // Send full reset command to player
-      if (player2.ws.readyState === WebSocket.OPEN) {
-        player2.ws.send(JSON.stringify({
-          type: 'fullStateReset',
-          position: player2.position,
-          health: player2.health,
-          bullets: player2.bullets
-        }));
-      }
-      
-      // Broadcast player update to all other players with fullReset flag
-      broadcastToOthers(duel.player2Id, {
-        type: 'playerUpdate',
-        id: duel.player2Id,
-        position: player2.position,
-        rotation: player2.rotation,
-        health: player2.health,
-        isAiming: false,
-        isReloading: false,
-        isShooting: false,
-        fullReset: true // Special flag to trigger full model reset on other clients
-      });
+    // If this player won, send kill notification
+    if (winnerId && winnerId === duel.player2Id) {
+      player2.ws.send(JSON.stringify({
+        type: 'kill',
+        targetId: duel.player1Id
+      }));
     }
-  }, 4500); // Wait 4.5 seconds to allow for death animation to complete
+  }
   
-  // Remove the duel
-  quickDrawDuels.delete(duelId);
+  // Wait for animation to complete before sending respawn
+  setTimeout(() => {
+    // Respawn both players in their new positions
+    if (player1 && players.has(duel.player1Id)) {
+      respawnPlayer(duel.player1Id);
+    }
+    
+    if (player2 && players.has(duel.player2Id)) {
+      respawnPlayer(duel.player2Id);
+    }
+    
+    // Finally, remove the duel from the active duels map
+    quickDrawDuels.delete(duelId);
+    
+    // Update arena status
+    const arenaIndex = duel.arenaIndex;
+    if (arenaIndex !== undefined) {
+      arenaInUse[arenaIndex] = false;
+    }
+    
+  }, 2000); // 2 second delay for death animation, same as regular kills
 }
 
 /**
@@ -2241,11 +2256,11 @@ function degToRad(degrees) {
 setTimeout(() => {
   try {
     // Create the sheriff with static position (standing still)
-    const sheriffPosition = { x: 0, y: 2.72, z: -5 }; // Position sheriff somewhere in town
+    const sheriffPosition = { x: 14, y: 2.73, z: 20 }; // Position sheriff somewhere in town
     createNpc({
       name: "Sheriff",
       position: sheriffPosition,
-      rotation: { y: degToRad(45) }, // Facing east (90 degrees)
+      rotation: { y: degToRad(90) }, // Facing east (90 degrees)
       path: {
         points: [sheriffPosition], // Single point path = standing still
         currentTarget: 0,
@@ -2257,11 +2272,11 @@ setTimeout(() => {
     });
     
     // Create the bartender with static position (standing still)
-    const bartenderPosition = { x: 3, y: 2.72, z: 2 }; // Position bartender in middle of town
+    const bartenderPosition = { x: -33, y: 2.92, z: 15 }; // Position bartender in middle of town
     createNpc({
       name: "Bartender",
       position: bartenderPosition,
-      rotation: { y: degToRad(180) }, // Facing south (180 degrees)
+      rotation: { y: degToRad(270) }, // Facing south (180 degrees)
       path: {
         points: [bartenderPosition], // Single point path = standing still
         currentTarget: 0,

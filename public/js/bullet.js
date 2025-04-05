@@ -75,20 +75,6 @@ export class Bullet {
     // Previous position for boundary crossing detection
     this.lastPosition = this.mesh.position.clone();
     
-    // FIRST CHECK: Before moving, check if bullet is already within arena but from an unauthorized player
-    if (window.quickDraw && window.quickDraw.isPointInArena(this.mesh.position)) {
-      const isLocalPlayerBullet = Number(this.sourcePlayerId) === Number(window.localPlayer.id);
-      const isPlayerInDuel = window.quickDraw && window.quickDraw.inDuel;
-      const isOpponentBullet = window.quickDraw && 
-                               window.quickDraw.duelOpponentId === Number(this.sourcePlayerId);
-      
-      // If bullet is inside arena but not from a duel player, destroy it immediately
-      if (!(isPlayerInDuel && isLocalPlayerBullet) && !isOpponentBullet) {
-        createImpactEffect(this.mesh.position, this.direction, scene, 'ground');
-        return { active: false, hit: { type: 'arena', position: this.mesh.position } };
-      }
-    }
-    
     // If we're still active, update bullet position and check for player hits
     this.lastPosition.copy(this.mesh.position);
     
@@ -113,6 +99,8 @@ export class Bullet {
       
       // If the bullet is crossing the boundary
       if (bulletCrossingBoundary) {
+        // Removed boundary crossing restrictions to allow free shooting across boundaries
+        /*
         const playerInDuel = window.quickDraw.inDuel;
         const isLocalPlayerBullet = Number(this.sourcePlayerId) === Number(window.localPlayer.id);
         
@@ -135,6 +123,7 @@ export class Bullet {
         if (!playerInDuel && !isLocalPlayerBullet && bulletInArena) {
           return { active: false, hit: { type: 'arena', position: endPos } };
         }
+        */
       }
     }
 
@@ -172,12 +161,13 @@ export class Bullet {
                                    window.quickDraw.duelOpponentId === targetPlayerId;
         
         // Make sure players are in the same game mode to allow hits
-        const bothInDuel = bulletPlayerInDuel && targetPlayerInDuel;
-        const bothInRegularTown = !bulletPlayerInDuel && !targetPlayerInDuel;
+        // Remove restriction to allow free shooting
+        // const bothInDuel = bulletPlayerInDuel && targetPlayerInDuel;
+        // const bothInRegularTown = !bulletPlayerInDuel && !targetPlayerInDuel;
         
-        if (!(bothInDuel || bothInRegularTown)) {
-          continue; // Skip collision check if players are in different areas/modes
-        }
+        // if (!(bothInDuel || bothInRegularTown)) {
+        //   continue; // Skip collision check if players are in different areas/modes
+        // }
         
         // Detect which hit zone was hit (head, body, limbs)
         const hitResult = this.checkPlayerHitZones(playerObj, endPos);

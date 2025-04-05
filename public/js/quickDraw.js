@@ -3059,12 +3059,15 @@ export class QuickDraw {
     handleResult(message) {
         console.log(`[QuickDraw] Duel ended. Winner: ${message.winnerId}`);
         
-        // First show the victory/defeat screen and visual effects
+        // Show the victory/defeat screen and visual effects
         this.endDuel(message.winnerId);
         
-        // The server will send a fullStateReset message after a delay
-        // This approach ensures proper synchronization between all clients
-        console.log('[QuickDraw] Waiting for server to send state reset...');
+        // We no longer need to manually manage death animations here
+        // because the server will send playerDeath, death, and kill messages
+        // which will be handled by the existing handlers
+        console.log('[QuickDraw] Death animation will be handled by standard death/kill handlers');
+        
+        // The server will send a respawn message after the death animation completes
     }
     
     /**
@@ -3174,6 +3177,27 @@ export class QuickDraw {
         if (this.localPlayerModel) {
             console.log('[QuickDraw] Removing local player model');
             
+            // Reset animation states to ensure clean state for next use
+            this.localPlayerModel.isDying = false;
+            this.localPlayerModel.isAiming = false;
+            this.localPlayerModel.isShooting = false;
+            this.localPlayerModel.isWalking = false;
+            this.localPlayerModel.isRunning = false;
+            
+            // Clean up any active animations
+            if (this.localPlayerModel.mixer) {
+                this.localPlayerModel.mixer.stopAllAction();
+            }
+            
+            if (this.localPlayerModel.animations) {
+                for (const actionName in this.localPlayerModel.animations) {
+                    const action = this.localPlayerModel.animations[actionName];
+                    if (action && action.stop) {
+                        action.stop();
+                    }
+                }
+            }
+            
             if (this.localPlayerModel.group) {
                 // Remove from scene if it's part of the scene
                 if (this.localPlayerModel.group.parent) {
@@ -3181,11 +3205,17 @@ export class QuickDraw {
                 }
                 
                 // Or try removing directly from scene
-                if (this.scene && this.scene.scene) {
-                    this.scene.scene.remove(this.localPlayerModel.group);
+                if (this.scene && this.scene.children) {
+                    this.scene.remove(this.localPlayerModel.group);
                 }
             }
             
+            // Dispose of all resources
+            if (typeof this.localPlayerModel.dispose === 'function') {
+                this.localPlayerModel.dispose();
+            }
+            
+            // Clear the reference
             this.localPlayerModel = null;
         }
     }
