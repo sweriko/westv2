@@ -380,6 +380,12 @@ async function init() {
     networkManager.onKill = (targetId) => {
       console.log(`You killed player ${targetId}`);
       
+      // Skip kill message if in QuickDraw duel (victory message is shown instead)
+      if (window.quickDraw && window.quickDraw.inDuel) {
+        console.log('In QuickDraw duel, skipping kill message');
+        return;
+      }
+      
       // Show kill message
       const killMessage = document.createElement('div');
       killMessage.innerText = 'KILL!';

@@ -509,7 +509,7 @@ export class MultiplayerManager {
     
     // Create THREE.js object to position the label in 3D space
     const labelObject = new THREE.Object3D();
-    labelObject.position.y = 2.2; // Position above player head
+    labelObject.position.y = 2.8; // Increased position above player head (was 2.5)
     
     // Store references for updating
     this.playerLabels.set(playerId, { div, labelObject });

@@ -1600,6 +1600,9 @@ export class QuickDraw {
         this.localPlayer.canAim = false;
         this.localPlayer.canMove = false;
         
+        // Hide nametags for dueling players
+        this.hidePlayerNametags(this.localPlayer.id, this.duelOpponentId);
+        
         // Force-lock player movement to prevent any accidental movement
         if (message.movementLocked === true) {
             // Completely block any movement input
@@ -1652,6 +1655,63 @@ export class QuickDraw {
             console.log('[QuickDraw] Sending ready signal to server');
             this.networkManager.sendQuickDrawReady();
         }, 2000);
+    }
+    
+    /**
+     * Hide nametags for dueling players
+     * @param {number} player1Id - First player's ID
+     * @param {number} player2Id - Second player's ID
+     */
+    hidePlayerNametags(player1Id, player2Id) {
+        // Check if we have access to the multiplayerManager
+        if (!window.multiplayerManager) {
+            console.warn('[QuickDraw] Cannot hide nametags - multiplayerManager not available');
+            return;
+        }
+        
+        console.log(`[QuickDraw] Hiding nametags for duel between ${player1Id} and ${player2Id}`);
+        
+        // Hide nametag for opponent
+        const opponentLabelData = window.multiplayerManager.playerLabels.get(player2Id);
+        if (opponentLabelData && opponentLabelData.div) {
+            this.originalOpponentLabelDisplay = opponentLabelData.div.style.display;
+            opponentLabelData.div.style.display = 'none';
+        }
+        
+        // Also hide local player's nametag if visible to others
+        if (window.multiplayerManager.playerLabels && window.multiplayerManager.playerLabels.get) {
+            const localLabelData = window.multiplayerManager.playerLabels.get(player1Id);
+            if (localLabelData && localLabelData.div) {
+                this.originalLocalLabelDisplay = localLabelData.div.style.display;
+                localLabelData.div.style.display = 'none';
+            }
+        }
+    }
+    
+    /**
+     * Restore hidden nametags after duel
+     */
+    restorePlayerNametags() {
+        // Check if we have access to the multiplayerManager
+        if (!window.multiplayerManager) return;
+        
+        console.log('[QuickDraw] Restoring player nametags after duel');
+        
+        // Restore opponent nametag if we have their ID
+        if (this.duelOpponentId) {
+            const opponentLabelData = window.multiplayerManager.playerLabels.get(this.duelOpponentId);
+            if (opponentLabelData && opponentLabelData.div) {
+                opponentLabelData.div.style.display = this.originalOpponentLabelDisplay || 'block';
+            }
+        }
+        
+        // Restore local player's nametag
+        if (this.localPlayer && this.localPlayer.id) {
+            const localLabelData = window.multiplayerManager.playerLabels.get(this.localPlayer.id);
+            if (localLabelData && localLabelData.div) {
+                localLabelData.div.style.display = this.originalLocalLabelDisplay || 'block';
+            }
+        }
     }
     
     /**
@@ -1900,6 +1960,11 @@ export class QuickDraw {
         // Determine if player won or lost
         const playerWon = winnerId === this.localPlayer.id;
         
+        // Tell the renderer not to show kill markers for quickdraw
+        if (window.renderer) {
+            window.renderer.skipNextKillMarker = true;
+        }
+        
         // Create overlay and play sounds
         this.showVictoryDefeatOverlay(playerWon);
         
@@ -1920,119 +1985,179 @@ export class QuickDraw {
         // Clear animation flag after the victory/defeat screen has been shown
         setTimeout(() => {
             this.inDeathOrKillAnimation = false;
-        }, 5000);
+            
+            // Restore nametags after death animation
+            this.restorePlayerNametags();
+        }, 4000);
         
         // Server will send fullStateReset message after a delay
-    }
-
-    /**
-     * Clear all match-related UI elements
-     */
-    clearMatchUI() {
-        console.log('[QuickDraw] Clearing all match UI elements');
-        
-        // Force hide any message overlay
-        this.hideMessage();
-        
-        // Force remove any victory/defeat overlay (handle both overlay types)
-        const resultOverlay = document.getElementById('quickdraw-result-overlay');
-        if (resultOverlay && resultOverlay.parentNode) {
-            console.log('[QuickDraw] Removing result overlay');
-            resultOverlay.parentNode.removeChild(resultOverlay);
-        }
-        
-        // Try removing all elements with quickdraw-result class as backup
-        const allResultElements = document.querySelectorAll('.quickdraw-result');
-        if (allResultElements.length > 0) {
-            console.log(`[QuickDraw] Removing ${allResultElements.length} additional result elements`);
-            allResultElements.forEach(el => {
-                if (el.parentNode) {
-                    el.parentNode.removeChild(el);
-                }
-            });
-        }
-        
-        // Hide health bar
-        if (this.healthBarContainer) {
-            this.healthBarContainer.style.display = 'none';
-        }
-        
-        // Update status indicator
-        this.updateStatusIndicator();
-        
-        console.log('[QuickDraw] Match UI cleared');
     }
 
     /**
      * Show victory/defeat overlay with appropriate effects
      */
     showVictoryDefeatOverlay(playerWon) {
-        // For iOS/Safari and mobile devices - create a fixed fullscreen overlay
-        if (window.isMobileDevice || /iPad|iPhone|iPod/.test(navigator.userAgent)) {
-            // Create iOS-friendly fullscreen overlay
-            const resultOverlay = document.createElement('div');
-            resultOverlay.id = 'quickdraw-result-overlay';
-            resultOverlay.className = 'quickdraw-result'; // Add class for easier selection
-            resultOverlay.style.position = 'fixed';
-            resultOverlay.style.top = '0';
-            resultOverlay.style.left = '0';
-            resultOverlay.style.width = '100%';
-            resultOverlay.style.height = '100%';
-            resultOverlay.style.display = 'flex';
-            resultOverlay.style.alignItems = 'center';
-            resultOverlay.style.justifyContent = 'center';
-            resultOverlay.style.backgroundColor = playerWon ? 'rgba(0, 128, 0, 0.4)' : 'rgba(128, 0, 0, 0.4)';
-            resultOverlay.style.zIndex = '9999';
+        // Create an auto-fading overlay
+        const resultOverlay = document.createElement('div');
+        resultOverlay.id = 'quickdraw-result-overlay';
+        resultOverlay.className = 'quickdraw-result';
+        resultOverlay.style.position = 'fixed';
+        resultOverlay.style.top = '0';
+        resultOverlay.style.left = '0';
+        resultOverlay.style.width = '100%';
+        resultOverlay.style.height = '100%';
+        resultOverlay.style.display = 'flex';
+        resultOverlay.style.flexDirection = 'column';
+        resultOverlay.style.alignItems = 'center';
+        resultOverlay.style.justifyContent = 'center';
+        resultOverlay.style.backgroundColor = playerWon ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.4)';
+        resultOverlay.style.zIndex = '9999';
+        resultOverlay.style.opacity = '0';
+        resultOverlay.style.transition = 'opacity 0.5s ease-in, opacity 1s ease-out 2.5s';
+        
+        // Create western-style wooden sign background
+        const woodenSign = document.createElement('div');
+        woodenSign.style.width = '600px';
+        woodenSign.style.height = '300px';
+        woodenSign.style.background = 'url("/textures/wooden_sign.png") no-repeat center center';
+        woodenSign.style.backgroundSize = 'contain';
+        woodenSign.style.display = 'flex';
+        woodenSign.style.alignItems = 'center';
+        woodenSign.style.justifyContent = 'center';
+        woodenSign.style.position = 'relative';
+        woodenSign.style.transform = 'rotate(-3deg)';
+        
+        // Create text element inside the wooden sign
+        const resultText = document.createElement('div');
+        resultText.textContent = playerWon ? 'VICTORY!' : 'DEFEAT';
+        resultText.style.fontSize = '80px';
+        resultText.style.fontWeight = 'bold';
+        resultText.style.fontFamily = 'Western, "Wanted M54", serif';
+        resultText.style.color = playerWon ? '#FFD700' : '#FF3333';
+        resultText.style.textShadow = playerWon 
+            ? '0 0 10px #FF9900, 0 0 20px #FF9900, 2px 2px 2px rgba(0,0,0,0.7)' 
+            : '0 0 10px #AA0000, 0 0 20px #AA0000, 2px 2px 2px rgba(0,0,0,0.7)';
+        resultText.style.transform = 'translateY(-10px)';
+        
+        // Create subtitle message
+        const subtitleText = document.createElement('div');
+        subtitleText.textContent = playerWon ? 'You Won The Duel!' : 'You Lost The Duel!';
+        subtitleText.style.fontSize = '24px';
+        subtitleText.style.fontFamily = 'Western, "Rye", serif';
+        subtitleText.style.color = '#FFF8DC';
+        subtitleText.style.marginTop = '10px';
+        subtitleText.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
+        
+        // Add decorative bullet holes to the sign if defeated
+        if (!playerWon) {
+            for (let i = 0; i < 3; i++) {
+                const bulletHole = document.createElement('div');
+                bulletHole.style.position = 'absolute';
+                bulletHole.style.width = '30px';
+                bulletHole.style.height = '30px';
+                bulletHole.style.borderRadius = '50%';
+                bulletHole.style.backgroundColor = '#000';
+                bulletHole.style.boxShadow = 'inset 0 0 10px 5px rgba(30, 30, 30, 0.8)';
+                
+                // Random positions for bullet holes
+                bulletHole.style.top = `${Math.random() * 70 + 15}%`;
+                bulletHole.style.left = `${Math.random() * 70 + 15}%`;
+                bulletHole.style.transform = 'translate(-50%, -50%)';
+                
+                woodenSign.appendChild(bulletHole);
+            }
+        } else {
+            // Add decorative sheriff star for victory
+            const star = document.createElement('div');
+            star.style.position = 'absolute';
+            star.style.top = '10%';
+            star.style.right = '15%';
+            star.style.width = '60px';
+            star.style.height = '60px';
+            star.style.backgroundImage = 'url("/textures/sheriff_badge.png")';
+            star.style.backgroundSize = 'contain';
+            star.style.backgroundRepeat = 'no-repeat';
+            star.style.filter = 'drop-shadow(0 0 5px gold)';
             
-            // Create text element inside the overlay
-            const resultText = document.createElement('div');
-            resultText.textContent = playerWon ? 'VICTORY!' : 'DEFEAT';
-            resultText.style.fontSize = '130px';
-            resultText.style.fontWeight = 'bold';
-            resultText.style.fontFamily = 'Western, Arial, sans-serif';
-            resultText.style.color = 'white';
-            resultText.style.textShadow = playerWon 
-                ? '0 0 30px #00FF00, 0 0 60px #00FF00' 
-                : '0 0 30px #FF0000, 0 0 60px #FF0000';
-            
-            resultOverlay.appendChild(resultText);
-            document.body.appendChild(resultOverlay);
-            
-            // Use a simple animation for better visibility
-            setTimeout(() => {
-                resultText.style.transition = 'transform 0.3s ease-in-out';
-                resultText.style.transform = 'scale(1.2)';
-                setTimeout(() => {
-                    resultText.style.transform = 'scale(1)';
-                }, 300);
-            }, 100);
+            woodenSign.appendChild(star);
         }
         
-        // Show in standard message overlay as backup
+        // Add decoration rope to sign
+        const rope = document.createElement('div');
+        rope.style.position = 'absolute';
+        rope.style.top = '-20px';
+        rope.style.left = '50%';
+        rope.style.width = '8px';
+        rope.style.height = '30px';
+        rope.style.backgroundColor = '#8B4513';
+        rope.style.transform = 'translateX(-50%)';
+        
+        woodenSign.appendChild(resultText);
+        woodenSign.appendChild(subtitleText);
+        woodenSign.appendChild(rope);
+        resultOverlay.appendChild(woodenSign);
+        document.body.appendChild(resultOverlay);
+        
+        // Fade in and animate
+        setTimeout(() => {
+            resultOverlay.style.opacity = '1';
+            woodenSign.style.transition = 'transform 0.3s ease-in-out';
+            woodenSign.style.transform = 'rotate(-3deg) scale(1.1)';
+            
+            setTimeout(() => {
+                woodenSign.style.transform = 'rotate(-3deg) scale(1)';
+                // Start subtle swinging animation
+                woodenSign.style.animation = 'gentle-swing 2s ease-in-out infinite';
+                
+                // Add swing animation
+                const styleSheet = document.createElement('style');
+                styleSheet.id = 'quickdraw-animations';
+                styleSheet.textContent = `
+                    @keyframes gentle-swing {
+                        0% { transform: rotate(-3deg); }
+                        50% { transform: rotate(-1deg); }
+                        100% { transform: rotate(-3deg); }
+                    }
+                `;
+                document.head.appendChild(styleSheet);
+            }, 300);
+        }, 100);
+        
+        // Standard message overlay as backup
         this.messageOverlay.textContent = playerWon ? 'VICTORY!' : 'DEFEAT';
-        this.messageOverlay.className = 'quickdraw-result'; // Add class for easier selection
+        this.messageOverlay.className = 'quickdraw-result';
         this.messageOverlay.style.display = 'block';
         this.messageOverlay.style.fontSize = '72px';
-        this.messageOverlay.style.color = playerWon ? '#00FF00' : '#FF0000';
+        this.messageOverlay.style.color = playerWon ? '#FFD700' : '#FF3333';
         this.messageOverlay.style.textShadow = playerWon 
-            ? '0 0 20px #00FF00' 
-            : '0 0 20px #FF0000';
-        
-        // Animate message
-        this.messageOverlay.style.transition = 'transform 0.2s ease-in-out';
-        this.messageOverlay.style.transform = 'translate(-50%, -50%) scale(1)';
-        
-        setTimeout(() => {
-            this.messageOverlay.style.transform = 'translate(-50%, -50%) scale(1.3)';
-            setTimeout(() => {
-                this.messageOverlay.style.transform = 'translate(-50%, -50%) scale(1)';
-            }, 200);
-        }, 10);
+            ? '0 0 20px #FF9900' 
+            : '0 0 20px #AA0000';
         
         // Play victory/defeat sound
         if (this.soundManager) {
             this.soundManager.playSound("quickdrawending", 0, 0.8);
         }
+        
+        // Auto-fade out the overlay faster (after 3 seconds instead of 5)
+        setTimeout(() => {
+            resultOverlay.style.opacity = '0';
+            
+            // Remove from DOM after fade out
+            setTimeout(() => {
+                if (resultOverlay.parentNode) {
+                    resultOverlay.parentNode.removeChild(resultOverlay);
+                }
+                
+                // Clean up animation style
+                const animStyle = document.getElementById('quickdraw-animations');
+                if (animStyle && animStyle.parentNode) {
+                    animStyle.parentNode.removeChild(animStyle);
+                }
+                
+                // Hide message overlay too
+                this.hideMessage();
+            }, 1000);
+        }, 2500);
     }
     
     /**
