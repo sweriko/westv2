@@ -21,6 +21,9 @@ export class MultiplayerManager {
     // Map to track username labels
     this.playerLabels = new Map(); // playerId -> { sprite, div }
     
+    // Initialize nametag visibility - visible by default
+    this._nametagsVisible = true;
+    
     // Create a container for the username labels
     this.createLabelContainer();
 
@@ -580,6 +583,23 @@ export class MultiplayerManager {
     this.updatePlayerLabels();
   }
   
+  /**
+   * Control visibility of ALL player nametags
+   * @param {boolean} visible - Whether nametags should be visible
+   */
+  setAllNametagsVisible(visible) {
+    console.log(`[MultiplayerManager] Setting all nametags visible: ${visible}`);
+    
+    this.playerLabels.forEach((labelData, playerId) => {
+      if (labelData && labelData.div) {
+        labelData.div.style.display = visible ? 'block' : 'none';
+      }
+    });
+    
+    // Store current global visibility setting
+    this._nametagsVisible = visible;
+  }
+  
   updatePlayerLabels() {
     const tempVector = new THREE.Vector3();
     const canvas = document.querySelector('canvas');
@@ -592,6 +612,11 @@ export class MultiplayerManager {
                   this.scene.getObjectByProperty('type', 'PerspectiveCamera');
     
     if (!camera) return;
+    
+    // If nametags are globally hidden, skip the update
+    if (this._nametagsVisible === false) {
+      return;
+    }
     
     this.playerLabels.forEach((labelData, playerId) => {
       const { div, labelObject } = labelData;

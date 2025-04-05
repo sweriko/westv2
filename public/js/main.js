@@ -186,8 +186,11 @@ async function init() {
       }, 100);
     }
     
-    // Initialize multiplayer manager
+    // Set up multiplayer manager to handle other players
     multiplayerManager = new MultiplayerManager(scene, soundManager, remotePlayers);
+    
+    // Make multiplayerManager globally accessible
+    window.multiplayerManager = multiplayerManager;
 
     // Initialize the local player
     localPlayer = new Player({

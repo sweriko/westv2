@@ -25,6 +25,12 @@ export class QuickDraw {
         this.pendingChallenge = null;
         this.duelActive = false;
         
+        // Initialize nametag tracking
+        this.originalLabelDisplays = new Map();
+        
+        // Ensure window.multiplayerManager is set
+        this.ensureMultiplayerManagerAccess();
+        
         // Aerial camera properties
         this.aerialCamera = null;
         this.aerialCameraAngle = 0;
@@ -897,6 +903,9 @@ export class QuickDraw {
         // Explicitly disable aiming during countdown
         this.localPlayer.canAim = false;
         
+        // Hide all player nametags during the duel
+        this.hidePlayerNametags();
+        
         // Only set up aerial camera if it's not already active
         // This prevents the camera path from changing after the match starts
         if (!this.aerialCameraActive) {
@@ -1367,55 +1376,261 @@ export class QuickDraw {
     }
 
     /**
-     * Trigger the draw phase of the duel.
+     * Handle the Draw signal from server
      */
     triggerDraw() {
-        console.log('[QuickDraw] Triggering draw phase!');
-        
-        // Update duel state
         this.duelState = 'draw';
         
-        // CRITICAL: Allow player to aim during draw phase
-        if (this.localPlayer) {
-            this.localPlayer.canAim = true;
-            console.log('[QuickDraw] Player aim enabled - can now draw weapon');
+        // Hide all nametags again to ensure they're hidden during the crucial draw moment
+        this.hidePlayerNametags();
+        
+        // Show the special DRAW message
+        this.showMessage("DRAW!", 1000, '#FF0000');
+        
+        // Show visual draw indicator
+        this.drawCircle.style.display = 'block';
+        this.drawCircle.style.opacity = '1';
+        this.drawCircle.style.transform = 'translate(-50%, -50%) scale(1)';
+        
+        // Add slow-mo effect if enabled
+        if (window.renderer && window.renderer.setTimeScale) {
+            window.renderer.setTimeScale(0.5); // Slow to half-speed
+            
+            // Reset time scale after 1s
+            setTimeout(() => {
+                if (window.renderer && window.renderer.setTimeScale) {
+                    window.renderer.setTimeScale(1.0);
+                }
+            }, 1000);
         }
         
-        // Make gun visible but initially holstered - player must manually draw
-        if (this.localPlayer && this.localPlayer.viewmodel) {
-            this.localPlayer.viewmodel.visible = true;
-            
-            // Don't force aim state, just ensure the gun starts holstered
-            if (!this.localPlayer.isAiming) {
-                // Reset gun position to holster if available
-                if (this.localPlayer.currentGunOffset && this.localPlayer.holsterOffset) {
-                    this.localPlayer.currentGunOffset.copy(this.localPlayer.holsterOffset);
-                }
+        // Enable aiming immediately on DRAW
+        this.localPlayer.canAim = true;
+        
+        // Visual feedback 
+        setTimeout(() => {
+            if (this.drawCircle.style.display !== 'none') {
+                this.drawCircle.style.opacity = '0';
+                this.drawCircle.style.transform = 'translate(-50%, -50%) scale(1.5)';
                 
-                // Reset any ongoing gun animation
-                if (this.localPlayer.gunAnimation) {
-                    this.localPlayer.gunAnimation.reset();
-                    this.localPlayer.gunAnimation = null;
-                }
+                // Hide the circle after animation completes
+                setTimeout(() => {
+                    this.drawCircle.style.display = 'none';
+                }, 500);
+            }
+        }, 500);
+        
+        // Play draw sound with intensity
+        if (this.soundManager) {
+            this.soundManager.playSound("draw", 0.8);
+        }
+        
+        // Update UI
+        this.updateStatusIndicator();
+    }
+
+    /**
+     * Handle the countdown message from server - preparation phase  
+     * @param {Object} message - Countdown message data
+     */
+    handleCountdown(message) {
+        console.log('[QuickDraw] Received countdown message');
+        this.startDuelCountdown();
+        
+        // Ensure nametags are hidden
+        this.hidePlayerNametags();
+    }
+    
+    /**
+     * Handle match found message for a queue match
+     * @param {Object} message - Match data
+     */
+    handleMatchFound(message) {
+        if (!this.localPlayer) return;
+        
+        console.log('[QuickDraw] Match found:', message);
+        
+        // Extract match details
+        this.inDuel = true;
+        this.duelOpponentId = message.opponentId;
+        this.duelActive = true;
+        
+        // Update aerial camera state
+        this.aerialCameraActive = false;
+        this.aerialCameraPathSet = false;
+        
+        // Set internal state to override camera
+        this._directCameraOverride = false;
+        
+        // Update lobby status
+        this.inLobby = false;
+        
+        // Show the message
+        this.showReadyMessage();
+        
+        // Disable player movement and aiming during the duel
+        this.localPlayer.canAim = false;
+        this.localPlayer.canMove = false;
+        
+        // Hide nametags for dueling players
+        this.hidePlayerNametags();
+        
+        // Force-lock player movement to prevent any accidental movement
+        if (message.movementLocked === true) {
+            // Completely block any movement input
+            this.localPlayer.forceLockMovement = true;
+            
+            // Backup original move method and replace with empty function
+            if (!this.localPlayer._origMove) {
+                this.localPlayer._origMove = this.localPlayer.move;
+                this.localPlayer.move = () => {}; // No-op function
             }
         }
         
-        // Disable aerial camera and switch to player view
+        // FIXED ISSUE: Teleport player to the spawn position if provided by server
+        if (message.startPosition) {
+            // Teleport player to the provided position
+            console.log(`[QuickDraw] Teleporting player to spawn position:`, message.startPosition);
+            this.localPlayer.group.position.set(
+                message.startPosition.x,
+                message.startPosition.y,
+                message.startPosition.z
+            );
+            
+            // Reset velocity to zero
+            this.localPlayer.velocity = new THREE.Vector3(0, 0, 0);
+            
+            // Also set rotation if provided
+            if (message.startRotation !== undefined) {
+                console.log(`[QuickDraw] Setting player rotation to: ${message.startRotation}`);
+                this.localPlayer.group.rotation.y = message.startRotation;
+                
+                // Debug visualization of player direction
+                if (this.debug) {
+                    this.showFacingDirection(this.localPlayer.group.position.clone(), message.startRotation);
+                }
+            }
+        } else {
+            console.warn('[QuickDraw] No spawn position provided by server');
+        }
+        
+        // Update the main UI health display too
+        if (typeof updateHealthUI === 'function') {
+            updateHealthUI(this.localPlayer);
+        }
+        
+        // Update status indicator
+        this.updateStatusIndicator();
+        
+        // Mark as ready after showing message
+        this.createDuelTimeout(() => {
+            console.log('[QuickDraw] Sending ready signal to server');
+            this.networkManager.sendQuickDrawReady();
+        }, 2000);
+    }
+    
+    /**
+     * Reset player state and respawn after a duel
+     * @param {Object} message - Reset data
+     */
+    resetPlayerAndRespawn(message) {
+        console.log('[QuickDraw] Received reset and respawn request');
+        
+        // Restore nametags before resetting state
+        this.restorePlayerNametags();
+        
+        // Reset player state completely
+        this.resetPlayerState();
+        
+        // Apply any health update from message
+        if (message && message.health !== undefined) {
+            this.localPlayer.health = message.health;
+            
+            // Update health UI
+            if (typeof updateHealthUI === 'function') {
+                updateHealthUI(this.localPlayer);
+            }
+        }
+        
+        // Reset camera (important even if no aerial view was used)
         this.disableAerialCamera();
         
-        // Make local player model invisible in first person
-        if (this.localPlayerModel && this.localPlayerModel.group) {
-            this.localPlayerModel.group.visible = false;
+        // Respawn player at a random town position 
+        this.respawnPlayerInTown();
+        
+        // Send a state reset message to other clients
+        this.sendPlayerStateReset();
+        
+        // Clear all duel timers
+        this.clearAllDuelTimers();
+    }
+
+    /**
+     * Handle the result of the duel (win/loss)
+     * @param {Object} message - Result data
+     */
+    handleResult(message) {
+        console.log('[QuickDraw] Received duel result:', message);
+        
+        // Show appropriate victory/defeat animation
+        this.endDuel(message.winnerId);
+        
+        // Update internal state
+        this.inDuel = false;
+        this.duelState = 'none';
+        
+        // Restore nametags but after a delay to match the victory/defeat animation timing
+        setTimeout(() => {
+            this.restorePlayerNametags();
+        }, 1000);
+    }
+
+    /**
+     * Handle player death in duel
+     * @param {Object} message - Death data
+     */
+    handleDeath(message) {
+        console.log('[QuickDraw] Player died in duel', message);
+        
+        // Create death effect
+        this.createDeathEffect();
+        
+        // Update health to zero
+        this.localPlayer.health = 0;
+        if (typeof updateHealthUI === 'function') {
+            updateHealthUI(this.localPlayer);
         }
         
-        // Check hit zones are properly set up
-        this.fixHitZonesForQuickDraw();
+        // Block all movement/shooting input
+        this.localPlayer.canMove = false;
+        this.localPlayer.canAim = false;
         
-        // Clear any previous force update interval
-        if (this.forceUpdateInterval) {
-            clearInterval(this.forceUpdateInterval);
-            this.forceUpdateInterval = null;
-        }
+        // Restore nametags
+        this.restorePlayerNametags();
+        
+        // The screen stays in the death view briefly before respawning
+        this.createDuelTimeout(() => {
+            // Reset will be triggered by server
+        }, 3000);
+    }
+    
+    /**
+     * Handle player kill in duel
+     * @param {Object} message - Kill data
+     */
+    handleKill(message) {
+        console.log('[QuickDraw] Player got a kill in duel', message);
+        
+        // Create kill effect 
+        this.createKillEffect();
+        
+        // Add a hit marker
+        this.showHitMarker(message.hitZone || 'body');
+        
+        // Restore nametags
+        this.restorePlayerNametags();
+        
+        // The result screen will appear shortly
     }
 
     /**
@@ -1601,7 +1816,7 @@ export class QuickDraw {
         this.localPlayer.canMove = false;
         
         // Hide nametags for dueling players
-        this.hidePlayerNametags(this.localPlayer.id, this.duelOpponentId);
+        this.hidePlayerNametags();
         
         // Force-lock player movement to prevent any accidental movement
         if (message.movementLocked === true) {
@@ -1658,59 +1873,58 @@ export class QuickDraw {
     }
     
     /**
-     * Hide nametags for dueling players
-     * @param {number} player1Id - First player's ID
-     * @param {number} player2Id - Second player's ID
+     * Hide all player nametags during a duel, not just the participants
+     * @param {number} player1Id - First player's ID (local player)
+     * @param {number} player2Id - Second player's ID (opponent)
      */
-    hidePlayerNametags(player1Id, player2Id) {
+    hidePlayerNametags() {
         // Check if we have access to the multiplayerManager
         if (!window.multiplayerManager) {
             console.warn('[QuickDraw] Cannot hide nametags - multiplayerManager not available');
             return;
         }
         
-        console.log(`[QuickDraw] Hiding nametags for duel between ${player1Id} and ${player2Id}`);
+        console.log(`[QuickDraw] Hiding all nametags during quickdraw duel`);
         
-        // Hide nametag for opponent
-        const opponentLabelData = window.multiplayerManager.playerLabels.get(player2Id);
-        if (opponentLabelData && opponentLabelData.div) {
-            this.originalOpponentLabelDisplay = opponentLabelData.div.style.display;
-            opponentLabelData.div.style.display = 'none';
-        }
+        // Store original display state for all player labels
+        this.originalLabelDisplays = new Map();
         
-        // Also hide local player's nametag if visible to others
-        if (window.multiplayerManager.playerLabels && window.multiplayerManager.playerLabels.get) {
-            const localLabelData = window.multiplayerManager.playerLabels.get(player1Id);
-            if (localLabelData && localLabelData.div) {
-                this.originalLocalLabelDisplay = localLabelData.div.style.display;
-                localLabelData.div.style.display = 'none';
+        // Hide all player labels
+        window.multiplayerManager.playerLabels.forEach((labelData, playerId) => {
+            if (labelData && labelData.div) {
+                this.originalLabelDisplays.set(playerId, labelData.div.style.display);
+                labelData.div.style.display = 'none';
             }
-        }
+        });
     }
     
     /**
-     * Restore hidden nametags after duel
+     * Restore all hidden nametags after duel
      */
     restorePlayerNametags() {
         // Check if we have access to the multiplayerManager
         if (!window.multiplayerManager) return;
         
-        console.log('[QuickDraw] Restoring player nametags after duel');
+        console.log('[QuickDraw] Restoring all player nametags after duel');
         
-        // Restore opponent nametag if we have their ID
-        if (this.duelOpponentId) {
-            const opponentLabelData = window.multiplayerManager.playerLabels.get(this.duelOpponentId);
-            if (opponentLabelData && opponentLabelData.div) {
-                opponentLabelData.div.style.display = this.originalOpponentLabelDisplay || 'block';
-            }
-        }
-        
-        // Restore local player's nametag
-        if (this.localPlayer && this.localPlayer.id) {
-            const localLabelData = window.multiplayerManager.playerLabels.get(this.localPlayer.id);
-            if (localLabelData && localLabelData.div) {
-                localLabelData.div.style.display = this.originalLocalLabelDisplay || 'block';
-            }
+        // Restore all player labels to their original display state
+        if (this.originalLabelDisplays && this.originalLabelDisplays.size > 0) {
+            window.multiplayerManager.playerLabels.forEach((labelData, playerId) => {
+                if (labelData && labelData.div) {
+                    const originalDisplay = this.originalLabelDisplays.get(playerId) || 'block';
+                    labelData.div.style.display = originalDisplay;
+                }
+            });
+            
+            // Clear stored display states
+            this.originalLabelDisplays.clear();
+        } else {
+            // Fallback - make all labels visible
+            window.multiplayerManager.playerLabels.forEach((labelData, playerId) => {
+                if (labelData && labelData.div) {
+                    labelData.div.style.display = 'block';
+                }
+            });
         }
     }
     
@@ -3240,6 +3454,9 @@ export class QuickDraw {
             this.localPlayer._origMove = null;
         }
         
+        // Ensure player nametags are restored
+        this.restorePlayerNametags();
+        
         // Reset quickdraw specific state
         this.inDuel = false;
         this.inLobby = false;
@@ -3848,5 +4065,122 @@ export class QuickDraw {
         this.sendPlayerStateReset();
         
         console.log('[QuickDraw] Player reset and respawn complete');
+    }
+
+    /**
+     * Clear all match UI elements
+     */
+    clearMatchUI() {
+        console.log('[QuickDraw] Clearing match UI elements');
+        
+        // Hide message overlay
+        this.hideMessage();
+        
+        // Hide draw circle
+        if (this.drawCircle) {
+            this.drawCircle.style.display = 'none';
+        }
+        
+        // Hide status indicator
+        if (this.statusIndicator) {
+            this.statusIndicator.style.display = 'none';
+        }
+        
+        // Hide health bar
+        if (this.healthBarContainer) {
+            this.healthBarContainer.style.display = 'none';
+        }
+        
+        // Restore player nametags
+        this.restorePlayerNametags();
+    }
+
+    /**
+     * Cleanup method for use before unloading the page or resetting the game.
+     * This ensures all UI elements, timers, and state are properly cleaned up.
+     */
+    cleanup() {
+        console.log('[QuickDraw] Cleaning up QuickDraw instance');
+        
+        // Always restore nametags when cleaning up
+        this.restorePlayerNametags();
+        
+        // Clear all duel-related timers
+        this.clearAllDuelTimers();
+        
+        // Reset player state if we have a local player
+        if (this.localPlayer) {
+            this.resetPlayerState();
+        }
+        
+        // Ensure aerial camera is disabled
+        this.disableAerialCamera();
+        
+        // Reset all state variables
+        this.inDuel = false;
+        this.inLobby = false;
+        this.duelState = 'none';
+        this.duelOpponentId = null;
+        this.pendingChallenge = null;
+        this.duelActive = false;
+        
+        // Hide UI elements
+        this.hideMessage();
+        if (this.statusIndicator) this.statusIndicator.style.display = 'none';
+        if (this.drawCircle) this.drawCircle.style.display = 'none';
+        if (this.healthBarContainer) this.healthBarContainer.style.display = 'none';
+        if (this.challengePrompt) this.challengePrompt.style.display = 'none';
+        
+        console.log('[QuickDraw] Cleanup complete');
+    }
+
+    /**
+     * Hide all player nametags during a duel
+     */
+    hidePlayerNametags() {
+        // Check if we have access to the multiplayerManager
+        if (!window.multiplayerManager) {
+            console.warn('[QuickDraw] Cannot hide nametags - multiplayerManager not available');
+            return;
+        }
+        
+        console.log(`[QuickDraw] Hiding ALL nametags during quickdraw duel using global control`);
+        
+        // Use the new global method to disable all nametags
+        window.multiplayerManager.setAllNametagsVisible(false);
+    }
+    
+    /**
+     * Restore all hidden nametags after duel
+     */
+    restorePlayerNametags() {
+        // Check if we have access to the multiplayerManager
+        if (!window.multiplayerManager) return;
+        
+        console.log('[QuickDraw] Restoring ALL nametags after duel using global control');
+        
+        // Use the new global method to enable all nametags
+        window.multiplayerManager.setAllNametagsVisible(true);
+    }
+
+    /**
+     * Ensures we have access to the MultiplayerManager for nametag control
+     */
+    ensureMultiplayerManagerAccess() {
+        // Check if window.multiplayerManager is already set
+        if (!window.multiplayerManager) {
+            console.warn('[QuickDraw] MultiplayerManager not available yet - will retry later');
+            
+            // Set up a retry check after a short delay
+            setTimeout(() => {
+                if (!window.multiplayerManager) {
+                    console.warn('[QuickDraw] MultiplayerManager still not available - nametag control will be limited');
+                } else {
+                    console.log('[QuickDraw] MultiplayerManager now available - nametag control enabled');
+                }
+            }, 2000);
+        } else {
+            console.log('[QuickDraw] MultiplayerManager available - nametag control enabled');
+        }
     }
 }
