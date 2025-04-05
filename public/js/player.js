@@ -829,6 +829,12 @@ export class Player {
     shootDir.x += (Math.random() - 0.5) * 0.0005;
     shootDir.y += (Math.random() - 0.5) * 0.0005;
     shootDir.z += (Math.random() - 0.5) * 0.0005;
+    
+    // Add Y offset for mobile devices to align bullets with crosshair
+    if (window.isMobile) {
+      shootDir.y += 0.17;
+    }
+    
     shootDir.normalize();
 
     // Recoil effect

@@ -2776,6 +2776,12 @@ export class QuickDraw {
         const bulletDirection = new THREE.Vector3(0, 0, -1);
         bulletDirection.applyQuaternion(camera.quaternion);
         
+        // Add Y offset for mobile devices to align bullets with crosshair
+        if (window.isMobile) {
+            bulletDirection.y += 0.17;
+            bulletDirection.normalize(); // Renormalize after adding offset
+        }
+        
         // Create ray for bullet path
         const bulletOrigin = new THREE.Vector3();
         camera.getWorldPosition(bulletOrigin);
