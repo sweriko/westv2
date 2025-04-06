@@ -914,7 +914,7 @@ function showGameInstructions() {
   const isMobile = window.isMobile || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   
   // Set dimensions based on device type
-  const bannerWidth = isMobile ? '250px' : '500px';
+  const bannerWidth = isMobile ? '250px' : '1000px'; // Wider for desktop to accommodate two images
   const bannerHeight = isMobile ? '250px' : '500px';
   const startPosition = isMobile ? '-250px' : '-500px';
   
@@ -929,16 +929,35 @@ function showGameInstructions() {
   instructionBanner.style.zIndex = '2000';
   instructionBanner.style.transition = 'bottom 0.5s ease-out';
   instructionBanner.style.bottom = startPosition; // Start completely off-screen
+  instructionBanner.style.display = 'flex'; // Use flex for side-by-side layout
+  instructionBanner.style.justifyContent = 'center'; // Center the images
   
-  // Create the image element
-  const instructionImage = document.createElement('img');
-  instructionImage.src = isMobile ? 'models/mobilemanual.png' : 'models/desktopmanual.png';
-  instructionImage.style.width = '100%';
-  instructionImage.style.height = '100%';
-  instructionImage.style.objectFit = 'contain';
-  
-  // Add image to banner
-  instructionBanner.appendChild(instructionImage);
+  if (isMobile) {
+    // For mobile, just add the single mobile manual image
+    const instructionImage = document.createElement('img');
+    instructionImage.src = 'models/mobilemanual.png';
+    instructionImage.style.width = '100%';
+    instructionImage.style.height = '100%';
+    instructionImage.style.objectFit = 'contain';
+    instructionBanner.appendChild(instructionImage);
+  } else {
+    // For desktop, add both images side by side
+    const desktopManualImage = document.createElement('img');
+    desktopManualImage.src = 'models/desktopmanual.png';
+    desktopManualImage.style.width = '50%';
+    desktopManualImage.style.height = '100%';
+    desktopManualImage.style.objectFit = 'contain';
+    
+    const trackpadManualImage = document.createElement('img');
+    trackpadManualImage.src = 'models/trackpadmanual.png';
+    trackpadManualImage.style.width = '50%';
+    trackpadManualImage.style.height = '100%';
+    trackpadManualImage.style.objectFit = 'contain';
+    
+    // Add both images to banner
+    instructionBanner.appendChild(desktopManualImage);
+    instructionBanner.appendChild(trackpadManualImage);
+  }
   
   // Add banner to game container
   document.getElementById('game-container').appendChild(instructionBanner);
