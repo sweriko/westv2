@@ -98,6 +98,7 @@ export class Player {
     // Alternative aiming controls
     this.isFAiming = false; // Whether player is aiming using the F key
     this.isFRmbPressed = false; // Whether right mouse button is pressed during F-aiming
+    this.isLmbPressed = false; // Whether left mouse button is being held (for hold-to-shoot)
     
     // Store previous position to detect collision with arena boundary
     this.previousPosition = new THREE.Vector3();

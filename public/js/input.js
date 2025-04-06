@@ -199,10 +199,17 @@ export function initInput(renderer, player, soundManager) {
         player.isFRmbPressed = true;
       }
     }
-    // Left-click => Shoot (only if aiming)
+    // Left-click handling
     else if (event.button === 0) {
       if (player.isAiming && !player.isReloading) {
-        player.shoot();
+        // Only use hold-to-shoot when F key is being held (F-aiming mode)
+        if (player.isFAiming) {
+          // F is being held - use hold-to-shoot mode
+          player.isLmbPressed = true;
+        } else {
+          // Standard aiming - shoot immediately on click
+          player.shoot();
+        }
       }
     }
   });
@@ -241,6 +248,16 @@ export function initInput(renderer, player, soundManager) {
             crosshair.classList.remove('contract');
           }, 250); // Match animation duration
         }
+      }
+    }
+    // Left mouse button release
+    else if (event.button === 0) {
+      if (player.isLmbPressed && player.isAiming && !player.isReloading) {
+        // Only shoot on release when in F-aiming mode
+        if (player.isFAiming) {
+          player.shoot();
+        }
+        player.isLmbPressed = false;
       }
     }
   });
@@ -699,6 +716,7 @@ function createMobileControls(player, soundManager) {
           // Let the player's own update method handle all viewmodel positioning
           player.isAiming = true;
           isAimingWithTouch = true;
+          player.isLmbPressed = true; // Mark that touch is being held for shooting
           
           // Show and prepare crosshair for animation
           const crosshair = document.getElementById('crosshair');
@@ -830,10 +848,11 @@ function createMobileControls(player, soundManager) {
       
       // Handle right side touch end (shooting on release)
       if (touch.identifier === rightSideTouchId) {
-        // Shoot when releasing the joystick if still aiming
+        // Shoot when releasing the touch if still aiming
         if (isAimingWithTouch && player.isAiming && !player.isReloading) {
           player.shoot();
         }
+        player.isLmbPressed = false;
         
         // Stop aiming
         player.isAiming = false;
@@ -905,6 +924,11 @@ function createMobileControls(player, soundManager) {
         rightSideTouchId = null;
         player.isAiming = false;
         isAimingWithTouch = false;
+        
+        // Clear any pressed state
+        if (player.isLmbPressed) {
+          player.isLmbPressed = false;
+        }
         
         // Reset visual feedback
         rightControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
