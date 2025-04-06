@@ -1,87 +1,6 @@
 // /public/js/playerModel.js
 
 /**
- * A simple blocky first-person arms model.
- */
-export class PlayerArms {
-  constructor(scene) {
-    this.scene = scene;
-    this.group = new THREE.Group();
-
-    // Right arm
-    this.rightArm = this.createBlockyArm(0xC68642);
-    this.rightArm.position.set(0.3, -0.4, -0.3);
-    this.rightArm.rotation.set(0.3, 0, 0);
-    this.group.add(this.rightArm);
-
-    // Left arm
-    this.leftArm = this.createBlockyArm(0xC68642);
-    this.leftArm.position.set(-0.3, -0.4, -0.3);
-    this.leftArm.rotation.set(0.3, 0, 0);
-    this.group.add(this.leftArm);
-
-    // Store initial positions/rotations for animations
-    this.rightArmOriginalPos = this.rightArm.position.clone();
-    this.rightArmOriginalRot = this.rightArm.rotation.clone();
-    this.leftArmOriginalPos = this.leftArm.position.clone();
-    this.leftArmOriginalRot = this.leftArm.rotation.clone();
-
-    // Initially not visible
-    this.setVisible(false);
-  }
-
-  /**
-   * Creates a blocky "arm" geometry (only a small cube).
-   * @param {number} color - Hex color (e.g. 0xC68642)
-   * @returns {THREE.Group}
-   */
-  createBlockyArm(color) {
-    const armGroup = new THREE.Group();
-
-    // A small "hand" cube
-    const handGeo = new THREE.BoxGeometry(0.08, 0.08, 0.08);
-    const handMat = new THREE.MeshStandardMaterial({ color });
-    const handMesh = new THREE.Mesh(handGeo, handMat);
-    armGroup.add(handMesh);
-
-    return armGroup;
-  }
-
-  /**
-   * Sets the arms' visibility.
-   * @param {boolean} visible
-   */
-  setVisible(visible) {
-    this.group.visible = visible;
-  }
-
-  /**
-   * Updates arms for aiming. (Example usage in first-person code.)
-   * @param {THREE.Camera} camera
-   * @param {boolean} isAiming
-   * @param {THREE.Vector3} gunBarrelTip
-   */
-  updatePosition(camera, isAiming, gunBarrelTip = null) {
-    if (isAiming) {
-      // Hide left arm by default (single-handed revolver stance)
-      this.leftArm.visible = false;
-      // Show right arm for aiming
-      this.rightArm.visible = true;
-
-      if (gunBarrelTip) {
-        // Rough alignment based on gun barrel tip if desired
-        this.rightArm.position.set(0.32, -0.35, -0.5);
-        this.rightArm.rotation.set(Math.PI / 2, 0, 0);
-      }
-    } else {
-      // Hide arms when not aiming
-      this.rightArm.visible = false;
-      this.leftArm.visible = false;
-    }
-  }
-}
-
-/**
  * The third-person model used to represent remote players
  * (and possibly the local player in others' view).
  */
@@ -1119,13 +1038,6 @@ export class ThirdPersonModel {
         }
       }
     });
-  }
-  
-  /**
-   * Alias for remove() for compatibility with the new code
-   */
-  dispose() {
-    this.remove();
   }
 
   /**
