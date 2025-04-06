@@ -106,6 +106,9 @@ async function init() {
     // Initialize NPC manager with the scene
     const npcManagerInstance = initNpcManager(scene);
     
+    // Make NPC manager globally accessible
+    window.npcManager = npcManager;
+    
     // Set up global renderer access for camera switching
     window.renderer.instance = renderer;
     window.renderer.camera = camera;
@@ -548,10 +551,6 @@ async function init() {
       handleChatMessage({ username, message });
     };
 
-    // Make NPC manager globally accessible
-    window.npcManager = npcManagerInstance;
-    console.log("NPCs are now handled by the server");
-    
     // Initialize UI elements
     createSettingsUI();
     

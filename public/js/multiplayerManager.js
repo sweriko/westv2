@@ -417,12 +417,24 @@ export class MultiplayerManager {
     
     console.log(`Adding remote player ${playerId} to scene`);
     
-    // Create new player model
-    const playerModel = new ThirdPersonModel(this.scene, playerId);
+    let playerModel;
+    
+    // Check if this is an NPC or bot
+    const isNpc = initialData.isNpc || false;
+    const isBot = initialData.isBot || false;
+    
+    // Use specialized NPC models for NPCs
+    if (isNpc && window.npcManager && window.npcManager.instance) {
+      // Let the NPC manager handle creating the appropriate model
+      playerModel = window.npcManager.instance.createOrUpdateNpc(playerId, initialData);
+    } else {
+      // Create standard player model for regular players and bots
+      playerModel = new ThirdPersonModel(this.scene, playerId);
+    }
     
     // Set bot/NPC flag if this is not a human player
-    playerModel.isBot = initialData.isBot || false;
-    playerModel.isNpc = initialData.isNpc || false;
+    playerModel.isBot = isBot;
+    playerModel.isNpc = isNpc;
     
     // Track if this is an AI-controlled character
     const isAiControlled = playerModel.isBot || playerModel.isNpc;

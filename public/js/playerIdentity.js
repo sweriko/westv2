@@ -202,7 +202,9 @@ function preloadGameContent() {
       'models/town.glb',
       'models/viewmodel.glb',
       'models/playermodel.glb',
-      'models/tumbleweed.glb'
+      'models/tumbleweed.glb',
+      'models/bartender.glb',
+      'models/sheriff.glb'
     ];
     
     // Track loading progress

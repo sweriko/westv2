@@ -159,6 +159,22 @@ export class ThirdPersonModel {
   }
 
   loadPlayerModel() {
+    // Get NPC type from playerId - this identifies specific NPCs like sheriff or bartender
+    const isNpcSheriff = typeof this.playerId === 'string' && this.playerId.includes('Sheriff');
+    const isNpcBartender = typeof this.playerId === 'string' && this.playerId.includes('Bartender');
+    
+    // Check if this is a special NPC that needs a custom model
+    if (isNpcSheriff) {
+      // Load sheriff model
+      this._loadCustomNpcModel('models/sheriff.glb', 'sheriffidle');
+      return;
+    } else if (isNpcBartender) {
+      // Load bartender model
+      this._loadCustomNpcModel('models/bartender.glb', 'bartenderidle');
+      return;
+    }
+
+    // Standard player model loading for all other entities
     // Check if we have a preloaded player model
     if (window.preloadedModels && (window.preloadedModels.playermodel || window.preloadedModels.playermodel_clone)) {
       console.log("Using preloaded playermodel");
@@ -290,6 +306,148 @@ export class ThirdPersonModel {
         
         // Add hit zone visualizers even for fallback model
         this.createHitZoneVisualizers();
+      }
+    );
+  }
+
+  /**
+   * Loads a custom NPC model with specific idle animation
+   * @param {string} modelPath - Path to the GLB model file
+   * @param {string} idleAnimationName - Name of the idle animation to play in a loop
+   * @private
+   */
+  _loadCustomNpcModel(modelPath, idleAnimationName) {
+    // Create loader instance
+    const loader = new THREE.GLTFLoader();
+    
+    // Load the custom NPC model
+    loader.load(modelPath, 
+      // Success callback
+      (gltf) => {
+        try {
+          this.playerModel = gltf.scene;
+          
+          // Position at origin with no offset to make feet touch the ground
+          this.playerModel.position.set(0, 0, 0);
+          
+          // Set appropriate scale (may need adjustment per model)
+          this.playerModel.scale.set(1.445, 1.445, 1.445);
+          
+          // Rotate model to face the right direction (might need adjustment per model)
+          this.playerModel.rotation.y = Math.PI; // Rotate 180 degrees
+      
+          // Add the model to the group
+          this.group.add(this.playerModel);
+          
+          // Set up meshes correctly
+          this.playerModel.traverse(child => {
+            if (child.isMesh) {
+              child.castShadow = true;
+              child.receiveShadow = true;
+              child.userData.isPlayerMesh = true;
+              
+              // Ensure materials are set up correctly
+              if (child.material) {
+                child.material.side = THREE.DoubleSide;
+                
+                // If this is a skinned mesh, ensure skinning is enabled
+                if (child.isSkinnedMesh) {
+                  child.material.skinning = true;
+                }
+                
+                child.material.needsUpdate = true;
+              }
+            }
+          });
+          
+          // Set up animations - do this after model is loaded
+          if (gltf.animations && gltf.animations.length > 0) {
+            // Initialize animations immediately
+            this.setupAnimations(gltf.animations);
+            
+            // Play the specific idle animation if it exists (after a small delay to ensure it's loaded)
+            setTimeout(() => {
+              if (this.animations[idleAnimationName]) {
+                // Play the custom idle animation in a loop
+                this.playAnimation(idleAnimationName, 0.5);
+                console.log(`Playing ${idleAnimationName} animation for NPC`);
+              } else {
+                console.warn(`${idleAnimationName} animation not found for NPC`);
+                
+                // Fall back to regular idle animation if specific one not found
+                if (this.animations['idle']) {
+                  this.playAnimation('idle', 0.5);
+                }
+              }
+            }, 100);
+          }
+          
+          // Initialize hit zone visualizers
+          this.createHitZoneVisualizers();
+          
+          console.log(`Custom NPC model ${modelPath} loaded successfully`);
+        } catch (e) {
+          console.error(`Error setting up custom NPC model ${modelPath}:`, e);
+        }
+      }, 
+      // Progress callback - silent
+      () => {},
+      // Error callback
+      (error) => {
+        console.error(`Error loading custom NPC model ${modelPath}:`, error);
+        
+        // Fall back to regular player model if custom model fails to load
+        console.log("Falling back to regular player model for NPC");
+        
+        // Load the regular player model as fallback
+        if (window.preloadedModels && window.preloadedModels.playermodel) {
+          const preloadedModel = window.preloadedModels.playermodel;
+          const gltf = {
+            scene: preloadedModel.scene.clone(),
+            animations: preloadedModel.animations
+          };
+          
+          this.playerModel = gltf.scene;
+          this.group.add(this.playerModel);
+          
+          // Setup player model
+          this.playerModel.position.set(0, 0, 0);
+          this.playerModel.scale.set(1.445, 1.445, 1.445);
+          this.playerModel.rotation.y = Math.PI;
+          
+          // Set up meshes correctly
+          this.playerModel.traverse(child => {
+            if (child.isMesh) {
+              child.castShadow = true;
+              child.receiveShadow = true;
+              child.userData.isPlayerMesh = true;
+              
+              if (child.material) {
+                child.material.side = THREE.DoubleSide;
+                if (child.isSkinnedMesh) child.material.skinning = true;
+                child.material.needsUpdate = true;
+              }
+            }
+          });
+          
+          // Set up animations
+          if (gltf.animations && gltf.animations.length > 0) {
+            this.setupAnimations(gltf.animations);
+          }
+          
+          // Initialize hit zone visualizers
+          this.createHitZoneVisualizers();
+        } else {
+          // Last resort fallback - create a colored cube
+          const geometry = new THREE.BoxGeometry(0.5, 1.8, 0.5);
+          const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+          const cube = new THREE.Mesh(geometry, material);
+          cube.position.set(0, 0.9, 0);
+          this.group.add(cube);
+          
+          // Add hit zone visualizers even for fallback model
+          this.createHitZoneVisualizers();
+        }
       }
     );
   }
