@@ -181,9 +181,23 @@ export class Bullet {
             // Create the impact effect
             createImpactEffect(endPos, this.direction, scene, 'player');
             
-            // Play headshot sound if it was a headshot
-            if (hitResult.zone === 'head' && window.localPlayer && window.localPlayer.soundManager) {
-              window.localPlayer.soundManager.playSound("headshotmarker", 100);
+            // Only play sounds and show hitmarker if this is the local player's bullet
+            if (this.isLocalBullet && window.localPlayer && window.localPlayer.soundManager) {
+              // Show hitmarker image for 100ms
+              this.showHitMarker(endPos);
+              
+              // Play sound with 300ms delay
+              if (hitResult.zone === 'head') {
+                // For headshots, only play headshotmarker (not both sounds)
+                setTimeout(() => {
+                  window.localPlayer.soundManager.playSound("headshotmarker", 100);
+                }, 300);
+              } else {
+                // For body/limb hits, play regular hitmarker sound
+                setTimeout(() => {
+                  window.localPlayer.soundManager.playSound("hitmarker", 100);
+                }, 300);
+              }
             }
           } else {
             console.log("Prevented impact effect on local player's own model");
@@ -684,8 +698,27 @@ export class Bullet {
         if (hitType === 'player') {
           impactSound = "fleshimpact";
           
+          // If this is a local player's bullet, show hitmarker and play sound
+          if (this.isLocalBullet) {
+            // Show hitmarker for 100ms
+            this.showHitMarker(position);
+            
+            // Play sound with 300ms delay
+            if (this.lastHitZone === 'head') {
+              // For headshots, only play the headshot sound (not both)
+              setTimeout(() => {
+                window.localPlayer.soundManager.playSound("headshotmarker", 100, 1.0);
+              }, 300);
+            } else {
+              // For body/limb hits, play regular hitmarker sound
+              setTimeout(() => {
+                window.localPlayer.soundManager.playSound("hitmarker", 100, 1.0);
+              }, 300);
+            }
+          }
+          
           // Play headshot sound if the server reports it was a headshot
-          if (this.lastHitZone === 'head') {
+          else if (this.lastHitZone === 'head') {
             // For mobile devices, simplify audio to prevent layering
             if (window.isMobile) {
               // Just play one non-spatialized sound to avoid sync/double sound issues on mobile
@@ -737,5 +770,94 @@ export class Bullet {
    */
   setLastHitZone(zone) {
     this.lastHitZone = zone;
+  }
+  
+  /**
+   * Shows a hitmarker on the screen when a bullet hits a target
+   * @param {THREE.Vector3} position - The 3D world position of the hit
+   */
+  showHitMarker(position) {
+    // Create hit marker element if it doesn't exist
+    if (!window.hitMarkerElement) {
+      const hitMarker = document.createElement('div');
+      hitMarker.style.position = 'absolute';
+      hitMarker.style.transform = 'translate(-50%, -50%)';
+      hitMarker.style.width = '40px';
+      hitMarker.style.height = '40px';
+      hitMarker.style.backgroundImage = 'url("models/hitmarker.png")';
+      hitMarker.style.backgroundSize = 'contain';
+      hitMarker.style.backgroundRepeat = 'no-repeat';
+      hitMarker.style.pointerEvents = 'none';
+      hitMarker.style.zIndex = '1000';
+      hitMarker.style.opacity = '0';
+      hitMarker.style.transition = 'opacity 0.1s ease-in-out';
+      
+      document.body.appendChild(hitMarker);
+      window.hitMarkerElement = hitMarker;
+    }
+    
+    // Convert 3D world position to 2D screen position
+    if (position && window.localPlayer && window.localPlayer.camera) {
+      // Clone the position to avoid modifying the original
+      const screenPos = this.worldToScreen(position);
+      
+      // Only show if the hit is in front of the camera
+      if (screenPos) {
+        // Position the hit marker at the calculated screen position
+        window.hitMarkerElement.style.left = screenPos.x + 'px';
+        window.hitMarkerElement.style.top = screenPos.y + 'px';
+        
+        // Show the hitmarker
+        window.hitMarkerElement.style.opacity = '1';
+        
+        // Hide after 100ms
+        setTimeout(() => {
+          if (window.hitMarkerElement) {
+            window.hitMarkerElement.style.opacity = '0';
+          }
+        }, 100);
+      }
+    } else {
+      // Fallback to center of screen if no position provided or cannot convert
+      window.hitMarkerElement.style.left = '50%';
+      window.hitMarkerElement.style.top = '50%';
+      window.hitMarkerElement.style.opacity = '1';
+      
+      setTimeout(() => {
+        if (window.hitMarkerElement) {
+          window.hitMarkerElement.style.opacity = '0';
+        }
+      }, 100);
+    }
+  }
+  
+  /**
+   * Converts a 3D world position to 2D screen coordinates
+   * @param {THREE.Vector3} worldPos - The 3D world position to convert
+   * @returns {Object|null} - The 2D screen position {x, y} or null if behind camera
+   */
+  worldToScreen(worldPos) {
+    if (!window.localPlayer || !window.localPlayer.camera) return null;
+    
+    // Get the camera
+    const camera = window.localPlayer.camera;
+    
+    // Clone position to avoid modifying the original
+    const pos = worldPos.clone();
+    
+    // Project the 3D position to 2D clip space
+    pos.project(camera);
+    
+    // If the point is behind the camera, don't show the hitmarker
+    if (pos.z > 1) return null;
+    
+    // Convert from normalized device coordinates (-1 to +1) to window coordinates
+    const widthHalf = window.innerWidth / 2;
+    const heightHalf = window.innerHeight / 2;
+    
+    const x = (pos.x * widthHalf) + widthHalf;
+    const y = -(pos.y * heightHalf) + heightHalf;
+    
+    return { x, y };
   }
 }

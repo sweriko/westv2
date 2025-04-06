@@ -135,6 +135,9 @@ async function init() {
     // Load headshot marker sound
     soundManager.loadSound("headshotmarker", "sounds/headshotmarker.mp3");
     
+    // Load hitmarker sound
+    soundManager.loadSound("hitmarker", "sounds/hitmarker.mp3");
+    
     // Load new sound effects
     soundManager.loadSound("dramatic", "sounds/dramatic.mp3");
     soundManager.loadSound("eaglescream", "sounds/eaglescream.mp3");
