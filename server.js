@@ -2287,6 +2287,31 @@ setTimeout(() => {
       }
     });
     
+    // Create "notabot" NPC with path along the length of the town (rotated 90°)
+    const fixedX = -15; // Center X position in town
+    const startZ = -40; // North end of town
+    const endZ = 40; // South end of town
+    const notabotY = 2.72; // Standard ground level
+
+    createNpc({
+      name: "notabot",
+      position: { x: fixedX, y: notabotY, z: startZ },
+      rotation: { y: degToRad(0) }, // Initially facing south (along Z axis)
+      walkSpeed: 1.4, // Moderate walking speed
+      path: {
+        points: [
+          { x: fixedX, y: notabotY, z: startZ },
+          { x: fixedX, y: notabotY, z: endZ },
+          { x: fixedX, y: notabotY, z: startZ } // Loop back to start
+        ],
+        currentTarget: 1, // Start by walking south
+        pauseTime: 500, // Very short pause at endpoints
+        isPaused: false,
+        pauseTimer: 0,
+        lastPauseTime: 0
+      }
+    });
+    
     // Cowboy has been removed per request
     
     console.log("Initial NPCs spawned");
