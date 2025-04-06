@@ -311,16 +311,17 @@ export function createSmokeEffect(position, direction, scene, isPreloading = fal
   return { smokeGroup, particles, animateSmoke };
 }
 
+// Create global blood effect resources for reuse across all impacts
+const BLOOD_POOL = {
+  geometries: [],
+  materials: [],
+  particles: []
+};
+
 /**
  * Creates an impact effect when a bullet hits a target.
- * Instead of a red disk, this new effect emits particles in the opposite direction
- * of the bullet's travel. When the bullet hits a body (player or NPC), the particles
- * are red (blood). When it hits the ground/solid, the particles are brown (splatter).
- *
- * The particle velocities have been reduced so that they stay near the impact point.
- *
- * Additionally, this function now plays an impact sound:
- * - If hitType is 'player', "fleshimpact.mp3" is played at the impact position.
+ * Generates realistic blood particles with varied splatter patterns and curved trajectories.
+ * Optimized with object pooling and selective calculations.
  *
  * @param {THREE.Vector3} position - Impact position.
  * @param {THREE.Vector3} direction - Impact (bullet) direction.
@@ -339,7 +340,7 @@ export function createImpactEffect(position, direction, scene, hitType) {
   
   // Play impact sound based on hit type using positional audio
   if (window.localPlayer && window.localPlayer.soundManager) {
-    if (hitType === 'player') {
+    if (hitType === 'player' || hitType === 'npc') {
       // Calculate distance to local player to avoid playing impact on own body
       const localPlayerPos = window.localPlayer.group.position;
       const distToLocalPlayer = Math.sqrt(
@@ -347,63 +348,426 @@ export function createImpactEffect(position, direction, scene, hitType) {
         Math.pow(position.z - localPlayerPos.z, 2)
       );
       
-      // Only play flesh impact if not too close to local player (prevents self-impacts)
+      // Only play flesh impact if not too close to local player
       if (distToLocalPlayer > 0.5) {
         window.localPlayer.soundManager.playSoundAt("fleshimpact", position);
       }
     }
   }
 
-  // Choose color: red for body impacts
-  const color = 0xFF0000;
-
-  const particleCount = 15;
+  // Blood effect settings
+  const particleCount = 22; // Balance between visual quality and performance
   const particles = [];
+  
+  // More varied blood colors for visual interest
+  const bloodColors = [
+    0xCC0000, // Standard red
+    0xAA0000, // Darker red
+    0x880000, // Very dark red
+    0xFF0000, // Bright red
+    0xDD0000  // Medium red
+  ];
+  
+  // Precomputed direction vector 
+  const negatedDir = direction.clone().negate();
+  
+  // Create initial blood burst (center of impact)
+  const burstSize = 0.04;
+  const burstMaterial = new THREE.MeshBasicMaterial({
+    color: 0xAA0000,
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false
+  });
+  
+  let burstGeom;
+  if (BLOOD_POOL.geometries.length > 0) {
+    burstGeom = BLOOD_POOL.geometries.pop();
+  } else {
+    burstGeom = new THREE.SphereGeometry(burstSize, 4, 3);
+  }
+  
+  const burst = new THREE.Mesh(burstGeom, burstMaterial);
+  effectGroup.add(burst);
+  
+  // Create impact direction-aligned disc for initial spray pattern
+  const spraySize = 0.06;
+  const sprayMaterial = new THREE.MeshBasicMaterial({
+    color: 0x990000,
+    transparent: true,
+    opacity: 0.8,
+    depthWrite: false
+  });
+  
+  const sprayGeom = new THREE.CircleGeometry(spraySize, 8);
+  const spray = new THREE.Mesh(sprayGeom, sprayMaterial);
+  
+  // Position spray slightly in front of impact point
+  spray.position.copy(negatedDir.clone().multiplyScalar(0.01));
+  
+  // Orient spray to face away from impact direction
+  spray.lookAt(spray.position.clone().add(negatedDir));
+  
+  effectGroup.add(spray);
+  
+  // Add burst and spray to particles for animation
+  particles.push({
+    mesh: burst,
+    type: 'burst',
+    velocity: new THREE.Vector3(0, 0, 0),
+    life: 8,
+    gravity: new THREE.Vector3(0, 0, 0)
+  });
+  
+  particles.push({
+    mesh: spray,
+    type: 'spray',
+    velocity: new THREE.Vector3(0, 0, 0),
+    life: 12,
+    gravity: new THREE.Vector3(0, 0, 0)
+  });
+  
+  // Create blood droplets with varied patterns
   for (let i = 0; i < particleCount; i++) {
-    const size = 0.03 * (0.8 + Math.random() * 0.4);
-    const particleGeometry = new THREE.SphereGeometry(size, 4, 4);
-    const particleMaterial = new THREE.MeshBasicMaterial({
-      color: color,
-      transparent: true,
-      opacity: 1
-    });
-    const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+    // Get or create particle
+    let particle, isNewParticle = false;
+    let particleType = '';
+    
+    // Determine particle type (affects behavior)
+    const randValue = Math.random();
+    if (randValue < 0.6) {
+      particleType = 'droplet'; // Small fast droplets
+    } else if (randValue < 0.9) {
+      particleType = 'medium'; // Medium sized drops
+    } else {
+      particleType = 'chunk'; // Large slow chunks
+    }
+    
+    // Try to get a particle from the pool
+    if (BLOOD_POOL.particles.length > 0) {
+      particle = BLOOD_POOL.particles.pop();
+      // Reset particle properties
+      particle.visible = true;
+      particle.scale.set(1, 1, 1);
+      
+      // Update material color
+      const colorIndex = Math.floor(Math.random() * bloodColors.length);
+      particle.material.color.setHex(bloodColors[colorIndex]);
+      particle.material.opacity = 0.9;
+    } else {
+      // Create new particle if none in pool
+      isNewParticle = true;
+      
+      // Size based on particle type
+      let size;
+      if (particleType === 'droplet') {
+        size = 0.01 + Math.random() * 0.015;
+      } else if (particleType === 'medium') {
+        size = 0.02 + Math.random() * 0.02;
+      } else {
+        size = 0.025 + Math.random() * 0.025;
+      }
+      
+      // Create geometry - varied for different particle types
+      let geometry;
+      if (BLOOD_POOL.geometries.length > 0) {
+        geometry = BLOOD_POOL.geometries.pop();
+      } else {
+        if (particleType === 'chunk') {
+          // Use icosahedron for chunks (more irregular shape)
+          geometry = new THREE.IcosahedronGeometry(size, 0);
+        } else {
+          // Use sphere for droplets (smaller faces for better performance)
+          geometry = new THREE.SphereGeometry(size, 3, 2);
+        }
+      }
+      
+      // Create material with varied color
+      const colorIndex = Math.floor(Math.random() * bloodColors.length);
+      const material = new THREE.MeshBasicMaterial({
+        color: bloodColors[colorIndex],
+        transparent: true,
+        opacity: 0.9,
+        depthWrite: false
+      });
+      
+      // Create the particle
+      particle = new THREE.Mesh(geometry, material);
+    }
+    
+    // Add particle to group
     effectGroup.add(particle);
-    // Use a reduced speed so particles stay close to the impact spot.
-    const velocity = direction.clone().negate();
-    const speed = 0.05 + Math.random() * 0.05;
-    velocity.multiplyScalar(speed);
-    velocity.x += (Math.random() - 0.5) * 0.05;
-    velocity.y += (Math.random() - 0.5) * 0.05;
-    velocity.z += (Math.random() - 0.5) * 0.05;
-    particles.push({ mesh: particle, velocity: velocity, life: 30 + Math.floor(Math.random() * 20) });
+    
+    // Initial position offset for more natural spray formation
+    // Offset more along the impact direction
+    const dirComponent = 0.015 * Math.random(); 
+    const radialComponent = 0.01;
+    
+    // Create a position that favors the impact direction
+    particle.position.copy(negatedDir.clone().multiplyScalar(dirComponent));
+    
+    // Add randomness to position
+    particle.position.x += (Math.random() - 0.5) * radialComponent;
+    particle.position.y += (Math.random() - 0.5) * radialComponent;
+    particle.position.z += (Math.random() - 0.5) * radialComponent;
+    
+    // Random rotation
+    if (isNewParticle) {
+      particle.rotation.set(
+        Math.random() * Math.PI * 2,
+        Math.random() * Math.PI * 2,
+        Math.random() * Math.PI * 2
+      );
+    }
+    
+    // Create velocity vector based on particle type and impact direction
+    const velocity = new THREE.Vector3();
+    velocity.copy(negatedDir);
+    
+    // Speed varies by particle type
+    let speed;
+    let speedRandomness;
+    
+    if (particleType === 'droplet') {
+      // Droplets move fastest with most randomness
+      speed = 0.1;
+      speedRandomness = 0.15;
+    } else if (particleType === 'medium') {
+      // Medium particles have moderate speed
+      speed = 0.08;
+      speedRandomness = 0.12;
+    } else {
+      // Chunks are slowest
+      speed = 0.06;
+      speedRandomness = 0.1;
+    }
+    
+    // Apply speed
+    const finalSpeed = speed + Math.random() * speedRandomness;
+    velocity.multiplyScalar(finalSpeed);
+    
+    // Create spread pattern based on particle type
+    const spread = particleType === 'droplet' ? 0.1 : 0.07;
+    
+    // Create a cone-shaped pattern mostly in the impact direction
+    // but allow some particles to go more perpendicular for better spray effect
+    const angleMultiplier = Math.random() < 0.3 ? 1.5 : 0.7;
+    velocity.x += (Math.random() - 0.5) * spread * angleMultiplier;
+    velocity.y += (Math.random() - 0.5) * spread * angleMultiplier;
+    velocity.z += (Math.random() - 0.5) * spread * angleMultiplier;
+    
+    // Add some upward bias for more pleasing arcs
+    if (Math.random() < 0.4) {
+      velocity.y += 0.04 * Math.random();
+    }
+    
+    // Different gravity strength based on particle type
+    // Smaller particles affected more by air resistance
+    let gravityStrength;
+    if (particleType === 'droplet') {
+      gravityStrength = 0.0035;
+    } else if (particleType === 'medium') {
+      gravityStrength = 0.0025;
+    } else {
+      gravityStrength = 0.002;
+    }
+    
+    // Gravity vector always points down
+    const gravity = new THREE.Vector3(0, -gravityStrength, 0);
+    
+    // Lifetimes vary by type
+    let lifetime;
+    if (particleType === 'droplet') {
+      lifetime = 15 + Math.floor(Math.random() * 15);
+    } else if (particleType === 'medium') {
+      lifetime = 20 + Math.floor(Math.random() * 15);
+    } else {
+      lifetime = 25 + Math.floor(Math.random() * 15);
+    }
+    
+    // Store particle info for animation
+    particles.push({
+      mesh: particle,
+      velocity: velocity,
+      gravity: gravity,
+      life: lifetime,
+      type: particleType,
+      initialLife: lifetime,
+      stretchAxis: new THREE.Vector3(),
+      // Save initial position for trail calculation
+      lastPos: particle.position.clone()
+    });
   }
 
-  const duration = 500; // in ms
+  // Duration in ms - allow more time for gravity arcs
+  const duration = 600;
   const startTime = performance.now();
+  let lastTime = startTime;
 
-  function animateEffect() {
-    const elapsed = performance.now() - startTime;
-    const t = elapsed / duration;
-    for (const p of particles) {
-      if (p.life > 0) {
-        p.mesh.position.add(p.velocity);
-        p.mesh.material.opacity = Math.max(1 - t, 0);
-        p.life--;
+  // Function to animate the blood particles
+  function animateEffect(currentTime) {
+    // Time delta calculation
+    const deltaTime = Math.min(currentTime - lastTime, 20) / 1000;
+    lastTime = currentTime;
+    
+    const elapsed = currentTime - startTime;
+    
+    // Animation update
+    let anyAlive = false;
+    
+    // Reduced physics frequency - helps performance 
+    const dt = deltaTime * 60;
+    
+    // Update each particle in a single loop pass
+    for (const particle of particles) {
+      if (particle.life > 0) {
+        anyAlive = true;
+        
+        // Different animation based on particle type
+        if (particle.type === 'burst') {
+          // Initial burst expands quickly then fades
+          const lifeRatio = particle.life / 8;
+          const scale = 1 + (1 - lifeRatio) * 3; 
+          particle.mesh.scale.set(scale, scale, scale);
+          particle.mesh.material.opacity = lifeRatio * 0.8;
+        } 
+        else if (particle.type === 'spray') {
+          // Spray expands and fades
+          const lifeRatio = particle.life / 12;
+          const scale = 1 + (1 - lifeRatio) * 2;
+          particle.mesh.scale.set(scale, scale, 1);
+          particle.mesh.material.opacity = lifeRatio * 0.7;
+        }
+        else {
+          // Save previous position for proper stretching
+          particle.lastPos.copy(particle.mesh.position);
+          
+          // Apply gravity to velocity
+          particle.velocity.add(particle.gravity);
+          
+          // Move particle based on velocity
+          particle.mesh.position.x += particle.velocity.x;
+          particle.mesh.position.y += particle.velocity.y;
+          particle.mesh.position.z += particle.velocity.z;
+          
+          // Apply stretching in direction of movement
+          // Only if moving fast enough
+          const speedSq = particle.velocity.lengthSq();
+          
+          if (speedSq > 0.0005) {
+            // Calculate movement vector
+            particle.stretchAxis.subVectors(particle.mesh.position, particle.lastPos).normalize();
+            
+            // Different stretch factors based on type
+            let stretchAmount;
+            if (particle.type === 'droplet') {
+              stretchAmount = 1 + speedSq * 35;
+              // Extra stretch for small fast particles
+              if (speedSq > 0.001) {
+                stretchAmount *= 1.3;
+              }
+            } else if (particle.type === 'medium') {
+              stretchAmount = 1 + speedSq * 25;
+            } else {
+              stretchAmount = 1 + speedSq * 15;
+            }
+            
+            // Find dominant axis for optimized stretching
+            const absX = Math.abs(particle.stretchAxis.x);
+            const absY = Math.abs(particle.stretchAxis.y);
+            const absZ = Math.abs(particle.stretchAxis.z);
+            
+            // Apply stretch primarily along dominant axis
+            if (absX > absY && absX > absZ) {
+              particle.mesh.scale.set(stretchAmount, 1, 1);
+            } else if (absY > absX && absY > absZ) {
+              particle.mesh.scale.set(1, stretchAmount, 1);
+            } else {
+              particle.mesh.scale.set(1, 1, stretchAmount);
+            }
+          }
+          
+          // Apply drag based on particle type
+          let drag;
+          if (particle.type === 'droplet') {
+            drag = 0.97; // Less drag for small particles
+          } else if (particle.type === 'medium') {
+            drag = 0.96;
+          } else {
+            drag = 0.95; // More drag for larger chunks
+          }
+          
+          particle.velocity.multiplyScalar(drag);
+          
+          // Fade out as particles get older
+          const lifeRatio = particle.life / particle.initialLife;
+          
+          // Different fade behavior based on type
+          if (particle.type === 'droplet' && lifeRatio < 0.5) {
+            // Droplets fade faster
+            particle.mesh.material.opacity = lifeRatio * 2 * 0.9;
+          } else if (lifeRatio < 0.3) {
+            // All particles fade in final phase
+            particle.mesh.material.opacity = lifeRatio / 0.3 * 0.9;
+          }
+        }
+        
+        // Decrement life
+        particle.life--;
+      } else if (particle.mesh.visible) {
+        // Hide expired particles
+        particle.mesh.visible = false;
+        
+        // Return to pool for reuse
+        if (particle.type !== 'burst' && particle.type !== 'spray' && 
+            BLOOD_POOL.particles.length < 50) {
+          BLOOD_POOL.particles.push(particle.mesh);
+          effectGroup.remove(particle.mesh);
+        }
       }
     }
-    if (elapsed < duration) {
+    
+    // Continue animation if any particles are alive and within duration
+    if (anyAlive && elapsed < duration) {
       requestAnimationFrame(animateEffect);
     } else {
-      scene.remove(effectGroup);
-      effectGroup.traverse(child => {
-        if (child.isMesh) {
-          child.geometry.dispose();
-          child.material.dispose();
+      // Clean up
+      for (const particle of particles) {
+        if (particle.type === 'burst' || particle.type === 'spray') {
+          // Clean up spray and burst
+          if (particle.mesh.geometry) {
+            if (BLOOD_POOL.geometries.length < 10) {
+              BLOOD_POOL.geometries.push(particle.mesh.geometry);
+            } else {
+              particle.mesh.geometry.dispose();
+            }
+          }
+          if (particle.mesh.material) {
+            particle.mesh.material.dispose();
+          }
+        } 
+        else if (!BLOOD_POOL.particles.includes(particle.mesh)) {
+          // Pool materials and geometries from other particles
+          if (BLOOD_POOL.materials.length < 20 && particle.mesh.material) {
+            BLOOD_POOL.materials.push(particle.mesh.material);
+          } else if (particle.mesh.material) {
+            particle.mesh.material.dispose();
+          }
+          
+          if (BLOOD_POOL.geometries.length < 10 && particle.mesh.geometry) {
+            BLOOD_POOL.geometries.push(particle.mesh.geometry);
+          } else if (particle.mesh.geometry) {
+            particle.mesh.geometry.dispose();
+          }
         }
-      });
+      }
+      
+      // Remove effect group
+      scene.remove(effectGroup);
     }
   }
+  
+  // Start animation
   requestAnimationFrame(animateEffect);
 }
 
