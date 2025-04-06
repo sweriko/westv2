@@ -16,7 +16,6 @@ import logger from './logger.js';
 import { FlyingEagle } from './flyingEagle.js';
 import { initChat, handleChatMessage, addSystemMessage } from './chat.js';
 import { initNpcManager, npcManager } from './npcManager.js';
-import { loadSettings, createSettingsUI } from './settings.js';
 console.log("NPC Manager module loaded");
 import './viewmodel-config.js';
 
@@ -67,9 +66,6 @@ window.renderer = {
 // Initialize the application
 async function init() {
   try {
-    // Load user settings
-    loadSettings();
-    
     // Initialize player identity before anything else
     const playerIdentity = await initPlayerIdentity();
     console.log(`Welcome back, ${playerIdentity.username}! Player ID: ${playerIdentity.id}`);
@@ -551,9 +547,6 @@ async function init() {
       handleChatMessage({ username, message });
     };
 
-    // Initialize UI elements
-    createSettingsUI();
-    
     // Start the animation loop
     animate(0);
     
