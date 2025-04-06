@@ -26,9 +26,9 @@ export class Viewmodel {
     this.EFFECTS = {
       // Muzzle flash anchor position (relative to model)
       MUZZLE_FLASH: {
-        x: 0.33,       // Left/right offset of muzzle flash
-        y: -0.17,      // Up/down offset of muzzle flash
-        z: -1.67,      // Forward/backward offset of muzzle flash (negative = forward)
+        x: -0.05,       // Left/right offset of muzzle flash
+        y: 0.1,      // Up/down offset of muzzle flash
+        z: -0.1,      // Forward/backward offset of muzzle flash (negative = forward)
         scale: 0.1     // Scale of muzzle flash effect
       },
       
