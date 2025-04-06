@@ -317,11 +317,11 @@ export class Tumbleweed {
       this.tumbleweedPool = []; // Pool of inactive tumbleweeds for reuse
       
       // Maximum tumbleweeds on screen at once
-      this.maxTumbleweeds = 10;
+      this.maxTumbleweeds = 8;
       
       // Spawn timer variables - ticks up each frame
       this.spawnTimer = 0;
-      this.spawnInterval = 5 + Math.random() * 3; // 5-8 second spawn interval
+      this.spawnInterval = 6 + Math.random() * 3; // 6-9 second spawn interval
       
       // Initial spawn
       this.initialSpawn();
@@ -331,8 +331,8 @@ export class Tumbleweed {
      * Spawns initial tumbleweeds when the manager is created
      */
     initialSpawn() {
-      // Spawn 3-6 tumbleweeds immediately
-      const initialCount = 3 + Math.floor(Math.random() * 4);
+      // Spawn 2-5 tumbleweeds immediately
+      const initialCount = 2 + Math.floor(Math.random() * 4);
       for (let i = 0; i < initialCount; i++) {
         this.spawnTumbleweed();
       }
