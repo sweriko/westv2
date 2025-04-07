@@ -32,7 +32,7 @@ export class Player {
     this.id = null; // will be set by networkManager.onInit
     this.velocity = new THREE.Vector3();
     this.canJump = false;
-    this.gravity = 20; // Gravity force for physics
+    this.gravity = 25; // Increased from 15 for much stronger gravity pull
 
     // Movement flags
     this.moveForward = false;
@@ -47,9 +47,9 @@ export class Player {
     
     // Sprinting flag - new addition
     this.isSprinting = false;
-    this.normalSpeed = 5; // Default movement speed
-    this.sprintSpeed = 12; // Faster sprint speed
-    this.sprintJumpBoost = 1.5; // Jump boost factor when sprinting
+    this.normalSpeed = 3.5; // Reduced from 5 for slower movement
+    this.sprintSpeed = 7; // Reduced from 12 for more realistic running
+    this.sprintJumpBoost = 1.1; // Reduced further for more subtle sprint jumping effect
 
     // Aiming
     this.isAiming = false;
@@ -124,6 +124,10 @@ export class Player {
       body: { damage: 40 },
       limbs: { damage: 20 }
     };
+    
+    // Jump mechanics
+    this.jumpCooldown = 0; // Cooldown timer to prevent jump spamming
+    this.jumpCooldownTime = 0.3; // Time in seconds between allowed jumps
     
     // Initialize network & UI
     this.initNetworking();
@@ -347,6 +351,11 @@ export class Player {
     if (this.forceLockMovement) return; // Complete override for duel mode
     if (!this.canMove) return; // Movement lock (e.g. during Quick Draw)
     if (this.chatActive) return; // Don't move when chat is active
+
+    // Update jump cooldown if it's active
+    if (this.jumpCooldown > 0) {
+      this.jumpCooldown = Math.max(0, this.jumpCooldown - deltaTime);
+    }
 
     if (this.moveForward) this.velocity.z = -this.getMoveSpeed();
     else if (this.moveBackward) this.velocity.z = this.getMoveSpeed();
@@ -1348,6 +1357,11 @@ export class Player {
    * Make the player jump.
    */
   jump() {
+    // Don't allow jumping if on cooldown
+    if (this.jumpCooldown > 0) {
+      return;
+    }
+    
     // Double check for platforms first - ensures we can always jump on platforms
     if (!this.canJump) {
       const feetPos = new THREE.Vector3(
@@ -1362,9 +1376,11 @@ export class Player {
     }
     
     if (this.canJump && !this.forceLockMovement && this.canMove) {
-      this.velocity.y = this.isSprinting ? 8 * this.sprintJumpBoost : 8;
+      // Much more realistic jump velocity (significantly reduced)
+      this.velocity.y = this.isSprinting ? 5.2 * this.sprintJumpBoost : 5.2;
       this.canJump = false;
       this.isJumping = true;
+      this.jumpCooldown = this.jumpCooldownTime; // Apply cooldown
       
       // Play jump sound with delay to match animation timing
       if (this.soundManager) {

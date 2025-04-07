@@ -984,9 +984,9 @@ export class ThirdPersonModel {
         // Check if moving based on position change or explicit walking flag
         const isMovingNow = isAIControlled ? 
                           (playerData.isWalking || false) : // Use isWalking flag for AI
-                          (distance > 0.05);               // Use distance for players
+                          (distance > 0.03);               // Reduced threshold for walking (was 0.05)
         
-        const isRunningNow = distance > 0.3; // Threshold for running
+        const isRunningNow = distance > 0.2; // Reduced threshold for running (was 0.3)
         
         // Handle animation state transitions
         if (isMovingNow) {
@@ -1364,17 +1364,20 @@ export class ThirdPersonModel {
       // Reset to walking or idle after jump animation completes
       const duration = jumpAction._clip.duration;
       
+      // Shorten the jump animation to match faster gravity
+      const adjustedDuration = duration * 0.8; // 20% shorter for quicker landing
+      
       // Set immediate state transition when landing
       setTimeout(() => {
         if (this.isJumping) {
           this.isJumping = false;
           // Check if the player was moving before jumping
-          const wasMoving = this.group.position.distanceTo(this.targetPosition) > 0.05;
+          const wasMoving = this.group.position.distanceTo(this.targetPosition) > 0.03; // Reduced from 0.05
           if (wasMoving) {
             this.isWalking = true;
             this.playAnimation('walking', 0.05);
             // Check if should be running with higher threshold
-            if (this.group.position.distanceTo(this.targetPosition) > 0.3) {
+            if (this.group.position.distanceTo(this.targetPosition) > 0.2) { // Reduced from 0.3
               this.isRunning = true;
               this.playAnimation('running', 0.05);
             }
@@ -1382,12 +1385,12 @@ export class ThirdPersonModel {
             this.playAnimation('idle', 0.05);
           }
         }
-      }, duration * 1000);
+      }, adjustedDuration * 1000);
     } else {
       // Fallback if jump animation fails
       setTimeout(() => {
         this.isJumping = false;
-      }, 1000);
+      }, 700); // Reduced from 1000ms to match faster jump
     }
   }
   
