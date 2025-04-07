@@ -831,6 +831,9 @@ export class Player {
     shootDir.y += (Math.random() - 0.5) * 0.0005;
     shootDir.z += (Math.random() - 0.5) * 0.0005;
     
+    // NOTE: We're no longer adjusting trajectory here
+    // The Bullet class will handle any needed adjustments
+    
     shootDir.normalize();
 
     // Recoil effect

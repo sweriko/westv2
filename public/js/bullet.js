@@ -16,7 +16,9 @@ export class Bullet {
    * @param {string|number} bulletId - Optional server-assigned bullet ID (for remote bullets)
    */
   constructor(position, direction, bulletId = null) {
-    // No trajectory adjustment needed - bullet goes straight where aimed
+    // Dynamic bullet trajectory adjustment based on viewport
+    this.adjustTrajectoryForViewport(direction);
+    
     this.mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.02, 8, 8),
       new THREE.MeshStandardMaterial({ color: 0xB8860B })
@@ -45,8 +47,96 @@ export class Bullet {
     this.rayOrigin = position.clone();
     this.rayDirection = direction.clone();
     
-    // No path visualizer
-    this.pathVisualizer = null;
+    // Create a visual path for trajectory debugging
+    if (window.debugMode) {
+      this.createTrajectoryVisualization(position, direction);
+    }
+  }
+
+  /**
+   * Adjusts bullet trajectory based on actual viewport dimensions.
+   * Especially useful for iOS where fullscreen mode isn't available by default.
+   * @param {THREE.Vector3} direction - The original direction vector to modify
+   */
+  adjustTrajectoryForViewport(direction) {
+    // Skip if not iOS or not needed
+    if (!this.isIOS() || !this.needsAdjustment()) {
+      return;
+    }
+
+    // Get viewport info
+    const viewportInfo = this.getViewportInfo();
+    
+    // Only adjust if there's unused space
+    if (viewportInfo.hasUnusedSpace) {
+      // Calculate adjustment based on the ratio of unused space
+      // This is the percentage of the screen that's not being used
+      const visualToDeviceRatio = viewportInfo.visualHeight / viewportInfo.deviceHeight;
+      
+      // Apply a much smaller adjustment - just enough to align with crosshair
+      // Start with a very subtle adjustment factor
+      const offsetY = (1 - visualToDeviceRatio) * 0.2; // Reduced from 0.7 to 0.2
+      
+      // Apply vertical adjustment to direction
+      direction.y += offsetY;
+      
+      // No horizontal adjustment needed - this was causing misalignment
+      
+      // Renormalize the direction vector
+      direction.normalize();
+      
+      // Debug logs
+      if (window.debugMode) {
+        console.log(`Bullet trajectory adjusted: Y+${offsetY.toFixed(4)}, ratio: ${visualToDeviceRatio.toFixed(2)}`);
+      }
+    }
+  }
+
+  /**
+   * Detects if the device is running iOS
+   * @returns {boolean} True if device is iOS
+   */
+  isIOS() {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  }
+
+  /**
+   * Checks if trajectory adjustment is needed
+   * @returns {boolean} True if adjustment is needed
+   */
+  needsAdjustment() {
+    // Only adjust for horizontal orientation on iOS
+    return this.isIOS() && window.innerWidth > window.innerHeight;
+  }
+
+  /**
+   * Gets information about the viewport dimensions
+   * @returns {Object} Viewport information
+   */
+  getViewportInfo() {
+    // Get the actual visible viewport sizes
+    const visualWidth = window.innerWidth;
+    const visualHeight = window.innerHeight;
+    
+    // Get full device screen dimensions
+    const deviceWidth = window.screen.width;
+    const deviceHeight = window.screen.height;
+    
+    // Check if we're in landscape mode
+    const isLandscape = visualWidth > visualHeight;
+    
+    // Determine if there's unused space (especially for iOS)
+    // In landscape, unused space would be at the top/bottom
+    const hasUnusedSpace = isLandscape && (visualHeight < deviceHeight);
+    
+    return {
+      visualWidth,
+      visualHeight,
+      deviceWidth,
+      deviceHeight,
+      isLandscape,
+      hasUnusedSpace
+    };
   }
 
   /**
@@ -859,5 +949,48 @@ export class Bullet {
     const y = -(pos.y * heightHalf) + heightHalf;
     
     return { x, y };
+  }
+
+  /**
+   * Creates a visual path showing the bullet's trajectory for debugging
+   * @param {THREE.Vector3} startPos - Start position
+   * @param {THREE.Vector3} direction - Direction vector 
+   */
+  createTrajectoryVisualization(startPos, direction) {
+    // Only create visualization if we're in debug mode and in the scene
+    if (!window.debugMode || !window.scene) return;
+    
+    // Create line showing the projected path
+    const lineMaterial = new THREE.LineBasicMaterial({ 
+      color: 0xff0000,
+      transparent: true,
+      opacity: 0.7
+    });
+    
+    // Create points along trajectory
+    const points = [];
+    points.push(startPos.clone());
+    
+    // Add a point 10 units away to show direction
+    const endPoint = startPos.clone().add(direction.clone().multiplyScalar(10));
+    points.push(endPoint);
+    
+    // Create the line geometry
+    const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
+    const line = new THREE.Line(lineGeometry, lineMaterial);
+    
+    // Add to scene
+    window.scene.add(line);
+    
+    // Store reference to remove later
+    this.trajectoryLine = line;
+    
+    // Remove line after 2 seconds
+    setTimeout(() => {
+      if (this.trajectoryLine && window.scene) {
+        window.scene.remove(this.trajectoryLine);
+        this.trajectoryLine = null;
+      }
+    }, 2000);
   }
 }

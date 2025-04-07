@@ -94,6 +94,9 @@ async function init() {
     // Detect if we're on a mobile device
     window.isMobile = isMobileDevice();
     
+    // Setup viewport detection and handling
+    setupViewportHandling();
+    
     // Initialize scene - use the scene from initScene instead of creating a new one
     const sceneSetup = initScene();
     camera = sceneSetup.camera;
@@ -1281,6 +1284,109 @@ function initImprovedHitboxSystem() {
 
   console.log("✅ Improved hitbox system successfully installed");
   return true;
+}
+
+/**
+ * Setup viewport detection and handling, especially for iOS devices
+ * where fullscreen is not available by default
+ */
+function setupViewportHandling() {
+  // Store initial viewport dimensions
+  updateViewportDimensions();
+  
+  // Listen for orientation changes and resize events
+  window.addEventListener('orientationchange', () => {
+    // Small delay to allow browser to complete orientation change
+    setTimeout(updateViewportDimensions, 300);
+  });
+  
+  window.addEventListener('resize', () => {
+    updateViewportDimensions();
+  });
+  
+  // Initial call to apply any needed viewport adjustments
+  applyViewportAdjustments();
+  
+  // Add keyboard shortcut for toggling debug mode (Alt+D)
+  window.addEventListener('keydown', (e) => {
+    if (e.altKey && e.key === 'd') {
+      window.debugMode = !window.debugMode;
+      console.log(`Debug mode ${window.debugMode ? 'enabled' : 'disabled'}`);
+      
+      // When debug mode is enabled, show a small indicator
+      let debugIndicator = document.getElementById('debug-indicator');
+      if (window.debugMode) {
+        if (!debugIndicator) {
+          debugIndicator = document.createElement('div');
+          debugIndicator.id = 'debug-indicator';
+          debugIndicator.style.position = 'fixed';
+          debugIndicator.style.top = '10px';
+          debugIndicator.style.right = '10px';
+          debugIndicator.style.backgroundColor = 'rgba(255, 0, 0, 0.5)';
+          debugIndicator.style.color = 'white';
+          debugIndicator.style.padding = '5px';
+          debugIndicator.style.borderRadius = '3px';
+          debugIndicator.style.fontSize = '12px';
+          debugIndicator.style.zIndex = '1000';
+          document.body.appendChild(debugIndicator);
+        }
+        debugIndicator.textContent = 'DEBUG MODE';
+        debugIndicator.style.display = 'block';
+      } else if (debugIndicator) {
+        debugIndicator.style.display = 'none';
+      }
+    }
+  });
+}
+
+/**
+ * Update the viewport dimensions when orientation or size changes
+ */
+function updateViewportDimensions() {
+  // Get current viewport and device dimensions
+  const visualWidth = window.innerWidth;
+  const visualHeight = window.innerHeight;
+  const deviceWidth = window.screen.width;
+  const deviceHeight = window.screen.height;
+  
+  // Store these values globally for access by other modules
+  window.viewportInfo = {
+    visualWidth,
+    visualHeight,
+    deviceWidth,
+    deviceHeight,
+    isLandscape: visualWidth > visualHeight,
+    // Calculate ratio of visual height to full device height
+    viewportRatio: visualHeight / deviceHeight
+  };
+  
+  // Log information for iOS devices
+  if (/iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream) {
+    console.log(`Viewport updated - Visual: ${visualWidth}x${visualHeight}, Device: ${deviceWidth}x${deviceHeight}`);
+    
+    if (window.viewportInfo.viewportRatio < 1) {
+      console.log(`Unused screen space detected. Viewport ratio: ${window.viewportInfo.viewportRatio.toFixed(2)}`);
+    }
+  }
+  
+  // Apply adjustments based on new dimensions
+  applyViewportAdjustments();
+}
+
+/**
+ * Apply necessary adjustments based on viewport dimensions
+ */
+function applyViewportAdjustments() {
+  // If we have a renderer, update the camera aspect ratio
+  if (window.renderer && window.renderer.camera) {
+    window.renderer.camera.aspect = window.innerWidth / window.innerHeight;
+    window.renderer.camera.updateProjectionMatrix();
+  }
+  
+  // Resize renderer if available
+  if (window.renderer && window.renderer.instance) {
+    window.renderer.instance.setSize(window.innerWidth, window.innerHeight);
+  }
 }
 
 // Call init() to start the application

@@ -7,6 +7,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Wild Western FPS" />
   <meta name="mobile-web-app-capable" content="yes" />
+  <!-- Additional iOS specific meta tags for better fullscreen handling -->
+  <meta name="format-detection" content="telephone=no" />
+  <meta name="HandheldFriendly" content="true" />
   <title>Wild Western FPS – Multiplayer</title>
   <link rel="stylesheet" href="css/style.css">
   <style>
@@ -29,6 +32,17 @@
       left: 0;
       right: 0;
       bottom: 0;
+    }
+    
+    /* Improved iOS safe area handling for status bar and notches */
+    #game-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      /* Apply safe area insets for notched devices */
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
     }
     
     canvas {
