@@ -123,7 +123,7 @@ const playerSequences = new Map(); // playerId -> last sequence number
 
 // Add NFT verification configuration
 // Hardcoded NFT token address for now (this would be a specific NFT or collection address)
-const SPECIAL_SKIN_NFT_ADDRESS = "swapout"; // Replace with actual Solana NFT mint address
+const SPECIAL_SKIN_NFT_ADDRESS = "3j4UKuFb7FDQ4ZNSbSujiak6Ps7AQVE9ynnLHorArzGz"; // Replace with actual Solana NFT mint address
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY; // Helius API key
 const HELIUS_API_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
 
