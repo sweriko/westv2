@@ -90,7 +90,19 @@ const phantomWalletAdapter = {
     async connect() {
         try {
             if (!this.isPhantomInstalled()) {
-                window.open('https://phantom.app/', '_blank');
+                // Check if mobile device
+                const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+                
+                if (isMobile) {
+                    // Try direct protocol link only - no automatic redirects
+                    window.location.href = 'solana-wallet://';
+                    
+                    // No timeouts or additional redirects
+                    return;
+                } else {
+                    // On desktop, open the Phantom website
+                    window.open('https://phantom.app/', '_blank');
+                }
                 return;
             }
             
@@ -187,35 +199,89 @@ const phantomWalletAdapter = {
         const button = document.createElement('button');
         button.id = 'phantom-connect-button';
         button.textContent = 'Connect';
-        button.style.backgroundColor = '#8c5cf5'; // Purple color
-        button.style.color = 'white';
-        button.style.border = 'none';
+        button.style.backgroundColor = 'transparent'; // Transparent background
+        button.style.color = 'white'; // White text color
+        button.style.border = '2px solid #8c5cf5'; // Purple outline
         button.style.borderRadius = '20px';
         button.style.padding = '8px 16px';
         button.style.cursor = 'pointer';
         button.style.fontFamily = 'Arial, sans-serif';
         button.style.fontWeight = 'bold';
         button.style.fontSize = '14px';
-        button.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.2)';
-        button.style.transition = 'background-color 0.2s ease';
+        button.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)';
+        button.style.transition = 'all 0.2s ease';
         button.style.pointerEvents = 'auto'; // Ensure clicks are registered
         
-        // Add hover effect
-        button.onmouseover = () => {
-            button.style.backgroundColor = '#7a4fe0';
-        };
-        button.onmouseout = () => {
-            button.style.backgroundColor = this.isConnected ? '#4caf50' : '#8c5cf5';
-        };
-        
         // Add click event
-        button.onclick = async () => {
+        button.onclick = async (event) => {
+            // For desktop gaming, prevent automatic pointer lock after clicking
+            if (!(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent))) {
+                // Store that user clicked wallet button
+                document.body.setAttribute('data-wallet-clicked', 'true');
+                
+                // If document has pointer lock, release it
+                if (document.pointerLockElement) {
+                    document.exitPointerLock();
+                }
+                
+                // Prevent default to stop any automatic pointer lock
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            
             if (this.isConnected) {
                 await this.disconnect();
             } else {
                 await this.connect();
             }
         };
+        
+        // Add responsive sizing for mobile
+        const checkMobileAndResize = () => {
+            if (window.innerWidth <= 768 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+                // More moderate size for mobile
+                button.style.cssText += `
+                    padding: 3px 8px !important;
+                    font-size: 10px !important;
+                    border-width: 1px !important;
+                    border-radius: 14px !important;
+                    opacity: 0.8 !important;
+                    background-color: transparent !important;
+                    color: white !important;
+                `;
+                container.style.cssText += `
+                    top: 5px !important;
+                    right: 5px !important;
+                `;
+                button.style.boxShadow = 'none !important';
+            } else {
+                button.style.cssText += `
+                    padding: 8px 16px !important;
+                    font-size: 14px !important;
+                    border-width: 2px !important;
+                    border-radius: 20px !important;
+                    opacity: 1 !important;
+                    background-color: transparent !important;
+                    color: white !important;
+                `;
+                container.style.cssText += `
+                    top: 10px !important;
+                    right: 10px !important;
+                `;
+                button.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)';
+            }
+        };
+        
+        // Initial check
+        checkMobileAndResize();
+        
+        // Add resize listener
+        window.addEventListener('resize', checkMobileAndResize);
+        
+        // Force check on mobile devices
+        if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+            setTimeout(checkMobileAndResize, 100);
+        }
         
         // Add button to container
         container.appendChild(button);
@@ -233,10 +299,14 @@ const phantomWalletAdapter = {
             button.textContent = this.publicKey 
                 ? `${this.publicKey.slice(0, 4)}...${this.publicKey.slice(-4)}`
                 : 'Connected';
-            button.style.backgroundColor = '#4caf50'; // Green color
+            button.style.borderColor = '#4caf50'; // Green border
+            button.style.color = 'white'; // White text
+            button.style.backgroundColor = 'transparent';
         } else {
-            button.textContent = text || 'Connect';
-            button.style.backgroundColor = '#8c5cf5'; // Purple color
+            button.textContent = 'Connect'; // Always use "Connect" regardless of device or install status
+            button.style.borderColor = '#8c5cf5'; // Purple border
+            button.style.color = 'white'; // White text
+            button.style.backgroundColor = 'transparent';
         }
     },
     
