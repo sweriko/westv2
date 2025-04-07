@@ -10,8 +10,16 @@ const phantomWalletAdapter = {
     onDisconnect: null,
     onError: null,
     
+    // Network manager reference for sending wallet data to server
+    networkManager: null,
+    
     // Initialize the adapter
-    init() {
+    init(networkManager) {
+        // Store network manager reference if provided
+        if (networkManager) {
+            this.networkManager = networkManager;
+        }
+        
         // Create the UI components
         this.createConnectButton();
         
@@ -43,6 +51,33 @@ const phantomWalletAdapter = {
         }
         
         return true;
+    },
+    
+    // Set the network manager after initialization (if needed)
+    setNetworkManager(networkManager) {
+        this.networkManager = networkManager;
+        
+        // If we're already connected, send the wallet address to the server
+        if (this.isConnected && this.publicKey && this.networkManager) {
+            this.sendWalletAddressToServer();
+        }
+    },
+    
+    // Send the wallet address to the server for NFT verification
+    sendWalletAddressToServer() {
+        if (!this.networkManager || !this.publicKey) return;
+        
+        console.log(`Sending wallet address to server: ${this.publicKey}`);
+        
+        // Use the network manager to send the wallet address
+        if (this.networkManager.socket && this.networkManager.socket.readyState === WebSocket.OPEN) {
+            this.networkManager.socket.send(JSON.stringify({
+                type: 'walletConnect',
+                walletAddress: this.publicKey
+            }));
+        } else {
+            console.warn('Unable to send wallet address: WebSocket not connected');
+        }
     },
     
     // Check if Phantom wallet is installed
@@ -96,6 +131,9 @@ const phantomWalletAdapter = {
         this.updateConnectButtonStatus(true);
         
         console.log("Connected to wallet:", this.publicKey);
+        
+        // Send the wallet address to the server
+        this.sendWalletAddressToServer();
         
         // Fire connect callback
         if (typeof this.onConnect === 'function') {

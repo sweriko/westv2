@@ -67,6 +67,16 @@ export class ThirdPersonModel {
     // Position adjustment to prevent sinking
     this.groundOffset = 0; // Reduced from 0.1 to make feet touch the ground
     
+    // Skin system
+    this.activeSkin = null;
+    this.availableSkins = {
+      default: null, // Default texture will be stored here after loading
+      bananaSkin: null // Will be loaded on demand
+    };
+    this.skinPermissions = {
+      bananaSkin: false // By default, skin is locked until verified with NFT
+    };
+    
     // Load the player model
     this.loadPlayerModel();
     
@@ -1018,6 +1028,26 @@ export class ThirdPersonModel {
         this.playAnimation('idle', 0.05);
       }
     }
+
+    // Handle skin updates - only when skin data changes
+    if (playerData.skins && (!this._lastSkinUpdate || JSON.stringify(playerData.skins) !== JSON.stringify(this._lastSkinUpdate))) {
+      // Store current skin data to prevent redundant updates
+      this._lastSkinUpdate = JSON.stringify(playerData.skins);
+      
+      // Update permissions
+      this.updateSkinPermissions(playerData.skins);
+      
+      // Apply banana skin automatically if permission granted and not already applied
+      if (playerData.skins.bananaSkin && this.activeSkin !== 'bananaSkin') {
+        this.updateSkin('bananaSkin');
+      }
+    }
+    // Force skin application during first update if it hasn't been applied yet
+    else if (playerData.skins && playerData.skins.bananaSkin && !this._initialSkinApplied && this.activeSkin !== 'bananaSkin') {
+      this._initialSkinApplied = true;
+      this.updateSkin('bananaSkin');
+      console.log(`Applied initial skin to player ${this.playerId} during first update`);
+    }
   }
 
   /**
@@ -1402,6 +1432,260 @@ export class ThirdPersonModel {
     // Remove from scene
     if (this.group.parent) {
       this.group.parent.remove(this.group);
+    }
+  }
+
+  /**
+   * Updates the model's skin based on skin ID
+   * @param {string} skinId - The skin ID to apply
+   * @returns {boolean} - Whether the skin was successfully applied
+   */
+  updateSkin(skinId) {
+    // Check if this is a valid skin
+    if (!skinId || !this.availableSkins.hasOwnProperty(skinId)) {
+      console.warn(`Invalid skin ID: ${skinId}`);
+      return false;
+    }
+    
+    // Check if player has permission for this skin
+    if (skinId !== 'default' && !this.skinPermissions[skinId]) {
+      console.warn(`Player ${this.playerId} does not have permission for skin: ${skinId}`);
+      return false;
+    }
+    
+    // Check if model is loaded before attempting to apply skins
+    if (!this.playerModel) {
+      console.warn(`Cannot apply skin - player model not loaded yet for player ${this.playerId}`);
+      // Schedule another attempt after a short delay
+      setTimeout(() => {
+        if (this.playerModel) {
+          console.log(`Retrying skin application for player ${this.playerId}`);
+          this.updateSkin(skinId);
+        }
+      }, 500);
+      return false;
+    }
+    
+    // TEMPORARY: Debug the model structure to help identify meshes and materials
+    this._debugModelStructure();
+    
+    // Check if the texture was already loaded for this skin
+    if (!this.availableSkins[skinId]) {
+      // Load the skin texture
+      this.loadSkinTexture(skinId);
+      return false; // Will be applied once loaded
+    }
+    
+    // Apply the skin texture to the model
+    this.applyTextureToModel(this.availableSkins[skinId]);
+    this.activeSkin = skinId;
+    
+    console.log(`Applied skin '${skinId}' to player ${this.playerId}`);
+    return true;
+  }
+  
+  /**
+   * TEMPORARY: Debug helper to print model hierarchy and materials
+   * @private
+   */
+  _debugModelStructure() {
+    if (!this.playerModel) return;
+    
+    console.log(`=== DEBUG: Model structure for player ${this.playerId} ===`);
+    let meshCount = 0;
+    let skinnedMeshCount = 0;
+    let materialCount = 0;
+    
+    this.playerModel.traverse(child => {
+      if (child.isMesh) {
+        meshCount++;
+        if (child.isSkinnedMesh) skinnedMeshCount++;
+        
+        console.log(`Mesh: ${child.name}`);
+        
+        if (child.material) {
+          materialCount++;
+          console.log(`  Material: ${child.material.name || 'unnamed'}`);
+          console.log(`  Has map: ${child.material.map ? 'YES' : 'NO'}`);
+          console.log(`  Side: ${child.material.side}`);
+          if (child.isSkinnedMesh) {
+            console.log(`  Skinning enabled: ${child.material.skinning ? 'YES' : 'NO'}`);
+          }
+        }
+      }
+    });
+    
+    console.log(`Total meshes: ${meshCount}, Skinned meshes: ${skinnedMeshCount}, Materials: ${materialCount}`);
+    console.log(`=== END DEBUG ===`);
+  }
+  
+  /**
+   * Loads a skin texture by ID
+   * @param {string} skinId - The skin ID to load
+   */
+  loadSkinTexture(skinId) {
+    if (!skinId || skinId === 'default') return;
+    
+    const texturePath = `models/textures/${skinId}.png`;
+    const textureLoader = new THREE.TextureLoader();
+    
+    // Store that we have permission before the async load starts
+    const hasPermission = this.skinPermissions[skinId];
+    
+    console.log(`Loading skin texture for playermodel: ${texturePath}`);
+    
+    textureLoader.load(
+      texturePath,
+      (texture) => {
+        console.log(`Successfully loaded texture: ${texturePath}`, texture);
+        
+        // Store the loaded texture
+        this.availableSkins[skinId] = texture;
+        
+        // Use the stored permission value rather than checking again
+        // This prevents race conditions where permissions might change during load
+        if (hasPermission) {
+          this.applyTextureToModel(texture);
+          this.activeSkin = skinId;
+          console.log(`Applied newly loaded skin '${skinId}' to player ${this.playerId}`);
+        } else {
+          console.log(`Texture loaded but not applied - no permission for skin: ${skinId}`);
+        }
+      },
+      (progressEvent) => {
+        console.log(`Texture loading progress: ${progressEvent.loaded} / ${progressEvent.total}`);
+      },
+      (error) => {
+        console.error(`Error loading skin texture '${skinId}':`, error);
+      }
+    );
+  }
+  
+  /**
+   * Applies a texture to the player model
+   * @param {THREE.Texture} texture - The texture to apply
+   */
+  applyTextureToModel(texture) {
+    if (!this.playerModel || !texture) return;
+    
+    // List of revolver part names to look for (with different variations to match all cases)
+    const revolverParts = ['barrel', 'drum', 'grip', 'revolver', 'gun', 'barrel.001', 'drum.001', 'grip.001'];
+    
+    // Count how many parts we modify for a single summary log instead of per-part logs
+    let modifiedPartsCount = 0;
+    
+    // Debug mode to log all mesh names and material names to help identify parts
+    const debugMode = false;
+    
+    // Apply the texture to all relevant meshes in the model
+    this.playerModel.traverse(child => {
+      if (child.isMesh && child.material) {
+        if (debugMode) {
+          console.log(`Found mesh: ${child.name} with material: ${child.material.name || 'unnamed'}`);
+        }
+        
+        // Use Material.003 as primary check, but also check for revolver part names
+        const isRevolverMaterial = child.material.name && child.material.name.includes('Material.003');
+        const isRevolverPart = revolverParts.some(part => 
+          child.name.toLowerCase().includes(part.toLowerCase())
+        );
+        
+        // Also check for gun parts by looking at Pistol parts
+        const isPistolPart = child.name.toLowerCase().includes('pistol');
+        
+        // Extra check for model materials that might be eligible for skins
+        const isEligibleMaterial = child.material.name && 
+          (child.material.name.includes('gun') || 
+           child.material.name.includes('pistol') || 
+           child.material.name.includes('revolver'));
+        
+        if (isRevolverMaterial || isRevolverPart || isPistolPart || isEligibleMaterial) {
+          // Increment counter
+          modifiedPartsCount++;
+          
+          // Store the original/default texture if not already stored
+          if (!this.availableSkins.default && child.material.map) {
+            this.availableSkins.default = child.material.map.clone();
+          }
+          
+          // Clone the original material to preserve all properties
+          if (child.material._originalMaterial === undefined) {
+            child.material._originalMaterial = child.material.clone();
+          }
+          
+          // Proper creation of new texture - maintaining UVs
+          if (child.material._originalMaterial && child.material._originalMaterial.map) {
+            const originalTexture = child.material._originalMaterial.map;
+            
+            // Copy ALL texture properties
+            texture.wrapS = originalTexture.wrapS;
+            texture.wrapT = originalTexture.wrapT;
+            texture.repeat.copy(originalTexture.repeat);
+            texture.offset.copy(originalTexture.offset);
+            texture.center.copy(originalTexture.center);
+            texture.rotation = originalTexture.rotation;
+            
+            // Copy any additional properties that might affect UV mapping
+            texture.flipY = originalTexture.flipY;
+            texture.encoding = originalTexture.encoding;
+            
+            // Handle mipmaps and filtering
+            texture.generateMipmaps = originalTexture.generateMipmaps;
+            texture.minFilter = originalTexture.minFilter;
+            texture.magFilter = originalTexture.magFilter;
+            
+            // Also ensure texture is fully loaded before applying
+            texture.needsUpdate = true;
+          }
+          
+          // Apply the new texture
+          child.material.map = texture;
+          child.material.needsUpdate = true;
+          
+          if (debugMode) {
+            console.log(`Applied texture to part: ${child.name}`);
+          }
+        }
+      }
+    });
+    
+    // Single summary log instead of multiple per-part logs
+    if (modifiedPartsCount > 0) {
+      console.log(`Applied texture to ${modifiedPartsCount} player model parts for player ${this.playerId}`);
+    } else {
+      console.warn(`No suitable parts found to apply texture for player ${this.playerId}`);
+    }
+  }
+  
+  /**
+   * Updates skin permissions based on server data
+   * @param {Object} skinData - Skin permission data from server
+   */
+  updateSkinPermissions(skinData) {
+    if (!skinData) return;
+    
+    let skinChanged = false;
+    
+    // Update permissions for each skin
+    Object.keys(skinData).forEach(skinId => {
+      if (this.skinPermissions.hasOwnProperty(skinId)) {
+        const oldPermission = this.skinPermissions[skinId];
+        const newPermission = skinData[skinId];
+        
+        this.skinPermissions[skinId] = newPermission;
+        
+        // If permission was granted, preload the skin
+        if (!oldPermission && newPermission) {
+          this.loadSkinTexture(skinId);
+          skinChanged = true;
+        }
+      }
+    });
+    
+    // If permission changes might affect current skin, check if we need to reset
+    if (skinChanged && this.activeSkin && !this.skinPermissions[this.activeSkin]) {
+      // Reset to default skin if current skin is no longer permitted
+      this.updateSkin('default');
     }
   }
 }

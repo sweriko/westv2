@@ -458,6 +458,42 @@ export class MultiplayerManager {
       playerModel.group.rotation.y = initialData.rotation.y;
     }
     
+    // Apply skin information if provided and not an NPC/bot
+    if (!isNpc && !isBot && initialData.skins) {
+      console.log(`Applying initial skin data for player ${playerId}:`, initialData.skins);
+      
+      // Update skin permissions
+      playerModel.updateSkinPermissions(initialData.skins);
+      
+      // Apply banana skin if permission is granted
+      if (initialData.skins.bananaSkin) {
+        console.log(`Player ${playerId} has bananaSkin permission, applying skin on initial join`);
+        
+        // Ensure the model is loaded first
+        if (!playerModel.playerModel) {
+          console.log(`Waiting for player model to load before applying skin for player ${playerId}`);
+          // Add a delay to wait for model to load
+          setTimeout(() => {
+            if (playerModel.playerModel) {
+              playerModel.updateSkin('bananaSkin');
+              // Mark as initially applied to prevent duplicate application
+              playerModel._initialSkinApplied = true;
+              // Store the skin data to prevent redundant updates
+              playerModel._lastSkinUpdate = JSON.stringify(initialData.skins);
+            } else {
+              console.warn(`Player model still not loaded for player ${playerId} after delay`);
+            }
+          }, 1500); // Longer delay to ensure model loads
+        } else {
+          playerModel.updateSkin('bananaSkin');
+          // Mark as initially applied to prevent duplicate application
+          playerModel._initialSkinApplied = true;
+          // Store the skin data to prevent redundant updates
+          playerModel._lastSkinUpdate = JSON.stringify(initialData.skins);
+        }
+      }
+    }
+    
     // For NPCs/Bots, ensure model is prepared correctly and animation is initialized
     if (isAiControlled) {
       // Store the network data for future updates
@@ -582,7 +618,18 @@ export class MultiplayerManager {
             // Check for cached data that was received in onPlayerUpdate
             const cachedData = playerModel._cachedNetworkData;
             if (cachedData) {
-              playerModel.update(cachedData);
+              // Clone the data to avoid permanent modifications to cached data
+              const clonedData = { ...cachedData };
+              
+              // Only include skin data on initial update or when it has actually changed
+              if (!playerModel._initialSkinApplied) {
+                playerModel._initialSkinApplied = true;
+              } else {
+                // Remove skin data from subsequent updates to prevent constant reapplication
+                delete clonedData.skins;
+              }
+              
+              playerModel.update(clonedData);
             }
           } else {
             playerModel.update(deltaTime);

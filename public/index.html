@@ -79,6 +79,20 @@
     .hidden {
       display: none;
     }
+    
+    .error-message {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background-color: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 20px;
+      border-radius: 5px;
+      z-index: 9999;
+      text-align: center;
+      font-family: Arial, sans-serif;
+    }
   </style>
 </head>
 <body>
@@ -123,17 +137,23 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
   <!-- Solana Web3.js -->
   <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
-  <!-- Main JS as ES6 module -->
-  <script type="module" src="js/main.js"></script>
+  
   <!-- Phantom Wallet integration -->
   <script type="module">
     import phantomWalletAdapter from './js/phantom-wallet.js';
     
+    // Make the wallet adapter globally available
+    window.phantomWalletAdapter = phantomWalletAdapter;
+    
     // Initialize the Phantom wallet adapter when the page loads
+    // (Network Manager will be connected later in main.js)
     document.addEventListener('DOMContentLoaded', () => {
-      phantomWalletAdapter.init();
+      console.log('Phantom wallet adapter made globally available');
     });
   </script>
+  
+  <!-- Main JS as ES6 module -->
+  <script type="module" src="js/main.js"></script>
   
   <!-- Letterbox effect for cinematic eagle camera view -->
   <div class="letterbox-top"></div>

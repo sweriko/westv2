@@ -68,6 +68,16 @@ export class Viewmodel {
     this.pendingHolster = false;
     this.forceVisible = false; // New flag to keep viewmodel visible
     
+    // Skin system
+    this.activeSkin = null;
+    this.availableSkins = {
+      default: null, // Default texture will be stored here after loading
+      bananaSkin: null // Will be loaded on demand
+    };
+    this.skinPermissions = {
+      bananaSkin: false // By default, skin is locked until verified with NFT
+    };
+    
     // Set up with proper scale and position
     this.group.scale.set(this.SCALE, this.SCALE, this.SCALE);
     this.group.position.set(
@@ -808,5 +818,176 @@ export class Viewmodel {
     
     // Fallback if muzzle flash anchor isn't ready yet
     return this.group.localToWorld(new THREE.Vector3(0, 0, -0.5));
+  }
+  
+  /**
+   * Updates the model's skin based on skin ID
+   * @param {string} skinId - The skin ID to apply
+   * @returns {boolean} - Whether the skin was successfully applied
+   */
+  updateSkin(skinId) {
+    // Check if this is a valid skin
+    if (!skinId || !this.availableSkins.hasOwnProperty(skinId)) {
+      console.warn(`Invalid skin ID: ${skinId}`);
+      return false;
+    }
+    
+    // Check if player has permission for this skin
+    if (skinId !== 'default' && !this.skinPermissions[skinId]) {
+      console.warn(`Player does not have permission for skin: ${skinId}`);
+      return false;
+    }
+    
+    // Check if the texture was already loaded for this skin
+    if (!this.availableSkins[skinId]) {
+      // Load the skin texture
+      this.loadSkinTexture(skinId);
+      return false; // Will be applied once loaded
+    }
+    
+    // Apply the skin texture to the model
+    this.applyTextureToModel(this.availableSkins[skinId]);
+    this.activeSkin = skinId;
+    
+    console.log(`Applied skin '${skinId}' to viewmodel`);
+    return true;
+  }
+  
+  /**
+   * Loads a skin texture by ID
+   * @param {string} skinId - The skin ID to load
+   */
+  loadSkinTexture(skinId) {
+    if (!skinId || skinId === 'default') return;
+    
+    const texturePath = `models/textures/${skinId}.png`;
+    const textureLoader = new THREE.TextureLoader();
+    
+    console.log(`Loading skin texture for viewmodel: ${texturePath}`);
+    
+    textureLoader.load(
+      texturePath,
+      (texture) => {
+        console.log(`Successfully loaded texture: ${texturePath}`, texture);
+        
+        // Store the loaded texture
+        this.availableSkins[skinId] = texture;
+        
+        // If we have permission for this skin, apply it immediately
+        if (this.skinPermissions[skinId]) {
+          this.applyTextureToModel(texture);
+          this.activeSkin = skinId;
+          console.log(`Applied newly loaded skin '${skinId}' to viewmodel`);
+        } else {
+          console.log(`Texture loaded but not applied - no permission for skin: ${skinId}`);
+        }
+      },
+      (progressEvent) => {
+        console.log(`Texture loading progress: ${progressEvent.loaded} / ${progressEvent.total}`);
+      },
+      (error) => {
+        console.error(`Error loading skin texture '${skinId}' for viewmodel:`, error);
+      }
+    );
+  }
+  
+  /**
+   * Applies a texture to the viewmodel
+   * @param {THREE.Texture} texture - The texture to apply
+   */
+  applyTextureToModel(texture) {
+    if (!this.model || !texture) return;
+    
+    // List of revolver part names to look for
+    const revolverParts = ['barrel', 'drum', 'grip', 'revolver', 'gun'];
+    
+    // Apply the texture to all relevant meshes in the model
+    this.model.traverse(child => {
+      if (child.isMesh && child.material) {
+        // Use Material.002 as primary check, but also check for revolver part names
+        const isRevolverMaterial = child.material.name && child.material.name.includes('Material.002');
+        const isRevolverPart = revolverParts.some(part => 
+          child.name.toLowerCase().includes(part.toLowerCase())
+        );
+        
+        if (isRevolverMaterial || isRevolverPart) {
+          console.log(`Found revolver part: ${child.name} with material: ${child.material.name}`);
+          
+          // Store the original/default texture if not already stored
+          if (!this.availableSkins.default && child.material.map) {
+            this.availableSkins.default = child.material.map.clone();
+            console.log('Stored original texture for later restoration');
+          }
+          
+          // Clone the original material to preserve all properties
+          if (child.material._originalMaterial === undefined) {
+            child.material._originalMaterial = child.material.clone();
+            console.log('Cloned original material to preserve properties');
+          }
+          
+          // Proper creation of new texture - maintaining UVs
+          if (child.material._originalMaterial && child.material._originalMaterial.map) {
+            const originalTexture = child.material._originalMaterial.map;
+            
+            // Copy ALL texture properties
+            texture.wrapS = originalTexture.wrapS;
+            texture.wrapT = originalTexture.wrapT;
+            texture.repeat.copy(originalTexture.repeat);
+            texture.offset.copy(originalTexture.offset);
+            texture.center.copy(originalTexture.center);
+            texture.rotation = originalTexture.rotation;
+            
+            // Copy any additional properties that might affect UV mapping
+            texture.flipY = originalTexture.flipY;
+            texture.encoding = originalTexture.encoding;
+            
+            // Handle mipmaps and filtering
+            texture.generateMipmaps = originalTexture.generateMipmaps;
+            texture.minFilter = originalTexture.minFilter;
+            texture.magFilter = originalTexture.magFilter;
+            
+            console.log('Copied all texture properties to preserve UV mapping');
+          }
+          
+          // Apply the new texture
+          child.material.map = texture;
+          child.material.needsUpdate = true;
+          
+          console.log(`Applied texture to viewmodel part: ${child.name}`);
+        }
+      }
+    });
+  }
+  
+  /**
+   * Updates skin permissions based on server data
+   * @param {Object} skinData - Skin permission data from server
+   */
+  updateSkinPermissions(skinData) {
+    if (!skinData) return;
+    
+    let skinChanged = false;
+    
+    // Update permissions for each skin
+    Object.keys(skinData).forEach(skinId => {
+      if (this.skinPermissions.hasOwnProperty(skinId)) {
+        const oldPermission = this.skinPermissions[skinId];
+        const newPermission = skinData[skinId];
+        
+        this.skinPermissions[skinId] = newPermission;
+        
+        // If permission was granted, preload the skin
+        if (!oldPermission && newPermission) {
+          this.loadSkinTexture(skinId);
+          skinChanged = true;
+        }
+      }
+    });
+    
+    // If permission changes might affect current skin, check if we need to reset
+    if (skinChanged && this.activeSkin && !this.skinPermissions[this.activeSkin]) {
+      // Reset to default skin if current skin is no longer permitted
+      this.updateSkin('default');
+    }
   }
 } 

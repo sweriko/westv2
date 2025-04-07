@@ -216,7 +216,8 @@ export class NetworkManager {
           quickDrawLobbyIndex: message.quickDrawLobbyIndex || -1,
           isBot: message.isBot || false, // Legacy bot flag
           isNpc: message.isNpc || false, // New NPC flag
-          username: message.username || `Player_${message.id}`
+          username: message.username || `Player_${message.id}`,
+          skins: message.skins || { bananaSkin: false } // Include skin information
         });
         break;
 
@@ -254,6 +255,11 @@ export class NetworkManager {
               message.isNpc !== undefined ? message.isNpc : existing.isNpc;
             existing.isWalking =
               message.isWalking !== undefined ? message.isWalking : existing.isWalking;
+            
+            // Always maintain skin state for syncing to new clients
+            if (message.skins) {
+              existing.skins = message.skins;
+            }
           } else {
             // If this is a new player we hadn't seen before
             this.otherPlayers.set(message.id, {
@@ -269,7 +275,8 @@ export class NetworkManager {
               isBot: message.isBot || false,
               isNpc: message.isNpc || false,
               isWalking: message.isWalking || false,
-              username: message.username || `Player_${message.id}`
+              username: message.username || `Player_${message.id}`,
+              skins: message.skins || { bananaSkin: false } // Include skin information
             });
             
             // Notify about this newly discovered player
@@ -389,6 +396,20 @@ export class NetworkManager {
       case 'chatMessage':
         if (this.onChatMessage) {
           this.onChatMessage(message.senderId, message.username, message.message);
+        }
+        break;
+
+      // Player skin update
+      case 'playerSkinUpdate':
+        // Update the stored player data for skins
+        const playerToUpdate = this.otherPlayers.get(message.playerId);
+        if (playerToUpdate) {
+          playerToUpdate.skins = message.skins;
+        }
+        
+        // Call the skin update handler in main.js
+        if (this.onPlayerSkinUpdate) {
+          this.onPlayerSkinUpdate(message);
         }
         break;
 

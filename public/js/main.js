@@ -195,6 +195,19 @@ async function init() {
     // Set up multiplayer manager to handle other players
     multiplayerManager = new MultiplayerManager(scene, soundManager, remotePlayers);
     
+    // Initialize the phantom wallet adapter with network manager for NFT verification
+    if (typeof phantomWalletAdapter !== 'undefined') {
+      console.log('Initializing Phantom wallet adapter');
+      phantomWalletAdapter.init(networkManager);
+      
+      // Listen for wallet connection events to apply skins
+      document.addEventListener('walletConnected', (e) => {
+        console.log('Wallet connected event received in main.js');
+      });
+    } else {
+      console.warn('Phantom wallet adapter not available');
+    }
+    
     // Make multiplayerManager globally accessible
     window.multiplayerManager = multiplayerManager;
 
@@ -550,6 +563,117 @@ async function init() {
       handleChatMessage({ username, message });
     };
 
+    // Listen for skin permission updates
+    networkManager.handleMessage = (originalHandleMessage => {
+      return function(message) {
+        // Call the original handler first
+        originalHandleMessage.call(this, message);
+        
+        // Handle skin permission updates
+        if (message.type === 'skinPermissionUpdate') {
+          // Store the skin permission update in a global cache to prevent duplicate processing
+          if (!window.skinPermissionCache) {
+            window.skinPermissionCache = new Map();
+          }
+          
+          // Create a cache key for this update
+          const updateKey = JSON.stringify(message.skins);
+          
+          // Check if we've already processed this exact update
+          if (window.skinPermissionCache.has(updateKey)) {
+            console.log('Skipping duplicate skin permission update');
+            return;
+          }
+          
+          // Store this update in the cache
+          window.skinPermissionCache.set(updateKey, true);
+          
+          console.log('Received skin permission update:', message);
+          
+          // Update local player's skin permissions
+          if (localPlayer && localPlayer.model) {
+            console.log('Updating skin permissions for local player model');
+            localPlayer.model.updateSkinPermissions(message.skins);
+            
+            // Apply banana skin if permission granted
+            if (message.skins.bananaSkin) {
+              console.log('Local player has bananaSkin permission, applying skin to model');
+              localPlayer.model.updateSkin('bananaSkin');
+            }
+          } else {
+            console.warn('Could not update local player model - model not available');
+          }
+          
+          // Update viewmodel skin to match
+          if (localPlayer && localPlayer.viewmodel) {
+            console.log('Updating skin permissions for viewmodel');
+            localPlayer.viewmodel.updateSkinPermissions(message.skins);
+            
+            // Apply banana skin if permission granted
+            if (message.skins.bananaSkin) {
+              console.log('Local player has bananaSkin permission, applying skin to viewmodel');
+              localPlayer.viewmodel.updateSkin('bananaSkin');
+            }
+          } else {
+            console.warn('Could not update viewmodel - viewmodel not available');
+          }
+        }
+      };
+    })(networkManager.handleMessage);
+    
+    // Set up separate handler for skin updates
+    networkManager.onPlayerSkinUpdate = (message) => {
+      // Create a cache key for this update
+      const playerUpdateKey = `${message.playerId}_${JSON.stringify(message.skins)}`;
+      
+      // Check if we've already processed this exact update
+      if (window.skinPermissionCache && window.skinPermissionCache.has(playerUpdateKey)) {
+        console.log(`Skipping duplicate skin update for player ${message.playerId}`);
+        return;
+      }
+      
+      // Store this update in the cache
+      if (!window.skinPermissionCache) {
+        window.skinPermissionCache = new Map();
+      }
+      window.skinPermissionCache.set(playerUpdateKey, true);
+      
+      console.log('Received player skin update:', message);
+      
+      const remotePlayer = remotePlayers.get(message.playerId);
+      if (remotePlayer) {
+        console.log(`Updating skin permissions for remote player ${message.playerId}`);
+        
+        // First, update the permissions in the player model
+        remotePlayer.updateSkinPermissions(message.skins);
+        
+        // Apply banana skin if permission granted
+        if (message.skins.bananaSkin) {
+          console.log(`Remote player ${message.playerId} has bananaSkin permission, applying skin`);
+          
+          // Force the skinPermission to be set directly as well (to avoid race condition)
+          remotePlayer.skinPermissions.bananaSkin = true;
+          
+          // Apply the skin
+          if (remotePlayer.activeSkin !== 'bananaSkin') {
+            remotePlayer.updateSkin('bananaSkin');
+          } else {
+            console.log(`Skin already applied to player ${message.playerId}`);
+          }
+          
+          // Store skin state to prevent redundant updates in the player model
+          if (!remotePlayer._cachedNetworkData) {
+            remotePlayer._cachedNetworkData = {};
+          }
+          remotePlayer._cachedNetworkData.skins = message.skins;
+          remotePlayer._initialSkinApplied = true;
+          remotePlayer._lastSkinUpdate = JSON.stringify(message.skins);
+        }
+      } else {
+        console.warn(`Could not update remote player ${message.playerId} - player not found in remotePlayers map`);
+      }
+    };
+
     // Start the animation loop
     animate(0);
     
@@ -558,8 +682,11 @@ async function init() {
     
   } catch (error) {
     console.error('Error during initialization:', error);
-    // Handle initialization errors gracefully
-    alert('There was an error starting the game. Please refresh the page to try again.');
+    // Show a user-friendly error message
+    const errorElement = document.createElement('div');
+    errorElement.className = 'error-message';
+    errorElement.textContent = 'Failed to initialize the game. Please try refreshing the page.';
+    document.body.appendChild(errorElement);
   }
 }
 

@@ -1,4 +1,5 @@
 // server.js
+require('dotenv').config();
 console.log("Starting server initialization...");
 const express = require('express');
 console.log("Express loaded");
@@ -10,6 +11,7 @@ const url = require('url');
 console.log("URL loaded");
 const app = express();
 console.log("Express app created");
+// Native fetch is available in Node.js v22, no need to require node-fetch
 
 // Add Telegram Bot API support
 const TelegramBot = require('node-telegram-bot-api');
@@ -119,6 +121,111 @@ const playerTimeouts = new Map(); // playerId -> { lastShot, lastReload, lastTel
 const playerNonces = new Map(); // playerId -> Set of used nonces
 const playerSequences = new Map(); // playerId -> last sequence number
 
+// Add NFT verification configuration
+// Hardcoded NFT token address for now (this would be a specific NFT or collection address)
+const SPECIAL_SKIN_NFT_ADDRESS = "swapout"; // Replace with actual Solana NFT mint address
+const HELIUS_API_KEY = process.env.HELIUS_API_KEY; // Helius API key
+const HELIUS_API_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+
+// Map to store wallet to skin permission mappings
+const walletSkins = new Map(); // walletAddress -> { skins: { skinId: true }, ... }
+
+/**
+ * Checks if a wallet owns a specific NFT via Helius API
+ * @param {string} walletAddress - The wallet address to check
+ * @param {string} nftAddress - The NFT mint address to verify ownership
+ * @returns {Promise<boolean>} Whether the wallet owns the NFT
+ */
+async function checkNftOwnership(walletAddress, nftAddress) {
+  try {
+    console.log(`Checking if wallet ${walletAddress} owns NFT ${nftAddress}`);
+    
+    const response = await fetch(HELIUS_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'helius-test',
+        method: 'getAssetsByOwner',
+        params: {
+          ownerAddress: walletAddress,
+          page: 1,
+          limit: 100,
+        },
+      }),
+    });
+    
+    const data = await response.json();
+    
+    if (data.error) {
+      console.error('Helius API error:', data.error);
+      return false;
+    }
+    
+    // Check if the wallet owns the NFT
+    const assets = data.result.items;
+    const ownsNft = assets.some(asset => asset.id === nftAddress);
+    
+    console.log(`Wallet ${walletAddress} ${ownsNft ? 'owns' : 'does not own'} NFT ${nftAddress}`);
+    
+    return ownsNft;
+  } catch (error) {
+    console.error('Error checking NFT ownership:', error);
+    return false;
+  }
+}
+
+/**
+ * Updates the player's skin based on wallet NFT ownership
+ * @param {string} playerId - The player ID
+ * @param {string} walletAddress - The wallet address
+ */
+async function updatePlayerSkin(playerId, walletAddress) {
+  try {
+    // Check if the wallet owns the special NFT
+    const ownsSpecialSkin = await checkNftOwnership(walletAddress, SPECIAL_SKIN_NFT_ADDRESS);
+    
+    // Update the player's skin permissions
+    walletSkins.set(walletAddress, {
+      skins: {
+        bananaSkin: ownsSpecialSkin
+      }
+    });
+    
+    // Get the player from the players map
+    const player = players.get(playerId);
+    if (!player) return;
+    
+    // Update the player data with skin information
+    player.skins = {
+      bananaSkin: ownsSpecialSkin
+    };
+    
+    // Broadcast the skin update to all players
+    broadcastToAll({
+      type: 'playerSkinUpdate',
+      playerId: playerId,
+      skins: {
+        bananaSkin: ownsSpecialSkin
+      }
+    });
+    
+    // Send confirmation to the player
+    player.ws.send(JSON.stringify({
+      type: 'skinPermissionUpdate',
+      skins: {
+        bananaSkin: ownsSpecialSkin
+      }
+    }));
+    
+    console.log(`Updated skin permissions for player ${playerId} (wallet: ${walletAddress}): bananaSkin=${ownsSpecialSkin}`);
+  } catch (error) {
+    console.error(`Error updating player skin for ${playerId}:`, error);
+  }
+}
+
 // On new connection
 wss.on('connection', (ws, req) => {
   // Parse parameters from query string
@@ -127,6 +234,7 @@ wss.on('connection', (ws, req) => {
   const clientId = parameters.clientId;
   const username = parameters.username;
   const token = parameters.token;
+  const walletAddress = parameters.walletAddress; // New: Get wallet address if provided
   
   // Check if this is a development mode connection
   const isDev = isDevMode && (parameters.dev === 'true' || parameters.newplayer === 'true');
@@ -233,7 +341,11 @@ function initializePlayer(ws, playerId, sessionId, clientId, username, token, is
     // Additional player state
     bullets: 6,
     maxBullets: 6,
-    lastUpdateTime: Date.now()
+    lastUpdateTime: Date.now(),
+    // Initialize skin data for new players
+    skins: {
+      bananaSkin: false // Default to no special skin
+    }
   });
 
   // Anti-cheat: Initialize timeout tracking
@@ -266,7 +378,8 @@ function initializePlayer(ws, playerId, sessionId, clientId, username, token, is
         isReloading: p.isReloading,
         health: p.health,
         username: p.username,
-        quickDrawLobbyIndex: p.quickDrawLobbyIndex
+        quickDrawLobbyIndex: p.quickDrawLobbyIndex,
+        skins: p.skins || { bananaSkin: false } // Include skin information for existing players
       }))
   }));
 
@@ -278,7 +391,8 @@ function initializePlayer(ws, playerId, sessionId, clientId, username, token, is
     rotation: players.get(playerId).rotation,
     health: players.get(playerId).health,
     username: players.get(playerId).username,
-    quickDrawLobbyIndex: players.get(playerId).quickDrawLobbyIndex
+    quickDrawLobbyIndex: players.get(playerId).quickDrawLobbyIndex,
+    skins: players.get(playerId).skins // Include skins in the join message
   });
 
   // Handle incoming messages
@@ -402,6 +516,28 @@ function initializePlayer(ws, playerId, sessionId, clientId, username, token, is
         // Handle bot player removal
         case 'bot_remove':
           handleBotRemove(data);
+          break;
+
+        // Handle wallet connection from client
+        case 'walletConnect':
+          if (!data.walletAddress) {
+            console.error(`Invalid wallet connection from player ${playerId}: No wallet address provided`);
+            return;
+          }
+          
+          const player = players.get(playerId);
+          if (!player) {
+            console.error(`Wallet connection received for unknown player ${playerId}`);
+            return;
+          }
+          
+          console.log(`Player ${playerId} connected wallet: ${data.walletAddress}`);
+          
+          // Update player record with wallet address
+          player.walletAddress = data.walletAddress;
+          
+          // Check NFT ownership and update skin permissions
+          updatePlayerSkin(playerId, data.walletAddress);
           break;
 
         default:
