@@ -221,11 +221,13 @@ async function init() {
     // Make localPlayer globally accessible for hit updates.
     window.localPlayer = localPlayer;
 
-    // Initialize input and store mobile controls interface
-    const mobileControls = initInput(renderer, localPlayer, soundManager);
+    // Initialize input system
+    const inputControls = initInput(renderer, localPlayer, soundManager);
     
-    // Make mobile controls globally accessible if on mobile
-    window.mobileControls = mobileControls;
+    // Make mobile controls globally accessible
+    if (isMobileDevice()) {
+      window.mobileControls = inputControls;
+    }
     
     // Make scene globally accessible for physics visualization
     window.scene = scene;

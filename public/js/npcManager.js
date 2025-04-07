@@ -180,20 +180,31 @@ export class NpcManager {
       // Show bartender interaction prompt
       this.promptText.textContent = 'Press E to get drunk';
       this.interactionPrompt.style.display = 'flex';
+      
+      // Check if we're on mobile and show mobile bartender button if available
+      if (window.mobileControls && typeof window.mobileControls.showBartenderButton === 'function') {
+        window.mobileControls.showBartenderButton();
+      }
     } else {
       // Hide interaction prompt
       this.interactionPrompt.style.display = 'none';
+      
+      // Hide mobile bartender button if available
+      if (window.mobileControls && typeof window.mobileControls.hideBartenderButton === 'function') {
+        window.mobileControls.hideBartenderButton();
+      }
     }
   }
   
   /**
    * Handle interaction with NPCs
-   * @param {KeyboardEvent} event - The keyboard event
+   * @param {KeyboardEvent|null} event - The keyboard event (null if triggered directly by mobile)
    * @param {Player} player - The local player
    * @returns {boolean} True if interaction was handled
    */
   handleInteraction(event, player) {
-    if (event.code !== 'KeyE') return false;
+    // For keyboard events, only proceed if it's the E key
+    if (event && event.code !== 'KeyE') return false;
     
     // Check if player is near the bartender
     if (this.isBartenderNearby) {

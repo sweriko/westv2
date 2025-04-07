@@ -518,6 +518,28 @@ function createMobileControls(player, soundManager) {
   declineButton.style.color = 'white';
   declineButton.style.zIndex = '1003';
   
+  // Create bartender interaction button (initially hidden, shows when near bartender)
+  const bartenderButton = document.createElement('div');
+  bartenderButton.id = 'bartender-button';
+  bartenderButton.className = 'mobile-button';
+  bartenderButton.innerText = '🥃';
+  bartenderButton.style.position = 'fixed';
+  bartenderButton.style.top = '50%';
+  bartenderButton.style.left = '50%';
+  bartenderButton.style.transform = 'translate(-50%, -50%)';
+  bartenderButton.style.width = '80px';
+  bartenderButton.style.height = '80px';
+  bartenderButton.style.backgroundColor = 'rgba(139, 69, 19, 0.7)'; // Brown color for whiskey/drink theme
+  bartenderButton.style.border = '2px solid rgba(255, 215, 0, 0.8)'; // Gold border
+  bartenderButton.style.borderRadius = '50%';
+  bartenderButton.style.display = 'none'; // Hidden by default
+  bartenderButton.style.justifyContent = 'center';
+  bartenderButton.style.alignItems = 'center';
+  bartenderButton.style.fontSize = '32px';
+  bartenderButton.style.fontWeight = 'bold';
+  bartenderButton.style.color = 'white';
+  bartenderButton.style.zIndex = '1004';
+  
   // Create visual joystick hint for movement (left side)
   const leftControlHint = document.createElement('div');
   leftControlHint.id = 'left-control-hint';
@@ -631,6 +653,7 @@ function createMobileControls(player, soundManager) {
   document.body.appendChild(inviteButton);
   document.body.appendChild(acceptButton);
   document.body.appendChild(declineButton);
+  document.body.appendChild(bartenderButton);
   document.body.appendChild(leftControlHint);
   document.body.appendChild(rightControlHint);
   document.body.appendChild(cameraControlHint);
@@ -1124,11 +1147,35 @@ function createMobileControls(player, soundManager) {
     e.preventDefault();
   });
   
+  // Bartender button handler
+  bartenderButton.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    
+    // Trigger the interaction with bartender via the NPC manager
+    if (window.npcManager && window.npcManager.instance) {
+      // Call the interaction handler with null event (indicating mobile trigger)
+      window.npcManager.instance.handleInteraction(null, player);
+      
+      // Hide the button after it's used
+      hideBartenderButton();
+    }
+  });
+  
   // Handle window resize to update the screen width calculation
   window.addEventListener('resize', () => {
     screenWidth = window.innerWidth;
   });
   
+  // Function to show bartender interaction button
+  function showBartenderButton() {
+    bartenderButton.style.display = 'flex';
+  }
+
+  // Function to hide bartender interaction button
+  function hideBartenderButton() {
+    bartenderButton.style.display = 'none';
+  }
+
   // Return methods to be called from the game loop
   return {
     checkForNearbyPlayers: function(nearbyPlayersExist) {
@@ -1140,7 +1187,9 @@ function createMobileControls(player, soundManager) {
     // Export constants so they can be adjusted externally if needed
     getConstants: function() {
       return CONSTANTS;
-    }
+    },
+    showBartenderButton: showBartenderButton,
+    hideBartenderButton: hideBartenderButton
   };
 }
 
