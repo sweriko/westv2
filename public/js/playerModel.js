@@ -402,11 +402,19 @@ export class ThirdPersonModel {
           // Set loop mode based on animation type
           if (animation.name === 'idle' || animation.name === 'walking' || animation.name === 'running') {
             this.animations[animation.name].setLoop(THREE.LoopRepeat);
-          } else if (animation.name === 'jump' || animation.name === 'playeraim' || 
-                     animation.name === 'playerholstering' || animation.name === 'playershoot' ||
-                     animation.name === 'death') {
+          } else if (animation.name === 'jump' || animation.name === 'playerholstering' || 
+                     animation.name === 'playershoot' || animation.name === 'death') {
             this.animations[animation.name].setLoop(THREE.LoopOnce);
             this.animations[animation.name].clampWhenFinished = true;
+          } else if (animation.name === 'playeraim') {
+            // Special handling for aim animation to ensure it freezes correctly
+            this.animations[animation.name].setLoop(THREE.LoopOnce, 1);
+            this.animations[animation.name].clampWhenFinished = true;
+            
+            // Pre-configure the animation to be easier to freeze at the end
+            const aimAction = this.animations[animation.name];
+            aimAction.zeroSlopeAtEnd = true; // Ensure smooth stop at end
+            aimAction.zeroSlopeAtStart = true; // Better blending
           }
         } catch (e) {
           console.error(`Error setting up animation ${animation.name}:`, e);
@@ -469,6 +477,20 @@ export class ThirdPersonModel {
         default:
           fadeTime = this.walkBlendTime;
       }
+    }
+    
+    // Special handling for aim animation to ensure it gets frozen properly
+    if (animationName === 'playeraim') {
+      const action = this.fadeToAction(animationName, fadeTime);
+      
+      if (action) {
+        // Configure it for freezing at the end
+        action.clampWhenFinished = true;
+        action.setLoop(THREE.LoopOnce, 1);
+        action.zeroSlopeAtEnd = true;
+      }
+      
+      return action;
     }
     
     // Play the animation with the determined fade time
@@ -825,10 +847,20 @@ export class ThirdPersonModel {
     // Store position before movement for walking detection
     this.lastPosition.copy(this.group.position);
     
-    // Update animation mixer if available
-    if (this.animationMixer && deltaTime > 0 && deltaTime < 1) {
+    // Special handling for when we're in a frozen aim pose
+    if (this.isAiming && !this.isShooting && !this.isJumping && this._aimPoseSnapshot) {
+      // Skip the animation mixer update entirely and just apply the saved pose
+      this.maintainAimPose();
+    } 
+    // Regular animation updates for all other states
+    else if (this.animationMixer && deltaTime > 0 && deltaTime < 1) {
       try {
         this.animationMixer.update(deltaTime);
+        
+        // If we need to aim but don't have a snapshot yet, create one
+        if (this.isAiming && !this.isShooting && !this.isJumping && !this._aimPoseSnapshot) {
+          this.maintainAimPose();
+        }
       } catch (e) {
         console.warn("Error updating animation mixer:", e);
       }
@@ -875,67 +907,46 @@ export class ThirdPersonModel {
     
     // Handle jump animation first to ensure immediacy
     if (animationsLoaded && playerData.velocity && playerData.velocity.y > 2.5 && !this.isJumping) {
-      // Interrupt any current animation for immediate jump
-      this.isJumping = true;
-      this.isWalking = false;
-      this.isRunning = false;
-      
-      // Force immediate transition to jump
-      this.animationCooldown = 0;
-      const jumpAction = this.playAnimation('jump', 0.01);
-      
-      // Only proceed with timing if we successfully got the animation
-      if (jumpAction && jumpAction._clip) {
-        // Reset to walking or idle after jump animation completes
-        const duration = jumpAction._clip.duration;
-        
-        // Set immediate state transition when landing
-        setTimeout(() => {
-          if (this.isJumping) {
-            this.isJumping = false;
-            // Check if the player was moving before jumping
-            const wasMoving = this.group.position.distanceTo(this.targetPosition) > 0.05;
-            if (wasMoving) {
-              this.isWalking = true;
-              this.playAnimation('walking', 0.05);
-              // Check if should be running with higher threshold
-              if (this.group.position.distanceTo(this.targetPosition) > 0.3) {
-                this.isRunning = true;
-                this.playAnimation('running', 0.05);
-              }
-            } else {
-              this.playAnimation('idle', 0.05);
-            }
-          }
-        }, duration * 1000);
-      } else {
-        // Fallback if jump animation fails
-        setTimeout(() => {
-          this.isJumping = false;
-        }, 1000);
-      }
-      
-      // Fast return to process only jump this frame
-      return;
+      this.playJumpAnimation();
+    }
+
+    // Handle landing from jump
+    if (this.isJumping && (!playerData.velocity || playerData.velocity.y <= 0.1)) {
+      this.isJumping = false;
     }
     
-    // Handle aiming/shooting animations
+    // Special handling for aim state - we only want to process animation transitions
+    // when there is an actual change in the aiming state
     if (animationsLoaded && !this.isJumping) {
       // Track if the aiming state has changed
       const wasAiming = this.isAiming;
       const isAimingNow = playerData.isAiming;
       
+      // We only need to handle aim animation transitions when the state actually changes
+      // or when we need to handle shooting while already aiming
+      
       // Handle shooting animation - prioritize shooting over aim changes
       if (isAimingNow && playerData.isShooting && !this.isShooting) {
         this.playShootAnimation();
       }
-      // Handle aiming animation start
+      // Handle aiming animation start - only when state changes from not aiming to aiming
       else if (isAimingNow && !wasAiming) {
         this.playAimAnimation();
       }
-      // Handle holstering animation
+      // Handle holstering animation - only when state changes from aiming to not aiming
       else if (!isAimingNow && wasAiming) {
         this.playHolsterAnimation();
+      }
+      // Maintain aim state - but don't restart the animation if already aiming
+      else if (isAimingNow && wasAiming) {
+        // If we have a snapshot, make sure it's applied
+        if (this._aimPoseSnapshot) {
+          // No need to call maintainAimPose() here as it will be called in animateMovement
+        }
+        // If we don't have a snapshot yet but should be aiming, create one
+        else if (!this._aimPoseSnapshot && isAimingNow) {
+          this.maintainAimPose();
+        }
       }
     }
     
@@ -968,6 +979,7 @@ export class ThirdPersonModel {
       }
 
       // Only process animation transitions if animations are loaded
+      // and we're not in a special state (aiming/shooting/jumping)
       if (animationsLoaded && !this.isJumping && !this.isAiming && !this.isShooting) {
         // Check if moving based on position change or explicit walking flag
         const isMovingNow = isAIControlled ? 
@@ -1010,25 +1022,6 @@ export class ThirdPersonModel {
       }
     }
     
-    // Handle landing from jump
-    if (this.isJumping && playerData.velocity && playerData.velocity.y < 0 && playerData.canJump) {
-      // Player has landed
-      this.isJumping = false;
-      // Check current movement state
-      const isMovingNow = this.group.position.distanceTo(this.targetPosition) > 0.05;
-      if (isMovingNow) {
-        this.isWalking = true;
-        this.playAnimation('walking', 0.05);
-        // Check if should be running with higher threshold
-        if (this.group.position.distanceTo(this.targetPosition) > 0.3) {
-          this.isRunning = true;
-          this.playAnimation('running', 0.05);
-        }
-      } else {
-        this.playAnimation('idle', 0.05);
-      }
-    }
-
     // Handle skin updates - only when skin data changes
     if (playerData.skins && (!this._lastSkinUpdate || JSON.stringify(playerData.skins) !== JSON.stringify(this._lastSkinUpdate))) {
       // Store current skin data to prevent redundant updates
@@ -1262,9 +1255,12 @@ export class ThirdPersonModel {
             // Ensure set to the end frame and frozen
             aimAction.reset();
             aimAction.time = aimAction._clip.duration - 0.01;
+            aimAction.timeScale = 0; // Completely stop time advancement
             aimAction.enabled = true;
             aimAction.setEffectiveWeight(1);
             aimAction.clampWhenFinished = true;
+            aimAction.setLoop(THREE.LoopOnce, 1); // Ensure it's set to loop once
+            aimAction.paused = true; // Pause the action to prevent any updates
             aimAction.play();
             
             this.currentAction = aimAction;
@@ -1274,6 +1270,125 @@ export class ThirdPersonModel {
     }
     
     return aimAction;
+  }
+  
+  // Maintain the aim pose at the last frame of the animation
+  maintainAimPose() {
+    // Only proceed if we have loaded animations and the playeraim animation exists
+    if (!this.animations || !this.animations['playeraim']) return;
+    
+    const aimAction = this.animations['playeraim'];
+    
+    // If we don't have a snapshot yet, create one
+    if (!this._aimPoseSnapshot) {
+      // Stop all current actions to prevent interference
+      this.animationMixer.stopAllAction();
+      
+      // Reset and prepare the aim action to capture the final pose
+      aimAction.reset();
+      aimAction.clampWhenFinished = true;
+      aimAction.setLoop(THREE.LoopOnce, 1);
+      aimAction.timeScale = 1; // Normal speed for setup
+      aimAction.time = 0; // Start from beginning
+      aimAction.enabled = true;
+      aimAction.setEffectiveWeight(1);
+      aimAction.play();
+      
+      // Skip to the end of the animation to capture final pose
+      aimAction.time = aimAction._clip.duration - 0.01;
+      
+      // Force an update to apply the pose to the bones
+      this.animationMixer.update(0);
+      
+      // Save a snapshot of all bone matrices in the model
+      this._aimPoseSnapshot = {};
+      this.playerModel.traverse(child => {
+        if (child.isBone) {
+          // Save position, rotation, scale for more accurate restoration
+          this._aimPoseSnapshot[child.uuid] = {
+            position: child.position.clone(),
+            quaternion: child.quaternion.clone(),
+            scale: child.scale.clone(),
+            matrix: child.matrix.clone(),
+            matrixWorld: child.matrixWorld.clone()
+          };
+        }
+      });
+      
+      // Stop the animation to prevent further updates
+      aimAction.stop();
+      
+      console.log(`Created detailed aim pose snapshot for player ${this.playerId}`);
+      
+      // Set the current action to aim so we know what state we're in
+      this.currentAction = aimAction;
+      this.isAiming = true;
+    }
+    
+    // Apply the saved pose each frame to ensure it stays frozen
+    if (this._aimPoseSnapshot) {
+      this.playerModel.traverse(child => {
+        if (child.isBone && this._aimPoseSnapshot[child.uuid]) {
+          const snapshot = this._aimPoseSnapshot[child.uuid];
+          
+          // Apply the saved transform data directly
+          child.position.copy(snapshot.position);
+          child.quaternion.copy(snapshot.quaternion);
+          child.scale.copy(snapshot.scale);
+          child.matrix.copy(snapshot.matrix);
+          
+          // Also set the matrixWorld to ensure correct global pose
+          child.matrixWorld.copy(snapshot.matrixWorld);
+          
+          // Ensure matrices are updated
+          child.updateMatrix();
+          child.updateMatrixWorld(true);
+        }
+      });
+    }
+  }
+  
+  // Play the jump animation
+  playJumpAnimation() {
+    // Interrupt any current animation for immediate jump
+    this.isJumping = true;
+    this.isWalking = false;
+    this.isRunning = false;
+    
+    // Force immediate transition to jump
+    this.animationCooldown = 0;
+    const jumpAction = this.playAnimation('jump', 0.01);
+    
+    // Only proceed with timing if we successfully got the animation
+    if (jumpAction && jumpAction._clip) {
+      // Reset to walking or idle after jump animation completes
+      const duration = jumpAction._clip.duration;
+      
+      // Set immediate state transition when landing
+      setTimeout(() => {
+        if (this.isJumping) {
+          this.isJumping = false;
+          // Check if the player was moving before jumping
+          const wasMoving = this.group.position.distanceTo(this.targetPosition) > 0.05;
+          if (wasMoving) {
+            this.isWalking = true;
+            this.playAnimation('walking', 0.05);
+            // Check if should be running with higher threshold
+            if (this.group.position.distanceTo(this.targetPosition) > 0.3) {
+              this.isRunning = true;
+              this.playAnimation('running', 0.05);
+            }
+          } else {
+            this.playAnimation('idle', 0.05);
+          }
+        }
+      }, duration * 1000);
+    } else {
+      // Fallback if jump animation fails
+      setTimeout(() => {
+        this.isJumping = false;
+      }, 1000);
+    }
   }
   
   // Play the holstering animation when player stops aiming
@@ -1287,6 +1402,9 @@ export class ThirdPersonModel {
     this.isShooting = false;
     this.animationCooldown = this.minAnimationCooldown;
     
+    // Clear any aim pose snapshot when transitioning to holstering
+    this._aimPoseSnapshot = null;
+    
     return this.playAnimation('playerholstering', this.gunBlendTime);
   }
   
@@ -1299,6 +1417,9 @@ export class ThirdPersonModel {
     
     this.isShooting = true;
     this.animationCooldown = this.minAnimationCooldown;
+    
+    // Clear aim pose snapshot during shooting
+    this._aimPoseSnapshot = null;
     
     // IMPORTANT: NO SOUNDS are played here!
     // All gunshot sounds are centrally managed in main.js to prevent duplication
@@ -1314,22 +1435,11 @@ export class ThirdPersonModel {
       setTimeout(() => {
         this.isShooting = false;
         
-        // If still aiming, show the aim animation
+        // If still aiming, create a new aim pose snapshot
         if (this.isAiming) {
-          // Use the end frame of the playeraim animation
-          if (this.animations['playeraim']) {
-            const aimAction = this.animations['playeraim'];
-            
-            // Manually set to the end frame to show the gun aimed
-            aimAction.reset();
-            aimAction.time = aimAction._clip.duration - 0.01;
-            aimAction.enabled = true;
-            aimAction.setEffectiveWeight(1);
-            aimAction.clampWhenFinished = true;
-            aimAction.play();
-            
-            this.currentAction = aimAction;
-          }
+          // Clear any existing snapshot so we can create a fresh one
+          this._aimPoseSnapshot = null;
+          this.maintainAimPose();
         }
       }, duration * 1000);
     }
@@ -1380,6 +1490,9 @@ export class ThirdPersonModel {
     this.isWalking = false;
     this.isRunning = false;
     this.isJumping = false;
+    
+    // Clear aim pose snapshot
+    this._aimPoseSnapshot = null;
     
     // Stop all active animations and reset mixer
     if (this.animationMixer) {

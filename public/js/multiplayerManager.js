@@ -615,7 +615,7 @@ export class MultiplayerManager {
     // Update player models
     for (const [id, playerModel] of this.remotePlayers.entries()) {
       if (playerModel) {
-        // Make sure we call the animateMovement method to update animations
+        // Always call animateMovement which handles the snapshot-based animations too
         if (playerModel.animateMovement) {
           playerModel.animateMovement(deltaTime);
         }
@@ -641,7 +641,13 @@ export class MultiplayerManager {
               playerModel.update(clonedData);
             }
           } else {
-            playerModel.update(deltaTime);
+            // DON'T pass deltaTime to update when the player is in a frozen aim pose
+            // This prevents animation mixer from resetting the animation each frame
+            if (playerModel.isAiming && !playerModel.isShooting && !playerModel.isJumping) {
+              // Skip sending deltaTime update which would reset the animation
+            } else {
+              playerModel.update(deltaTime);
+            }
           }
         }
       }
