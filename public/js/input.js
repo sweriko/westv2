@@ -346,6 +346,39 @@ function hideInstructionsOnMobile() {
  * @param {SoundManager} soundManager - The SoundManager instance for audio feedback
  */
 function createMobileControls(player, soundManager) {
+  // Position constants for easy adjustment
+  const CONSTANTS = {
+    // Jump button positioning
+    JUMP_BUTTON: {
+      BOTTOM: 100,  // Distance from bottom edge
+      RIGHT: 40,   // Distance from right edge
+      SIZE: 60     // Button size
+    },
+    // Left control hint (movement joystick)
+    LEFT_JOYSTICK: {
+      BOTTOM: 30,  // Distance from bottom edge
+      LEFT: 90,    // Distance from left edge
+      SIZE: 120    // Joystick size
+    },
+    // Right control hint (aim/shoot joystick)
+    RIGHT_JOYSTICK: {
+      BOTTOM: 30,  // Distance from bottom edge
+      RIGHT: 135,   // Distance from right edge
+      SIZE: 100    // Joystick size
+    },
+    // Camera area - not using a dedicated button, instead using the area above the aim joystick
+    CAMERA_AREA: {
+      Y_OFFSET: 130,  // Distance above the aim joystick
+      HEIGHT: 150,    // Height of the camera area
+      WIDTH: 120      // Width of the camera area (matching the aim joystick)
+    },
+    // Sensitivities
+    MOVE_THRESHOLD: 10,                // Minimum movement in pixels before registering movement
+    MOVE_SENSITIVITY: 0.15,            // Movement speed multiplier
+    LOOK_SENSITIVITY: 0.4,             // Look speed multiplier for aiming
+    CAMERA_ROTATION_SENSITIVITY: 0.7   // Camera rotation sensitivity for view changes
+  };
+
   // Single large invisible overlay for touch input
   const touchOverlay = document.createElement('div');
   touchOverlay.id = 'touch-overlay';
@@ -359,16 +392,16 @@ function createMobileControls(player, soundManager) {
   touchOverlay.style.backgroundColor = 'transparent';
   document.body.appendChild(touchOverlay);
   
-  // Create jump button (on right side, to the left of the aim/shoot joystick)
+  // Create jump button
   const jumpButton = document.createElement('div');
   jumpButton.id = 'jump-button';
   jumpButton.className = 'mobile-button';
   jumpButton.innerText = '↑';
   jumpButton.style.position = 'fixed';
-  jumpButton.style.bottom = '30px';
-  jumpButton.style.right = '170px'; // Moved further left from 140px to 170px
-  jumpButton.style.width = '60px';
-  jumpButton.style.height = '60px';
+  jumpButton.style.bottom = `${CONSTANTS.JUMP_BUTTON.BOTTOM}px`;
+  jumpButton.style.right = `${CONSTANTS.JUMP_BUTTON.RIGHT}px`;
+  jumpButton.style.width = `${CONSTANTS.JUMP_BUTTON.SIZE}px`;
+  jumpButton.style.height = `${CONSTANTS.JUMP_BUTTON.SIZE}px`;
   jumpButton.style.backgroundColor = 'rgba(255, 255, 255, 0.3)';
   jumpButton.style.border = '2px solid rgba(255, 255, 255, 0.5)';
   jumpButton.style.borderRadius = '50%';
@@ -470,39 +503,89 @@ function createMobileControls(player, soundManager) {
   leftControlHint.id = 'left-control-hint';
   leftControlHint.className = 'control-hint';
   leftControlHint.style.position = 'fixed';
-  leftControlHint.style.bottom = '30px';
-  leftControlHint.style.left = '30px';
-  leftControlHint.style.width = '100px';
-  leftControlHint.style.height = '100px';
+  leftControlHint.style.bottom = `${CONSTANTS.LEFT_JOYSTICK.BOTTOM}px`;
+  leftControlHint.style.left = `${CONSTANTS.LEFT_JOYSTICK.LEFT}px`;
+  leftControlHint.style.width = `${CONSTANTS.LEFT_JOYSTICK.SIZE}px`;
+  leftControlHint.style.height = `${CONSTANTS.LEFT_JOYSTICK.SIZE}px`;
+  leftControlHint.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
   leftControlHint.style.borderRadius = '50%';
-  leftControlHint.style.border = '2px solid rgba(255, 255, 255, 0.3)';
-  leftControlHint.style.backgroundColor = 'transparent';
+  leftControlHint.style.border = '2px dashed rgba(255, 255, 255, 0.3)';
+  leftControlHint.style.zIndex = '998';
+  leftControlHint.style.pointerEvents = 'none';
   
-  // Create visual joystick hint for aiming/shooting (right side)
+  // Create inner knob for left joystick (walk)
+  const leftJoystickKnob = document.createElement('div');
+  leftJoystickKnob.id = 'left-joystick-knob';
+  leftJoystickKnob.className = 'joystick-knob';
+  leftJoystickKnob.style.position = 'absolute';
+  leftJoystickKnob.style.width = `${CONSTANTS.LEFT_JOYSTICK.SIZE * 0.4}px`; // 40% of the size of the outer circle
+  leftJoystickKnob.style.height = `${CONSTANTS.LEFT_JOYSTICK.SIZE * 0.4}px`;
+  leftJoystickKnob.style.backgroundColor = 'rgba(255, 255, 255, 0.4)';
+  leftJoystickKnob.style.borderRadius = '50%';
+  leftJoystickKnob.style.top = '50%';
+  leftJoystickKnob.style.left = '50%';
+  leftJoystickKnob.style.transform = 'translate(-50%, -50%)';
+  leftJoystickKnob.style.zIndex = '999';
+  leftJoystickKnob.style.pointerEvents = 'none';
+  leftControlHint.appendChild(leftJoystickKnob);
+  
+  // Create visual joystick hint for aiming (right side)
   const rightControlHint = document.createElement('div');
   rightControlHint.id = 'right-control-hint';
   rightControlHint.className = 'control-hint';
   rightControlHint.style.position = 'fixed';
-  rightControlHint.style.bottom = '30px';
-  rightControlHint.style.right = '30px';
-  rightControlHint.style.width = '100px';
-  rightControlHint.style.height = '100px';
+  rightControlHint.style.bottom = `${CONSTANTS.RIGHT_JOYSTICK.BOTTOM}px`;
+  rightControlHint.style.right = `${CONSTANTS.RIGHT_JOYSTICK.RIGHT}px`;
+  rightControlHint.style.width = `${CONSTANTS.RIGHT_JOYSTICK.SIZE}px`;
+  rightControlHint.style.height = `${CONSTANTS.RIGHT_JOYSTICK.SIZE}px`;
+  rightControlHint.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
   rightControlHint.style.borderRadius = '50%';
-  rightControlHint.style.border = '2px solid rgba(255, 255, 255, 0.3)';
-  rightControlHint.style.backgroundColor = 'transparent';
+  rightControlHint.style.border = '2px dashed rgba(255, 255, 255, 0.3)';
+  rightControlHint.style.zIndex = '998';
+  rightControlHint.style.pointerEvents = 'none';
   
-  // Create horizontal camera rotation area above aim joystick
+  // Create inner knob for right joystick (aim)
+  const rightJoystickKnob = document.createElement('div');
+  rightJoystickKnob.id = 'right-joystick-knob';
+  rightJoystickKnob.className = 'joystick-knob';
+  rightJoystickKnob.style.position = 'absolute';
+  rightJoystickKnob.style.width = `${CONSTANTS.RIGHT_JOYSTICK.SIZE * 0.4}px`; // 40% of the size of the outer circle
+  rightJoystickKnob.style.height = `${CONSTANTS.RIGHT_JOYSTICK.SIZE * 0.4}px`;
+  rightJoystickKnob.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
+  rightJoystickKnob.style.borderRadius = '50%';
+  rightJoystickKnob.style.top = '50%';
+  rightJoystickKnob.style.left = '50%';
+  rightJoystickKnob.style.transform = 'translate(-50%, -50%)';
+  rightJoystickKnob.style.zIndex = '999';
+  rightJoystickKnob.style.pointerEvents = 'none';
+  
+  // Add bullet image to right joystick knob
+  const bulletImg = document.createElement('img');
+  bulletImg.src = 'models/aimjoystick.png';
+  bulletImg.style.width = '70%';
+  bulletImg.style.height = '70%';
+  bulletImg.style.position = 'absolute';
+  bulletImg.style.top = '50%';
+  bulletImg.style.left = '50%';
+  bulletImg.style.transform = 'translate(-50%, -50%)';
+  bulletImg.style.pointerEvents = 'none';
+  rightJoystickKnob.appendChild(bulletImg);
+  
+  rightControlHint.appendChild(rightJoystickKnob);
+  
+  // Create visual indicator for the camera area (above the aim joystick)
   const cameraControlHint = document.createElement('div');
   cameraControlHint.id = 'camera-control-hint';
-  cameraControlHint.className = 'control-hint';
   cameraControlHint.style.position = 'fixed';
-  cameraControlHint.style.bottom = '140px';
-  cameraControlHint.style.right = '30px';
-  cameraControlHint.style.width = '200px';
-  cameraControlHint.style.height = '60px';
-  cameraControlHint.style.borderRadius = '30px';
-  cameraControlHint.style.border = '2px solid rgba(255, 255, 255, 0.3)';
+  cameraControlHint.style.top = '0';
+  cameraControlHint.style.left = '0';
+  cameraControlHint.style.width = '100%';
+  cameraControlHint.style.height = '100%';
   cameraControlHint.style.backgroundColor = 'transparent';
+  cameraControlHint.style.border = 'none';
+  cameraControlHint.style.zIndex = '900'; // Below other controls
+  cameraControlHint.style.pointerEvents = 'none';
+  cameraControlHint.innerText = '';
   
   // Create orientation message
   const orientationMsg = document.createElement('div');
@@ -543,12 +626,6 @@ function createMobileControls(player, soundManager) {
   let rightTouchStartTime = 0;
   let screenWidth = window.innerWidth;
   let isAimingWithTouch = false;
-  
-  // Constants for sensitivity
-  const MOVE_THRESHOLD = 10; // Minimum movement in pixels before registering movement
-  const MOVE_SENSITIVITY = 0.15;  // Movement speed multiplier
-  const LOOK_SENSITIVITY = 0.4;   // Look speed multiplier - Increased from 0.25 to 0.4 for higher sensitivity
-  const CAMERA_ROTATION_SENSITIVITY = 0.5; // Camera rotation sensitivity for horizontal pad - Increased from 0.3 to 0.5
   
   // Initial state of player
   player.moveForward = false;
@@ -612,7 +689,7 @@ function createMobileControls(player, soundManager) {
     }
   }
   
-  // Touch start handler (for aiming)
+  // Touch start handler
   touchOverlay.addEventListener('touchstart', (e) => {
     // Ensure audio is activated on first touch
     ensureAudioContextResumed();
@@ -623,6 +700,18 @@ function createMobileControls(player, soundManager) {
       instructionsElement.parentNode.removeChild(instructionsElement);
     }
     
+    // Get joystick element positions for accurate activation areas
+    const leftJoystickRect = leftControlHint.getBoundingClientRect();
+    const rightJoystickRect = rightControlHint.getBoundingClientRect();
+    const jumpButtonRect = jumpButton.getBoundingClientRect();
+    
+    // Get chat area if it exists
+    let chatRect = null;
+    const chatContainer = document.getElementById('chat-container');
+    if (chatContainer) {
+      chatRect = chatContainer.getBoundingClientRect();
+    }
+    
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
       const x = touch.clientX;
@@ -631,52 +720,28 @@ function createMobileControls(player, soundManager) {
       // Get the screen dimensions
       const screenHeight = window.innerHeight;
       
-      // Define joystick areas
-      // Left joystick: Bottom left corner of screen
-      const leftJoystickArea = {
-        x: 0,
-        y: screenHeight * 0.4,
-        width: screenWidth * 0.3,
-        height: screenHeight * 0.6
-      };
-      
-      // Jump button area (for detection to avoid overlap)
-      const jumpButtonArea = {
-        x: screenWidth - 200,
-        y: screenHeight - 90,
-        width: 80,
-        height: 80
-      };
-      
-      // Right joystick: Bottom right corner of screen (aim/shoot)
-      const rightJoystickArea = {
-        x: screenWidth * 0.7,
-        y: screenHeight * 0.6,
-        width: screenWidth * 0.3,
-        height: screenHeight * 0.4
-      };
-      
-      // Camera rotation area: Above right joystick
-      const cameraRotationArea = {
-        x: screenWidth * 0.6,
-        y: screenHeight * 0.3,
-        width: screenWidth * 0.4,
-        height: screenHeight * 0.3
-      };
-      
       // Skip if touch is on jump button to avoid interfering with its handler
-      if (x >= jumpButtonArea.x && 
-          x <= jumpButtonArea.x + jumpButtonArea.width &&
-          y >= jumpButtonArea.y && 
-          y <= jumpButtonArea.y + jumpButtonArea.height) {
+      if (x >= jumpButtonRect.left && 
+          x <= jumpButtonRect.right &&
+          y >= jumpButtonRect.top && 
+          y <= jumpButtonRect.bottom) {
+        continue;
+      }
+      
+      // Skip if touch is in chat area
+      if (chatRect && 
+          x >= chatRect.left && 
+          x <= chatRect.right && 
+          y >= chatRect.top && 
+          y <= chatRect.bottom) {
         continue;
       }
       
       // Check if touch is in left joystick area (movement)
-      if (x >= leftJoystickArea.x && 
-          x <= leftJoystickArea.x + leftJoystickArea.width &&
-          y >= leftJoystickArea.y && 
-          y <= leftJoystickArea.y + leftJoystickArea.height) {
+      if (x >= leftJoystickRect.left && 
+          x <= leftJoystickRect.right &&
+          y >= leftJoystickRect.top && 
+          y <= leftJoystickRect.bottom) {
         
         if (leftSideTouchId === null) {
           leftSideTouchId = touch.identifier;
@@ -685,18 +750,17 @@ function createMobileControls(player, soundManager) {
           
           // Visual feedback - highlight active control
           leftControlHint.style.borderColor = 'rgba(255, 255, 255, 0.7)';
-          leftControlHint.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+          leftControlHint.style.backgroundColor = 'rgba(0, 0, 0, 0.4)';
           
-          // Position the joystick where the touch started
-          leftControlHint.style.left = (x - leftControlHint.offsetWidth / 2) + 'px';
-          leftControlHint.style.bottom = (screenHeight - y - leftControlHint.offsetHeight / 2) + 'px';
+          // Do not move the entire joystick anymore
+          // Just keep it in place and let only the knob move
         }
       } 
       // Check if touch is in right joystick area (aim/shoot)
-      else if (x >= rightJoystickArea.x && 
-               x <= rightJoystickArea.x + rightJoystickArea.width &&
-               y >= rightJoystickArea.y && 
-               y <= rightJoystickArea.y + rightJoystickArea.height) {
+      else if (x >= rightJoystickRect.left && 
+               x <= rightJoystickRect.right &&
+               y >= rightJoystickRect.top && 
+               y <= rightJoystickRect.bottom) {
         
         if (rightSideTouchId === null) {
           rightSideTouchId = touch.identifier;
@@ -706,14 +770,12 @@ function createMobileControls(player, soundManager) {
           
           // Visual feedback - highlight active control
           rightControlHint.style.borderColor = 'rgba(255, 255, 255, 0.7)';
-          rightControlHint.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+          rightControlHint.style.backgroundColor = 'rgba(0, 0, 0, 0.4)';
           
-          // Position the joystick where the touch started
-          rightControlHint.style.right = (screenWidth - x - rightControlHint.offsetWidth / 2) + 'px';
-          rightControlHint.style.bottom = (screenHeight - y - rightControlHint.offsetHeight / 2) + 'px';
+          // Do not move the entire joystick anymore
+          // Just keep it in place and let only the knob move
           
-          // Start aiming immediately on touch - JUST set the flag
-          // Let the player's own update method handle all viewmodel positioning
+          // Start aiming immediately on touch
           player.isAiming = true;
           isAimingWithTouch = true;
           player.isLmbPressed = true; // Mark that touch is being held for shooting
@@ -731,21 +793,11 @@ function createMobileControls(player, soundManager) {
           }
         }
       }
-      // Check if touch is in camera rotation area
-      else if (x >= cameraRotationArea.x && 
-               x <= cameraRotationArea.x + cameraRotationArea.width &&
-               y >= cameraRotationArea.y && 
-               y <= cameraRotationArea.y + cameraRotationArea.height) {
-        
-        if (cameraTouchId === null) {
-          cameraTouchId = touch.identifier;
-          cameraStartPos.x = x;
-          cameraStartPos.y = y;
-          
-          // Visual feedback - highlight active control
-          cameraControlHint.style.borderColor = 'rgba(255, 255, 255, 0.7)';
-          cameraControlHint.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-        }
+      // If not on any specific control, use touch for camera control
+      else if (cameraTouchId === null) {
+        cameraTouchId = touch.identifier;
+        cameraStartPos.x = x;
+        cameraStartPos.y = y;
       }
     }
     e.preventDefault();
@@ -767,15 +819,34 @@ function createMobileControls(player, soundManager) {
         const deltaX = touch.clientX - leftStartPos.x;
         const deltaY = touch.clientY - leftStartPos.y;
         
+        // Move the joystick knob
+        const leftJoystickKnob = document.getElementById('left-joystick-knob');
+        if (leftJoystickKnob) {
+          // Calculate the distance from center
+          const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+          // Get the max distance the knob can move (radius of outer circle - radius of knob)
+          const maxDistance = CONSTANTS.LEFT_JOYSTICK.SIZE * 0.3; // 30% of the outer circle size
+          
+          if (distance > 0) {
+            // Normalize the position to the max distance
+            const normalizedDistance = Math.min(distance, maxDistance);
+            const normalizedX = deltaX * (normalizedDistance / distance);
+            const normalizedY = deltaY * (normalizedDistance / distance);
+            
+            // Move the knob from center position
+            leftJoystickKnob.style.transform = `translate(calc(-50% + ${normalizedX}px), calc(-50% + ${normalizedY}px))`;
+          }
+        }
+        
         // Only apply movement if joystick is moved beyond threshold
-        if (Math.abs(deltaX) > MOVE_THRESHOLD || Math.abs(deltaY) > MOVE_THRESHOLD) {
+        if (Math.abs(deltaX) > CONSTANTS.MOVE_THRESHOLD || Math.abs(deltaY) > CONSTANTS.MOVE_THRESHOLD) {
           // Forward/backward based on vertical movement
-          player.moveForward = deltaY < -MOVE_THRESHOLD;
-          player.moveBackward = deltaY > MOVE_THRESHOLD;
+          player.moveForward = deltaY < -CONSTANTS.MOVE_THRESHOLD;
+          player.moveBackward = deltaY > CONSTANTS.MOVE_THRESHOLD;
           
           // Left/right based on horizontal movement
-          player.moveLeft = deltaX < -MOVE_THRESHOLD;
-          player.moveRight = deltaX > MOVE_THRESHOLD;
+          player.moveLeft = deltaX < -CONSTANTS.MOVE_THRESHOLD;
+          player.moveRight = deltaX > CONSTANTS.MOVE_THRESHOLD;
         }
       }
       
@@ -784,9 +855,28 @@ function createMobileControls(player, soundManager) {
         const deltaX = touch.clientX - rightStartPos.x;
         const deltaY = touch.clientY - rightStartPos.y;
         
+        // Move the joystick knob
+        const rightJoystickKnob = document.getElementById('right-joystick-knob');
+        if (rightJoystickKnob) {
+          // Calculate the distance from center
+          const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+          // Get the max distance the knob can move (radius of outer circle - radius of knob)
+          const maxDistance = CONSTANTS.RIGHT_JOYSTICK.SIZE * 0.3; // 30% of the outer circle size
+          
+          if (distance > 0) {
+            // Normalize the position to the max distance
+            const normalizedDistance = Math.min(distance, maxDistance);
+            const normalizedX = deltaX * (normalizedDistance / distance);
+            const normalizedY = deltaY * (normalizedDistance / distance);
+            
+            // Move the knob from center position
+            rightJoystickKnob.style.transform = `translate(calc(-50% + ${normalizedX}px), calc(-50% + ${normalizedY}px))`;
+          }
+        }
+        
         // Apply camera rotation - allow for 360° movement
-        player.group.rotation.y -= deltaX * LOOK_SENSITIVITY * 0.01;
-        player.camera.rotation.x -= deltaY * LOOK_SENSITIVITY * 0.01;
+        player.group.rotation.y -= deltaX * CONSTANTS.LOOK_SENSITIVITY * 0.01;
+        player.camera.rotation.x -= deltaY * CONSTANTS.LOOK_SENSITIVITY * 0.01;
         
         // Limit vertical rotation to avoid flipping
         player.camera.rotation.x = Math.max(
@@ -799,14 +889,14 @@ function createMobileControls(player, soundManager) {
         rightStartPos.y = touch.clientY;
       }
       
-      // Handle camera rotation area (separate from aiming)
+      // Handle camera area touch (separate from aiming)
       if (touch.identifier === cameraTouchId) {
         const deltaX = touch.clientX - cameraStartPos.x;
         const deltaY = touch.clientY - cameraStartPos.y;
         
         // Apply full 360° camera rotation based on touch movement
-        player.group.rotation.y -= deltaX * CAMERA_ROTATION_SENSITIVITY * 0.01;
-        player.camera.rotation.x -= deltaY * CAMERA_ROTATION_SENSITIVITY * 0.01;
+        player.group.rotation.y -= deltaX * CONSTANTS.CAMERA_ROTATION_SENSITIVITY * 0.01;
+        player.camera.rotation.x -= deltaY * CONSTANTS.CAMERA_ROTATION_SENSITIVITY * 0.01;
         
         // Limit vertical rotation to avoid flipping
         player.camera.rotation.x = Math.max(
@@ -839,11 +929,13 @@ function createMobileControls(player, soundManager) {
         
         // Reset visual feedback
         leftControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
-        leftControlHint.style.backgroundColor = 'transparent';
+        leftControlHint.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
         
-        // Reset joystick position
-        leftControlHint.style.left = '30px';
-        leftControlHint.style.bottom = '30px';
+        // Reset joystick knob position
+        const leftJoystickKnob = document.getElementById('left-joystick-knob');
+        if (leftJoystickKnob) {
+          leftJoystickKnob.style.transform = 'translate(-50%, -50%)';
+        }
       }
       
       // Handle right side touch end (shooting on release)
@@ -876,28 +968,26 @@ function createMobileControls(player, soundManager) {
         
         // Reset visual feedback
         rightControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
-        rightControlHint.style.backgroundColor = 'transparent';
+        rightControlHint.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
         
-        // Reset joystick position
-        rightControlHint.style.right = '30px';
-        rightControlHint.style.bottom = '30px';
+        // Reset joystick knob position
+        const rightJoystickKnob = document.getElementById('right-joystick-knob');
+        if (rightJoystickKnob) {
+          rightJoystickKnob.style.transform = 'translate(-50%, -50%)';
+        }
         
         rightSideTouchId = null;
       }
       
-      // Handle camera rotation touch end
+      // Handle camera touch end
       if (touch.identifier === cameraTouchId) {
         cameraTouchId = null;
-        
-        // Reset visual feedback
-        cameraControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
-        cameraControlHint.style.backgroundColor = 'transparent';
       }
     }
     e.preventDefault();
   });
   
-  // Touch cancel handler (similar to touch end)
+  // Touch cancel handler - similar updates
   touchOverlay.addEventListener('touchcancel', (e) => {
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
@@ -912,11 +1002,13 @@ function createMobileControls(player, soundManager) {
         
         // Reset visual feedback
         leftControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
-        leftControlHint.style.backgroundColor = 'transparent';
+        leftControlHint.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
         
-        // Reset joystick position
-        leftControlHint.style.left = '30px';
-        leftControlHint.style.bottom = '30px';
+        // Reset joystick knob position
+        const leftJoystickKnob = document.getElementById('left-joystick-knob');
+        if (leftJoystickKnob) {
+          leftJoystickKnob.style.transform = 'translate(-50%, -50%)';
+        }
       }
       
       // Reset right side touch (aiming)
@@ -932,11 +1024,13 @@ function createMobileControls(player, soundManager) {
         
         // Reset visual feedback
         rightControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
-        rightControlHint.style.backgroundColor = 'transparent';
+        rightControlHint.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
         
-        // Reset joystick position
-        rightControlHint.style.right = '30px';
-        rightControlHint.style.bottom = '30px';
+        // Reset joystick knob position
+        const rightJoystickKnob = document.getElementById('right-joystick-knob');
+        if (rightJoystickKnob) {
+          rightJoystickKnob.style.transform = 'translate(-50%, -50%)';
+        }
         
         // Play contraction animation before hiding crosshair
         const crosshair = document.getElementById('crosshair');
@@ -958,10 +1052,6 @@ function createMobileControls(player, soundManager) {
       // Reset camera rotation touch
       if (touch.identifier === cameraTouchId) {
         cameraTouchId = null;
-        
-        // Reset visual feedback
-        cameraControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';
-        cameraControlHint.style.backgroundColor = 'transparent';
       }
     }
     e.preventDefault();
@@ -1026,7 +1116,11 @@ function createMobileControls(player, soundManager) {
       inviteButton.style.display = nearbyPlayersExist ? 'flex' : 'none';
     },
     showQuickdrawInvite: showQuickdrawInvite,
-    hideQuickdrawInvite: hideQuickdrawInvite
+    hideQuickdrawInvite: hideQuickdrawInvite,
+    // Export constants so they can be adjusted externally if needed
+    getConstants: function() {
+      return CONSTANTS;
+    }
   };
 }
 
