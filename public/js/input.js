@@ -441,20 +441,21 @@ function createMobileControls(player, soundManager) {
   inviteButton.className = 'mobile-button';
   inviteButton.innerText = 'E';
   inviteButton.style.position = 'fixed';
-  inviteButton.style.bottom = '140px';
-  inviteButton.style.right = '30px';
-  inviteButton.style.width = '70px';
-  inviteButton.style.height = '70px';
-  inviteButton.style.backgroundColor = 'rgba(0, 255, 0, 0.5)';
+  inviteButton.style.top = '50%'; // Center vertically
+  inviteButton.style.left = '50%'; // Center horizontally
+  inviteButton.style.transform = 'translate(-50%, -50%)'; // Perfect centering
+  inviteButton.style.width = '80px';
+  inviteButton.style.height = '80px';
+  inviteButton.style.backgroundColor = 'rgba(0, 128, 0, 0.5)';
   inviteButton.style.border = '2px solid rgba(255, 255, 255, 0.7)';
   inviteButton.style.borderRadius = '50%';
   inviteButton.style.display = 'none'; // Hidden by default
   inviteButton.style.justifyContent = 'center';
   inviteButton.style.alignItems = 'center';
-  inviteButton.style.fontSize = '28px';
+  inviteButton.style.fontSize = '32px';
   inviteButton.style.fontWeight = 'bold';
   inviteButton.style.color = 'white';
-  inviteButton.style.zIndex = '1002';
+  inviteButton.style.zIndex = '1001';
   
   // Create quickdraw accept button (initially hidden, shows when receiving invites)
   const acceptButton = document.createElement('div');
