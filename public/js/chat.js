@@ -68,34 +68,61 @@ function createChatUI() {
   if (isMobileDevice()) {
     // Position chat in top left for mobile - without dark background
     chatContainer.style.position = 'fixed';
-    chatContainer.style.top = '0';
-    chatContainer.style.left = '0';
-    chatContainer.style.width = '60%';
+    chatContainer.style.top = '10px';
+    chatContainer.style.left = '0px'; // Changed from 10px to 0px - more to the left
+    chatContainer.style.width = '70%';
     chatContainer.style.maxHeight = '30%';
-    chatContainer.style.backgroundColor = 'transparent'; // No dark background
+    chatContainer.style.backgroundColor = 'transparent'; // Remove background
     chatContainer.style.zIndex = '1000';
     
-    // Style chat input for mobile
-    chatInputContainer.style.position = 'fixed';
-    chatInputContainer.style.top = '50%';
-    chatInputContainer.style.left = '50%';
-    chatInputContainer.style.transform = 'translate(-50%, -50%)';
-    chatInputContainer.style.width = '80%';
-    chatInputContainer.style.zIndex = '1005';
-    chatInputContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.8)'; // Keep background on input container
-    chatInputContainer.style.padding = '10px';
-    chatInputContainer.style.borderRadius = '5px';
+    // COMPLETELY NEW APPROACH: Create a simple HTML link that opens a prompt
+    // This is the most compatible approach for iOS Safari
+    const chatButtonLink = document.createElement('a');
+    chatButtonLink.id = 'chat-mobile-link';
+    chatButtonLink.href = '#chat';  // Non-empty href required for iOS
+    chatButtonLink.textContent = ''; // No text
+    chatButtonLink.style.position = 'fixed';
+    chatButtonLink.style.top = '10px';
+    chatButtonLink.style.left = '0px'; // Also changed to 0px to match chat container
+    chatButtonLink.style.width = '70%'; // Match chat container width
+    chatButtonLink.style.height = '30%'; // Match chat container height
+    chatButtonLink.style.padding = '0';
+    chatButtonLink.style.zIndex = '2000';
+    chatButtonLink.style.backgroundColor = 'transparent'; // Invisible
+    chatButtonLink.style.border = 'none'; // No border
+    chatButtonLink.style.color = 'transparent'; // Invisible text
+    chatButtonLink.style.textDecoration = 'none';
+    chatButtonLink.style.textAlign = 'left';
+    chatButtonLink.style.opacity = '0'; // Make completely invisible
+    // Still need pointer events to work
+    chatButtonLink.style.pointerEvents = 'auto';
     
-    // Show send button on mobile
-    sendButton.style.display = 'inline-block';
+    // Add link to DOM
+    document.body.appendChild(chatButtonLink);
     
-    // Make chat container clickable to open chat
-    chatContainer.style.cursor = 'pointer';
-    chatContainer.addEventListener('click', function() {
-      openChat();
+    // Use simple prompt-based chat for maximum iOS compatibility
+    chatButtonLink.addEventListener('click', function(e) {
+      e.preventDefault();
+      
+      // Use native prompt() dialog which works reliably on all browsers
+      const message = prompt('Enter your message:');
+      
+      if (message && message.trim()) {
+        // Get network manager from global scope
+        const networkManager = window.networkManager;
+        
+        if (networkManager) {
+          // Process the chat message
+          lastSentMessage = message.trim();
+          sendChatMessage(message.trim(), networkManager);
+        }
+      }
     });
     
-    // Add mobile-specific message
+    // Hide the standard chat input on mobile since we're using prompt
+    chatInputContainer.style.display = 'none';
+    
+    // Add system message about chat being available - shorter version
     addSystemMessage("Tap here to chat");
   } else {
     // Add desktop-specific message
@@ -160,13 +187,19 @@ function setupChatEventListeners(networkManager) {
   // Add event listener for send button
   const sendButton = document.getElementById('chat-send-button');
   if (sendButton) {
-    sendButton.addEventListener('click', function() {
-      const message = chatInput.value.trim();
-      if (message) {
-        lastSentMessage = message;
-        sendChatMessage(message, networkManager);
-      }
-      closeChat();
+    // Use both click and touchend for better mobile experience
+    ['click', 'touchend'].forEach(eventType => {
+      sendButton.addEventListener(eventType, function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const message = chatInput.value.trim();
+        if (message) {
+          lastSentMessage = message;
+          sendChatMessage(message, networkManager);
+        }
+        closeChat();
+      });
     });
   }
 }
@@ -192,15 +225,45 @@ function openChat() {
   
   // Special handling for mobile keyboards
   if (isMobileDevice()) {
-    // Need a slight delay to ensure the input shows properly before focusing
+    // Create and append a temporary button that we'll click/focus to help trigger the keyboard
+    const tempButton = document.createElement('button');
+    tempButton.style.position = 'fixed';
+    tempButton.style.bottom = '0';
+    tempButton.style.right = '0';
+    tempButton.style.width = '1px';
+    tempButton.style.height = '1px';
+    tempButton.style.opacity = '0.01';
+    tempButton.style.pointerEvents = 'none';
+    document.body.appendChild(tempButton);
+    
+    // Force iOS Safari to show keyboard
     setTimeout(() => {
+      // Remove readonly attribute completely
+      chatInput.removeAttribute('readonly');
+      
+      // Use these attributes to help iOS Safari
+      chatInput.setAttribute('autocomplete', 'off');
+      chatInput.setAttribute('autocorrect', 'off');
+      chatInput.setAttribute('autocapitalize', 'none');
+      chatInput.style.fontSize = '16px'; // iOS Safari requires at least 16px
+      
+      // Click the temporary button to ensure iOS transitions focus properly
+      tempButton.focus();
+      tempButton.click();
+      
+      // Now focus and click the actual input
       chatInput.focus();
-      // Try to force the keyboard to show on mobile
       chatInput.click();
-      chatInput.setAttribute('readonly', false);
-      // Some mobile browsers need readOnly to be toggled
-      chatInput.readOnly = false;
-    }, 100);
+      
+      // Some iOS versions need a double focus attempt with delay
+      setTimeout(() => {
+        chatInput.focus();
+        chatInput.click();
+        
+        // Remove the temporary button
+        document.body.removeChild(tempButton);
+      }, 50);
+    }, 300);
   } else {
     chatInput.focus();
   }
@@ -392,13 +455,22 @@ export function updateChatPosition() {
     // Mobile positioning - top left corner, transparent background
     chatContainer.style.position = 'fixed';
     chatContainer.style.top = '10px';
-    chatContainer.style.left = '10px';
-    chatContainer.style.width = '60%';
+    chatContainer.style.left = '0px'; // Changed from 10px to 0px - more to the left
+    chatContainer.style.width = '70%';
     chatContainer.style.maxHeight = '30%';
     chatContainer.style.backgroundColor = 'transparent';
     chatContainer.style.overflow = 'auto';
     
-    // Style input for mobile
+    // Update chat button link position if it exists
+    const chatButton = document.getElementById('chat-mobile-link');
+    if (chatButton) {
+      chatButton.style.top = '10px';
+      chatButton.style.left = '0px';
+      chatButton.style.width = '70%';
+      chatButton.style.height = '30%';
+    }
+    
+    // Style input for mobile (hidden but keeping styles in case we need them)
     if (chatInputContainer) {
       chatInputContainer.style.position = 'fixed';
       chatInputContainer.style.top = '50%';
@@ -409,25 +481,6 @@ export function updateChatPosition() {
       chatInputContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
       chatInputContainer.style.padding = '10px';
       chatInputContainer.style.borderRadius = '5px';
-    }
-    
-    // Show send button on mobile
-    const sendButton = document.getElementById('chat-send-button');
-    if (sendButton) {
-      sendButton.style.display = 'inline-block';
-      sendButton.style.marginLeft = '10px';
-      sendButton.style.padding = '5px 10px';
-      sendButton.style.backgroundColor = '#4CAF50';
-      sendButton.style.color = 'white';
-      sendButton.style.border = 'none';
-      sendButton.style.borderRadius = '3px';
-    }
-    
-    // Style chat input for mobile
-    if (chatInput) {
-      chatInput.style.width = 'calc(100% - 80px)';
-      chatInput.style.padding = '8px';
-      chatInput.style.fontSize = '16px'; // Larger font size for mobile
     }
   } else {
     // Desktop positioning - bottom left corner

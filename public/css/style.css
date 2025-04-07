@@ -1051,3 +1051,144 @@ canvas {
 .letterbox-active .letterbox-bottom {
   height: 15vh;  /* 15% of viewport height for each bar */
 }
+
+/* Mobile-specific chat styles */
+@media (max-width: 1024px) {
+  #chat-container {
+    background-color: transparent !important; /* Remove background */
+    touch-action: auto !important; /* Override any touch restrictions */
+    -webkit-touch-callout: default !important; /* Allow touch interactions */
+    -webkit-user-select: text !important; /* Allow text selection in chat */
+    user-select: text !important;
+    pointer-events: auto !important; /* Ensure pointer events work */
+    padding: 10px !important; /* Smaller padding */
+    min-height: 30px; /* Ensure there's always something to tap */
+    /* Position from the left edge - no more notch adjustment */
+    left: 0px !important; 
+    top: 10px !important;
+    width: 70% !important;
+    max-width: 70% !important;
+  }
+  
+  /* For iPhone X and later with notch */
+  @supports (padding-top: env(safe-area-inset-top)) {
+    #chat-container {
+      padding-left: calc(env(safe-area-inset-left) + 5px) !important;
+      padding-top: env(safe-area-inset-top) !important;
+    }
+  }
+  
+  /* iOS-compatible chat link styles - invisible but clickable */
+  #chat-mobile-link {
+    /* Reset all visible styles */
+    background-color: transparent !important;
+    border: none !important;
+    color: transparent !important;
+    box-shadow: none !important;
+    opacity: 0 !important;
+    
+    /* Keep functional properties */
+    -webkit-tap-highlight-color: transparent !important;
+    -webkit-touch-callout: none !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    touch-action: manipulation !important;
+    display: block !important;
+    
+    /* Positioning - match chat container exactly */
+    position: fixed !important;
+    top: 10px !important;
+    left: 0px !important;
+    width: 70% !important;
+    height: 30% !important;
+    z-index: 9999 !important;
+    
+    /* Critical for functionality */
+    pointer-events: auto !important;
+  }
+}
+
+/* Mobile-specific enhancements for chat without background */
+@media (max-width: 1024px) {
+  .chat-message {
+    text-shadow: 2px 2px 3px rgba(0, 0, 0, 1), 0 0 8px rgba(0, 0, 0, 1) !important;
+    font-weight: bold !important;
+    color: rgba(255, 255, 255, 0.95) !important;
+  }
+  
+  .system-message {
+    color: rgba(255, 255, 255, 0.9) !important;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 1), 0 0 8px rgba(0, 0, 0, 1) !important;
+  }
+  
+  .username {
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 1), 0 0 8px rgba(0, 0, 0, 1) !important;
+  }
+}
+
+@supports (padding-top: env(safe-area-inset-top)) {
+  #chat-container {
+    padding-left: calc(env(safe-area-inset-left) + 5px) !important;
+    padding-top: env(safe-area-inset-top) !important;
+  }
+}
+
+/* Chat messages specific styles */
+#chat-messages {
+  padding-right: 5px !important;
+}
+
+#chat-input-container {
+  touch-action: auto !important;
+  -webkit-touch-callout: default !important;
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  pointer-events: auto !important;
+}
+
+#chat-input {
+  font-size: 16px; /* iOS Safari requires 16px+ to prevent zoom */
+}
+
+#chat-send-button {
+  min-height: 44px; /* Apple recommends 44px minimum touch target size */
+  min-width: 44px;
+  touch-action: manipulation;
+  -webkit-appearance: none; /* Prevent iOS default styling */
+}
+
+/* iOS-compatible chat link styles - invisible but clickable */
+#chat-mobile-link {
+  /* Reset all visible styles */
+  background-color: transparent !important;
+  border: none !important;
+  color: transparent !important;
+  box-shadow: none !important;
+  opacity: 0 !important;
+  
+  /* Keep functional properties */
+  -webkit-tap-highlight-color: transparent !important;
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  touch-action: manipulation !important;
+  display: block !important;
+  
+  /* Positioning - match chat container exactly */
+  position: fixed !important;
+  top: 10px !important;
+  left: 0px !important;
+  width: 70% !important;
+  height: 30% !important;
+  z-index: 9999 !important;
+  
+  /* Critical for functionality */
+  pointer-events: auto !important;
+}
+
+/* Remove active state visual effects */
+#chat-mobile-link:active {
+  opacity: 0 !important;
+  background-color: transparent !important;
+  transform: none !important;
+}
