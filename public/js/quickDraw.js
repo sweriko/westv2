@@ -693,6 +693,13 @@ export class QuickDraw {
         // Check if any other players are within the challenge radius
         if (this.networkManager && this.networkManager.otherPlayers) {
             for (const [playerId, playerData] of this.networkManager.otherPlayers) {
+                // Skip NPCs - don't allow dueling with them
+                // First make sure playerId is a string before using string methods
+                if (playerData.isNpc === true || 
+                    (typeof playerId === 'string' && playerId.startsWith('npc_'))) {
+                    continue;
+                }
+                
                 // Skip players who are in a quick draw already or don't have position
                 if (!playerData.position || playerData.quickDrawLobbyIndex >= 0 || 
                     playerData.inQuickDrawDuel) continue;

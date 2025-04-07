@@ -7,7 +7,7 @@ import { MultiplayerManager } from './multiplayerManager.js';
 import { Bullet } from './bullet.js';
 import { ThirdPersonModel } from './playerModel.js';
 import { PhysicsSystem } from './physics.js';
-import { createMuzzleFlash, createSmokeEffect, createImpactEffect, preloadMuzzleFlash, preloadSmokeEffect, SmokeRingEffect } from './effects.js';
+import { createMuzzleFlash, createSmokeEffect, createImpactEffect, preloadMuzzleFlash, preloadSmokeEffect, SmokeRingEffect, DrunkennessEffect } from './effects.js';
 import { QuickDraw } from './quickDraw.js';
 import { updateAmmoUI, updateHealthUI } from './ui.js';
 import { Viewmodel } from './viewmodel.js';
@@ -213,9 +213,9 @@ async function init() {
 
     // Initialize the local player
     localPlayer = new Player({
-      scene,
-      camera,
-      soundManager,
+      scene: scene,
+      camera: camera,
+      soundManager: soundManager,
       onShoot: handleLocalPlayerShoot  // callback for local shooting
     });
     // Make localPlayer globally accessible for hit updates.
@@ -258,6 +258,10 @@ async function init() {
 
     // Initialize Quick Draw game mode after the local player is created
     quickDraw = new QuickDraw(scene, localPlayer, networkManager, soundManager);
+    
+    // Initialize drunkenness effect - pass both player and camera arguments
+    const drunkennessEffect = new DrunkennessEffect(localPlayer, camera);
+    console.log('Drunkenness effect initialized');
     
     // Initialize the QuickDraw game mode
     quickDraw.init();
@@ -680,6 +684,14 @@ async function init() {
     // Show game instructions for all users, first-time users will see it after name entry
     showGameInstructions();
     
+    // Done loading, hide the loading screen
+    setTimeout(() => {
+      const loadingScreen = document.getElementById('loading-screen');
+      if (loadingScreen) {
+        loadingScreen.style.display = 'none';
+      }
+    }, 500);
+    
   } catch (error) {
     console.error('Error during initialization:', error);
     // Show a user-friendly error message
@@ -705,7 +717,12 @@ function animate(time) {
 
   // Update local player
   localPlayer.update(deltaTime);
-
+  
+  // Update nearby NPCs for interaction
+  if (npcManager && npcManager.instance) {
+    npcManager.instance.updateNearbyNpcs(localPlayer);
+  }
+  
   // Update remote players (animations, movement interpolation, etc.)
   multiplayerManager.update(deltaTime);
   

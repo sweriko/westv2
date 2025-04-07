@@ -966,3 +966,423 @@ export function preloadMuzzleFlash(scene) {
 
 // Export the SmokeRingEffect class
 export { SmokeRingEffect };
+
+/**
+ * DrunkennessEffect - Creates a drunkenness camera effect
+ * with various visual and motion effects that intensify and fade over time
+ */
+export class DrunkennessEffect {
+  constructor(player, camera) {
+    this.player = player;
+    this.camera = camera;
+    this.active = false;
+    this.startTime = 0;
+    // Adjust timing as requested - total 30s
+    this.duration = 30000; // 30 seconds total
+    this.intensifyDuration = 5000; // 5 seconds to intensify
+    this.fullIntensityDuration = 20000; // 20 seconds at full intensity
+    this.fadeoutDuration = 5000; // 5 seconds to fade out
+    this.lastUpdate = 0;
+    
+    // Original camera values to restore
+    this.originalFOV = 0;
+    this.originalPosition = new THREE.Vector3();
+    this.originalRotation = new THREE.Euler();
+    
+    // Effect parameters - smoother intensity
+    this.maxIntensity = 1.2; // More moderate intensity
+    this.currentIntensity = 0;
+    
+    // Camera wobble parameters - slower frequency for more sway
+    this.wobblePhase = 0;
+    this.wobbleFrequency = 1.2; // Reduced from 2.5 to 1.2 for slower sway
+    this.maxPositionWobble = 0.13; // Slightly reduced
+    this.maxRotationWobble = 0.06; // Slightly reduced
+    
+    // Movement jitter parameters
+    this.jitterAmount = 0;
+    this.jitterDecay = 0.9;
+    this.directionShiftAmount = 0;
+    this.directionShiftPhase = 0;
+    
+    // Visual effects
+    this.effectsContainer = null;
+    this.doubleVisionEnabled = false;
+    this.doubleVisionCanvas = null;
+    this.doubleVisionCtx = null;
+    this.doubleVisionOffset = 0;
+    
+    // Create visual effects container
+    this.createVisualEffects();
+    
+    // Set to window for access from other modules
+    window.drunkennessEffect = this;
+  }
+  
+  /**
+   * Creates the DOM elements for visual effects
+   */
+  createVisualEffects() {
+    // Create container for visual effects - minimal approach
+    this.effectsContainer = document.createElement('div');
+    this.effectsContainer.id = 'drunkenness-effects';
+    this.effectsContainer.style.position = 'absolute';
+    this.effectsContainer.style.top = '0';
+    this.effectsContainer.style.left = '0';
+    this.effectsContainer.style.width = '100%';
+    this.effectsContainer.style.height = '100%';
+    this.effectsContainer.style.pointerEvents = 'none';
+    this.effectsContainer.style.zIndex = '10';
+    this.effectsContainer.style.display = 'none';
+    this.effectsContainer.style.background = 'transparent';
+    
+    // Create filter layer with NO filters
+    this.filterLayer = document.createElement('div');
+    this.filterLayer.id = 'drunkenness-filter';
+    this.filterLayer.style.position = 'absolute';
+    this.filterLayer.style.top = '0';
+    this.filterLayer.style.left = '0';
+    this.filterLayer.style.width = '100%';
+    this.filterLayer.style.height = '100%';
+    this.filterLayer.style.backgroundColor = 'rgba(0,0,0,0)';
+    this.filterLayer.style.backdropFilter = 'none';
+    this.filterLayer.style.pointerEvents = 'none';
+    this.filterLayer.style.mixBlendMode = 'normal';
+    
+    // Add filter layer to container
+    this.effectsContainer.appendChild(this.filterLayer);
+    
+    // Add container to document
+    document.body.appendChild(this.effectsContainer);
+    
+    // Double vision canvas will be created on demand
+    this.doubleVisionEnabled = false;
+    this.doubleVisionCanvas = null;
+    this.doubleVisionCtx = null;
+  }
+  
+  /**
+   * Activates the drunkenness effect
+   */
+  activate() {
+    if (this.active) return; // Already active
+    
+    console.log('Activating drunkenness effect');
+    
+    // Store original camera values
+    this.originalFOV = this.camera.fov;
+    this.originalPosition.copy(this.camera.position);
+    this.originalRotation.copy(this.camera.rotation);
+    
+    // Reset effect parameters
+    this.currentIntensity = 0;
+    this.wobblePhase = 0;
+    this.jitterAmount = 0;
+    this.directionShiftPhase = 0;
+    
+    // Start the effect
+    this.active = true;
+    this.startTime = performance.now();
+    this.lastUpdate = this.startTime;
+    
+    // Show visual effects container
+    this.effectsContainer.style.display = 'block';
+    
+    // Start update loop
+    this.update();
+  }
+  
+  /**
+   * Deactivates the drunkenness effect and cleans up all elements
+   */
+  deactivate() {
+    if (!this.active) return;
+    
+    console.log('Deactivating drunkenness effect');
+    
+    // Restore original camera values
+    this.camera.fov = this.originalFOV;
+    this.camera.updateProjectionMatrix();
+    this.camera.position.copy(this.originalPosition);
+    this.camera.rotation.copy(this.originalRotation);
+    
+    // Hide effects container
+    this.effectsContainer.style.display = 'none';
+    
+    // THOROUGH CLEANUP OF ALL ELEMENTS:
+    
+    // 1. Remove all style elements
+    const styleElements = [
+      document.getElementById('drunk-chromatic-aberration'),
+      document.getElementById('drunk-brightness-fix')
+    ];
+    
+    styleElements.forEach(element => {
+      if (element && element.parentNode) {
+        element.parentNode.removeChild(element);
+      }
+    });
+    
+    // 2. Remove all overlay elements
+    const overlayElements = [
+      document.querySelector('.drunk-red-overlay'),
+      document.querySelector('.drunk-cyan-overlay')
+    ];
+    
+    overlayElements.forEach(element => {
+      if (element && element.parentNode) {
+        element.parentNode.removeChild(element);
+      }
+    });
+    
+    // 3. Remove double vision canvas
+    if (this.doubleVisionCanvas && this.doubleVisionCanvas.parentNode) {
+      this.doubleVisionCanvas.parentNode.removeChild(this.doubleVisionCanvas);
+      this.doubleVisionCanvas = null;
+      this.doubleVisionCtx = null;
+    }
+    this.doubleVisionEnabled = false;
+    
+    // End the effect
+    this.active = false;
+  }
+  
+  /**
+   * Updates the drunkenness effect
+   */
+  update() {
+    if (!this.active) return;
+    
+    const now = performance.now();
+    const deltaTime = (now - this.lastUpdate) / 1000; // in seconds
+    this.lastUpdate = now;
+    
+    // Calculate elapsed time and overall progress
+    const elapsed = now - this.startTime;
+    
+    // Check if effect should end
+    if (elapsed >= this.duration) {
+      this.deactivate();
+      return;
+    }
+    
+    // Calculate intensity based on phase of effect
+    if (elapsed < this.intensifyDuration) {
+      // Intensifying phase - increase intensity
+      this.currentIntensity = (elapsed / this.intensifyDuration) * this.maxIntensity;
+    } else if (elapsed < this.intensifyDuration + this.fullIntensityDuration) {
+      // Full intensity phase - maintain max intensity
+      this.currentIntensity = this.maxIntensity;
+    } else {
+      // Fadeout phase - decrease intensity
+      const fadeOutElapsed = elapsed - (this.intensifyDuration + this.fullIntensityDuration);
+      this.currentIntensity = this.maxIntensity * (1 - (fadeOutElapsed / this.fadeoutDuration));
+    }
+    
+    // Apply camera wobble effect
+    this.applyWobbleEffect(deltaTime);
+    
+    // Apply movement jitter effect
+    this.applyMovementJitter(deltaTime);
+    
+    // Update visual effects
+    this.updateVisualEffects();
+    
+    // Continue update loop
+    requestAnimationFrame(() => this.update());
+  }
+  
+  /**
+   * Applies the wobble effect to the camera
+   * @param {number} deltaTime - Time since last update in seconds
+   */
+  applyWobbleEffect(deltaTime) {
+    // Update wobble phase - slower progression
+    this.wobblePhase += deltaTime * this.wobbleFrequency; // Removed multiplier for smoother effect
+    
+    // Calculate wobble offsets using smoother sine waves
+    // Use fewer frequencies for less chaotic motion
+    const posXOffset = Math.sin(this.wobblePhase * 0.8) 
+      * this.maxPositionWobble * this.currentIntensity;
+    
+    const posYOffset = Math.sin(this.wobblePhase * 0.9) 
+      * this.maxPositionWobble * this.currentIntensity;
+    
+    const posZOffset = Math.sin(this.wobblePhase * 0.7) 
+      * this.maxPositionWobble * this.currentIntensity;
+    
+    // Smoother rotation effect - but preserve player's ability to look up/down
+    // Only apply rotation offset to Y and Z axes, leaving X (up/down) controlled by player
+    const rotYOffset = Math.sin(this.wobblePhase * 0.7)
+      * this.maxRotationWobble * this.currentIntensity;
+    
+    const rotZOffset = Math.sin(this.wobblePhase * 0.8)
+      * this.maxRotationWobble * 1.5 * this.currentIntensity; // Keep roll more pronounced
+    
+    // Apply position offsets
+    this.camera.position.x = this.originalPosition.x + posXOffset;
+    this.camera.position.y = this.originalPosition.y + posYOffset;
+    this.camera.position.z = this.originalPosition.z + posZOffset;
+    
+    // Apply rotation offsets - but only to Y and Z, preserving player's X rotation control
+    // For X rotation, we store the difference from original to preserve player input
+    const playerRotXDelta = this.camera.rotation.x - this.originalRotation.x;
+    this.camera.rotation.y = this.originalRotation.y + rotYOffset;
+    this.camera.rotation.z = this.originalRotation.z + rotZOffset;
+    
+    // Preserve the player's ability to look up/down by adding back their input delta
+    this.camera.rotation.x = this.originalRotation.x + playerRotXDelta;
+    
+    // Apply FOV effect (slight zoom in/out)
+    const fovOffset = Math.sin(this.wobblePhase * 0.4) * 5 * this.currentIntensity;
+    
+    this.camera.fov = this.originalFOV + fovOffset;
+    this.camera.updateProjectionMatrix();
+  }
+  
+  /**
+   * Applies movement jitter to player controls
+   * @param {number} deltaTime - Time since last update in seconds
+   */
+  applyMovementJitter(deltaTime) {
+    if (!this.player) return;
+    
+    // Update direction shift phase - slower
+    this.directionShiftPhase += deltaTime * 0.6; // Reduced from 0.9
+    
+    // Calculate direction shift with smoother curve
+    this.directionShiftAmount = Math.sin(this.directionShiftPhase) 
+      * 0.6 * this.currentIntensity; // Reduced from 0.8
+    
+    // Apply random jitter to movement
+    if (this.player.isMoving && typeof this.player.isMoving === 'function' && this.player.isMoving()) {
+      // Apply random movement jitter - reduced intensity
+      const jitterX = (Math.random() - 0.5) * 0.25 * this.currentIntensity; // Reduced from 0.35
+      const jitterZ = (Math.random() - 0.5) * 0.25 * this.currentIntensity; // Reduced from 0.35
+      
+      // Apply jitter to velocity
+      if (this.player.velocity) {
+        if (this.player.moveForward || this.player.moveBackward) {
+          this.player.velocity.x += jitterX;
+        }
+        if (this.player.moveLeft || this.player.moveRight) {
+          this.player.velocity.z += jitterZ;
+        }
+      }
+      
+      // Apply direction shift (makes the player veer slightly left/right when moving)
+      if (this.player.moveForward || this.player.moveBackward || 
+          this.player.moveLeft || this.player.moveRight) {
+        this.player.group.rotation.y += this.directionShiftAmount * deltaTime;
+      }
+      
+      // Occasionally apply a rotation push - reduced frequency
+      if (Math.random() < 0.02 * this.currentIntensity) { // Reduced from 0.03
+        this.player.group.rotation.y += (Math.random() - 0.5) * 0.1 * this.currentIntensity; // Reduced from 0.15
+      }
+    }
+  }
+  
+  /**
+   * Updates visual effects based on current intensity
+   */
+  updateVisualEffects() {
+    // EMERGENCY FIX: Remove all filters/effects that could cause darkening
+    
+    // Remove any existing overlay elements that might be causing darkening
+    const overlaysToRemove = [
+      document.querySelector('.drunk-red-overlay'), 
+      document.querySelector('.drunk-cyan-overlay')
+    ];
+    
+    overlaysToRemove.forEach(overlay => {
+      if (overlay && overlay.parentNode) {
+        overlay.parentNode.removeChild(overlay);
+      }
+    });
+    
+    // Remove any existing style elements that might be adding filters
+    const stylesToRemove = [
+      document.getElementById('drunk-chromatic-aberration'),
+      document.getElementById('drunk-brightness-fix')
+    ];
+    
+    stylesToRemove.forEach(style => {
+      if (style && style.parentNode) {
+        style.parentNode.removeChild(style);
+      }
+    });
+    
+    // Set filter layer to completely transparent
+    this.filterLayer.style.backgroundColor = 'rgba(0,0,0,0)';
+    this.filterLayer.style.backdropFilter = 'none';
+    
+    // Simplified double vision effect without CSS filters
+    // Only show double vision above certain intensity
+    if (this.currentIntensity > 0.1) {
+      // Calculate double vision offset based on intensity
+      const baseOffset = this.currentIntensity * 15;
+      const wobbleOffset = Math.sin(this.wobblePhase) * 5 * this.currentIntensity;
+      this.doubleVisionOffset = baseOffset + wobbleOffset;
+      
+      // Get game canvas for double vision effect
+      const gameCanvas = document.querySelector('canvas');
+      if (gameCanvas && !this.doubleVisionEnabled) {
+        // Create a very simple double vision using plain canvas
+        // (without any filter that could cause darkening)
+        this.doubleVisionCanvas = document.createElement('canvas');
+        this.doubleVisionCanvas.width = window.innerWidth;
+        this.doubleVisionCanvas.height = window.innerHeight;
+        this.doubleVisionCanvas.style.position = 'absolute';
+        this.doubleVisionCanvas.style.top = '0';
+        this.doubleVisionCanvas.style.left = '0';
+        this.doubleVisionCanvas.style.width = '100%';
+        this.doubleVisionCanvas.style.height = '100%';
+        this.doubleVisionCanvas.style.pointerEvents = 'none';
+        this.doubleVisionCanvas.style.opacity = '0.2';
+        this.doubleVisionCanvas.style.zIndex = '100';
+        this.doubleVisionCanvas.style.mixBlendMode = 'lighten';
+        
+        // Only add the canvas once
+        document.body.appendChild(this.doubleVisionCanvas);
+        this.doubleVisionCtx = this.doubleVisionCanvas.getContext('2d');
+        this.doubleVisionEnabled = true;
+      }
+      
+      // Draw the double vision effect if canvas is ready
+      if (this.doubleVisionEnabled && this.doubleVisionCtx && gameCanvas) {
+        // Clear previous content
+        this.doubleVisionCtx.clearRect(0, 0, this.doubleVisionCanvas.width, this.doubleVisionCanvas.height);
+        
+        // Use simple drawImage for offset vision, with no compositing
+        this.doubleVisionCtx.drawImage(
+          gameCanvas, 
+          this.doubleVisionOffset, 
+          -this.doubleVisionOffset / 2
+        );
+        
+        // Force canvas to be fully visible
+        this.doubleVisionCanvas.style.display = 'block';
+      }
+    } else if (this.doubleVisionEnabled) {
+      // Hide double vision canvas when intensity is too low
+      if (this.doubleVisionCanvas) {
+        this.doubleVisionCanvas.style.display = 'none';
+      }
+      this.doubleVisionEnabled = false;
+    }
+    
+    // Add a single style element that ONLY forces brightness to 100%
+    const brightnessStyle = document.createElement('style');
+    brightnessStyle.id = 'drunk-brightness-fix';
+    brightnessStyle.textContent = `
+      * { filter: brightness(100%) !important; }
+      body { filter: brightness(100%) !important; }
+      canvas { filter: brightness(100%) !important; }
+      div { filter: brightness(100%) !important; }
+      #game-container { filter: brightness(100%) !important; }
+      #game-container * { filter: brightness(100%) !important; }
+    `;
+    document.head.appendChild(brightnessStyle);
+  }
+}

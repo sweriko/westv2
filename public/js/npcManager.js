@@ -13,7 +13,16 @@ export class NpcManager {
     this.scene = scene;
     this.npcs = new Map(); // npcId -> NPC instances
     
+    // NPC interaction system
+    this.interactionPrompt = null;
+    this.proximityRadius = 3.5; // How close the player needs to be to interact
+    this.nearbyNpc = null; // Current NPC the player is near
+    this.isBartenderNearby = false; // Specifically tracking if near the bartender
+    
     console.log("NPC Manager initialized - NPCs are now server-controlled");
+    
+    // Create interaction prompt
+    this.createInteractionUI();
   }
 
   /**
@@ -73,6 +82,132 @@ export class NpcManager {
     
     console.log(`Created NPC model for ${npcData.username || 'Unknown NPC'}`);
     return npcModel;
+  }
+  
+  /**
+   * Creates UI elements for NPC interaction
+   */
+  createInteractionUI() {
+    // Create interaction prompt
+    this.interactionPrompt = document.createElement('div');
+    this.interactionPrompt.id = 'npc-interaction-prompt';
+    this.interactionPrompt.style.position = 'absolute';
+    this.interactionPrompt.style.bottom = '20%';
+    this.interactionPrompt.style.left = '50%';
+    this.interactionPrompt.style.transform = 'translate(-50%, 0) rotate(-2deg)';
+    this.interactionPrompt.style.width = '350px';
+    this.interactionPrompt.style.height = '100px';
+    this.interactionPrompt.style.background = 'url("/textures/wooden_sign.png") no-repeat center center';
+    this.interactionPrompt.style.backgroundSize = 'contain';
+    this.interactionPrompt.style.display = 'flex';
+    this.interactionPrompt.style.alignItems = 'center';
+    this.interactionPrompt.style.justifyContent = 'center';
+    this.interactionPrompt.style.zIndex = '1000';
+    
+    // Create text element
+    this.promptText = document.createElement('div');
+    this.promptText.style.fontFamily = 'Western, "Wanted M54", serif';
+    this.promptText.style.fontSize = '28px';
+    this.promptText.style.fontWeight = 'bold';
+    this.promptText.style.color = '#FFD700';
+    this.promptText.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
+    
+    this.interactionPrompt.appendChild(this.promptText);
+    document.getElementById('game-container').appendChild(this.interactionPrompt);
+    this.interactionPrompt.style.display = 'none'; // Hide initially
+    
+    // Add gentle swing animation
+    const promptAnimation = document.createElement('style');
+    promptAnimation.textContent = `
+      @keyframes swingSign {
+        0% { transform: translate(-50%, 0) rotate(-2deg); }
+        50% { transform: translate(-50%, 0) rotate(2deg); }
+        100% { transform: translate(-50%, 0) rotate(-2deg); }
+      }
+      #npc-interaction-prompt {
+        animation: swingSign 3s ease-in-out infinite;
+      }
+    `;
+    document.head.appendChild(promptAnimation);
+  }
+  
+  /**
+   * Updates the list of nearby NPCs for interaction
+   * @param {Player} player - The local player
+   */
+  updateNearbyNpcs(player) {
+    if (!player) return;
+    
+    const playerPos = player.group.position.clone();
+    this.nearbyNpc = null;
+    this.isBartenderNearby = false;
+    
+    let closestDistance = this.proximityRadius;
+    
+    // Check each NPC for proximity
+    for (const [npcId, npcModel] of this.npcs) {
+      if (!npcModel.group) continue;
+      
+      // Get NPC position
+      const npcPos = npcModel.group.position.clone();
+      
+      // Calculate distance to player
+      const distance = playerPos.distanceTo(npcPos);
+      
+      // If within proximity radius and closer than any previous NPC
+      if (distance <= closestDistance) {
+        closestDistance = distance;
+        this.nearbyNpc = npcModel;
+        
+        // Check if it's the bartender specifically
+        if (npcId.includes('Bartender') || 
+            (npcModel.playerId && npcModel.playerId.includes('Bartender'))) {
+          this.isBartenderNearby = true;
+          console.log('Near bartender, can get drunk!');
+        }
+      }
+    }
+    
+    // Update UI based on nearby NPCs
+    this.updateInteractionUI();
+  }
+  
+  /**
+   * Updates the interaction UI based on nearby NPCs
+   */
+  updateInteractionUI() {
+    if (this.nearbyNpc && this.isBartenderNearby) {
+      // Show bartender interaction prompt
+      this.promptText.textContent = 'Press E to get drunk';
+      this.interactionPrompt.style.display = 'flex';
+    } else {
+      // Hide interaction prompt
+      this.interactionPrompt.style.display = 'none';
+    }
+  }
+  
+  /**
+   * Handle interaction with NPCs
+   * @param {KeyboardEvent} event - The keyboard event
+   * @param {Player} player - The local player
+   * @returns {boolean} True if interaction was handled
+   */
+  handleInteraction(event, player) {
+    if (event.code !== 'KeyE') return false;
+    
+    // Check if player is near the bartender
+    if (this.isBartenderNearby) {
+      console.log('Interacting with bartender - getting drunk!');
+      
+      // Trigger drunkenness effect
+      if (window.drunkennessEffect) {
+        window.drunkennessEffect.activate();
+      }
+      
+      return true;
+    }
+    
+    return false;
   }
 }
 

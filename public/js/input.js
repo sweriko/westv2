@@ -56,6 +56,25 @@ export function initInput(renderer, player, soundManager) {
     // Skip game input if chat is active
     if (isChatInputActive()) return;
     
+    // Check for NPC interaction first
+    if (event.code === 'KeyE') {
+      // Try to handle NPC interaction first - highest priority
+      if (window.npcManager && window.npcManager.instance) {
+        // Check if there's a bartender or other NPC nearby
+        if (window.npcManager.instance.isBartenderNearby || window.npcManager.instance.nearbyNpc) {
+          // Handle the interaction with the NPC
+          window.npcManager.instance.handleInteraction(event, player);
+          return; // Exit early, don't process QuickDraw
+        }
+      }
+      
+      // If no NPC interaction was handled, check if it's for QuickDraw challenge
+      if (window.quickDraw) {
+        window.quickDraw.handleChallengeKeypress(event);
+        return;
+      }
+    }
+    
     switch (event.code) {
       case 'KeyW':
         player.moveForward = true;
