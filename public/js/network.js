@@ -191,8 +191,14 @@ export class NetworkManager {
           this.onInit(message);
         }
 
-        // Add known players
+        // Add known players - exclude any with our own ID
         message.players.forEach(player => {
+          // Skip if this is somehow our own ID
+          if (player.id === this.playerId) {
+            console.log(`Skipping duplicate player with our ID: ${player.id}`);
+            return;
+          }
+          
           if (this.onPlayerJoined) {
             this.onPlayerJoined(player);
           }
@@ -203,6 +209,13 @@ export class NetworkManager {
       // Another player joined
       case 'playerJoined':
         console.log(`Player ${message.id} joined${message.isNpc ? ' (NPC)' : (message.isBot ? ' (BOT)' : '')}`);
+        
+        // Skip if this is our own ID
+        if (message.id === this.playerId) {
+          console.log(`Skipping player join for own player ID: ${message.id}`);
+          break;
+        }
+        
         if (this.onPlayerJoined) {
           this.onPlayerJoined(message);
         }
@@ -233,6 +246,12 @@ export class NetworkManager {
       // General player update (pos/rot/aiming/etc.)
       case 'playerUpdate':
         {
+          // Skip if this is our own ID
+          if (message.id === this.playerId) {
+            console.log(`Skipping update for own player ID: ${message.id}`);
+            break;
+          }
+
           const existing = this.otherPlayers.get(message.id);
           if (existing) {
             existing.position = message.position || existing.position;
@@ -261,30 +280,33 @@ export class NetworkManager {
               existing.skins = message.skins;
             }
           } else {
-            // If this is a new player we hadn't seen before
-            this.otherPlayers.set(message.id, {
-              id: message.id,
-              position: message.position || { x: 0, y: 0, z: 0 },
-              rotation: message.rotation || { y: 0 },
-              isAiming: message.isAiming || false,
-              isShooting: message.isShooting || false,
-              isReloading: message.isReloading || false, 
-              quickDrawLobbyIndex: message.quickDrawLobbyIndex || -1,
-              health: message.health || 100,
-              isDying: message.isDying || false,
-              isBot: message.isBot || false,
-              isNpc: message.isNpc || false,
-              isWalking: message.isWalking || false,
-              username: message.username || `Player_${message.id}`,
-              skins: message.skins || { bananaSkin: false } // Include skin information
-            });
-            
-            // Notify about this newly discovered player
-            if (this.onPlayerJoined) {
-              this.onPlayerJoined(this.otherPlayers.get(message.id));
+            // If this is a new player we hadn't seen before - skip if it's our own ID
+            if (message.id !== this.playerId) {
+              this.otherPlayers.set(message.id, {
+                id: message.id,
+                position: message.position || { x: 0, y: 0, z: 0 },
+                rotation: message.rotation || { y: 0 },
+                isAiming: message.isAiming || false,
+                isShooting: message.isShooting || false,
+                isReloading: message.isReloading || false, 
+                quickDrawLobbyIndex: message.quickDrawLobbyIndex || -1,
+                health: message.health || 100,
+                isDying: message.isDying || false,
+                isBot: message.isBot || false,
+                isNpc: message.isNpc || false,
+                isWalking: message.isWalking || false,
+                username: message.username || `Player_${message.id}`,
+                skins: message.skins || { bananaSkin: false } // Include skin information
+              });
+              
+              // Notify about this newly discovered player
+              if (this.onPlayerJoined) {
+                this.onPlayerJoined(this.otherPlayers.get(message.id));
+              }
             }
           }
           
+          // Call onPlayerUpdate with the updated or new player data
           if (this.onPlayerUpdate && message.id !== this.playerId) {
             this.onPlayerUpdate(message.id, existing || this.otherPlayers.get(message.id));
           }

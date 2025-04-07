@@ -364,11 +364,12 @@ function initializePlayer(ws, playerId, sessionId, clientId, username, token, is
   playerSequences.set(playerId, 0);
 
   // Send init data to this client (their ID + existing players)
+  // FIXED: Ensure we don't include the player's own ID in the list of players sent
   ws.send(JSON.stringify({
     type: 'init',
     id: playerId,
     players: Array.from(players.entries())
-      .filter(([pid]) => pid !== playerId)
+      .filter(([pid]) => pid !== playerId) // Make sure to exclude the player's own ID
       .map(([pid, p]) => ({
         id: pid,
         position: p.position,
@@ -1167,7 +1168,9 @@ function updatePlayerCount() {
 // Broadcast to all except a given playerId
 function broadcastToOthers(excludeId, data) {
   for (const [pid, pl] of players.entries()) {
-    if (pid === excludeId) continue;
+    // Skip if this is the excluded player ID (could be a number or an array of numbers)
+    if (Array.isArray(excludeId) ? excludeId.includes(pid) : pid === excludeId) continue;
+    
     if (pl.ws.readyState === WebSocket.OPEN) {
       pl.ws.send(JSON.stringify(data));
     }

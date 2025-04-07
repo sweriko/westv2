@@ -75,6 +75,9 @@ export class MultiplayerManager {
       this.localPlayerId = initData.id;
       console.log(`Local player initialized with ID: ${this.localPlayerId}`);
 
+      // Remove any existing duplicate of the local player (safety check)
+      this.removeLocalPlayerDuplicates();
+
       // Add all existing players (these are remote from our POV)
       if (initData.players && Array.isArray(initData.players)) {
         initData.players.forEach(playerData => {
@@ -415,6 +418,12 @@ export class MultiplayerManager {
     // Skip if we already have this player
     if (this.remotePlayers.has(playerId)) return;
     
+    // Skip if this is the local player ID (safety check to prevent ghost duplicates)
+    if (playerId === this.localPlayerId) {
+      console.log(`MultiplayerManager: Skipping attempt to add local player (ID: ${playerId}) as remote player`);
+      return null;
+    }
+    
     console.log(`Adding remote player ${playerId} to scene`);
     
     let playerModel;
@@ -709,6 +718,36 @@ export class MultiplayerManager {
   notifyPlayersUpdated() {
     if (typeof this.onRemotePlayersUpdated === 'function') {
       this.onRemotePlayersUpdated(this.remotePlayers);
+    }
+  }
+
+  /**
+   * Removes any existing player models with the same ID as the local player
+   * This prevents the "ghost player" issue where a player sees their own model
+   */
+  removeLocalPlayerDuplicates() {
+    if (!this.localPlayerId) return;
+    
+    // Check if there's a model with our ID in the remote players map
+    if (this.remotePlayers.has(this.localPlayerId)) {
+      console.log(`Removing duplicate local player model with ID: ${this.localPlayerId}`);
+      
+      // Get the model
+      const duplicateModel = this.remotePlayers.get(this.localPlayerId);
+      
+      // Dispose of the model properly
+      if (duplicateModel) {
+        duplicateModel.dispose();
+      }
+      
+      // Remove from the map
+      this.remotePlayers.delete(this.localPlayerId);
+      
+      // Remove username label
+      this.removePlayerLabel(this.localPlayerId);
+      
+      // Notify that remote players have changed
+      this.notifyPlayersUpdated();
     }
   }
 }
