@@ -996,8 +996,14 @@ export class DrunkennessEffect {
     // Camera wobble parameters - slower frequency for more sway
     this.wobblePhase = 0;
     this.wobbleFrequency = 1.2; // Reduced from 2.5 to 1.2 for slower sway
-    this.maxPositionWobble = 0.13; // Slightly reduced
-    this.maxRotationWobble = 0.06; // Slightly reduced
+    this.maxPositionWobble = 0.25; // Increased from 0.13 for more intense swaying
+    this.maxRotationWobble = 0.12; // Increased from 0.06 for more intense swaying
+    
+    // Camera smoothing parameters
+    this.targetCameraPosition = new THREE.Vector3();
+    this.targetCameraRotation = new THREE.Euler();
+    this.cameraLerpFactor = 0.1; // Adjust for smoother/faster transitions
+    this.lastPlayerInput = new THREE.Euler();
     
     // Movement jitter parameters
     this.jitterAmount = 0;
@@ -1179,8 +1185,14 @@ export class DrunkennessEffect {
       this.currentIntensity = this.maxIntensity * (1 - (fadeOutElapsed / this.fadeoutDuration));
     }
     
-    // Apply camera wobble effect
-    this.applyWobbleEffect(deltaTime);
+    // Capture player's input before applying drunk effects
+    this.capturePlayerInput();
+    
+    // Calculate wobble effect target values
+    this.calculateWobbleTargets(deltaTime);
+    
+    // Smoothly blend camera movement
+    this.smoothCameraBlend(deltaTime);
     
     // Apply movement jitter effect
     this.applyMovementJitter(deltaTime);
@@ -1193,15 +1205,22 @@ export class DrunkennessEffect {
   }
   
   /**
-   * Applies the wobble effect to the camera
+   * Captures the player's current input to blend with drunk wobble
+   */
+  capturePlayerInput() {
+    // Store player's intended camera rotation
+    this.lastPlayerInput.copy(this.camera.rotation);
+  }
+  
+  /**
+   * Calculates the wobble effect target values
    * @param {number} deltaTime - Time since last update in seconds
    */
-  applyWobbleEffect(deltaTime) {
+  calculateWobbleTargets(deltaTime) {
     // Update wobble phase - slower progression
-    this.wobblePhase += deltaTime * this.wobbleFrequency; // Removed multiplier for smoother effect
+    this.wobblePhase += deltaTime * this.wobbleFrequency;
     
     // Calculate wobble offsets using smoother sine waves
-    // Use fewer frequencies for less chaotic motion
     const posXOffset = Math.sin(this.wobblePhase * 0.8) 
       * this.maxPositionWobble * this.currentIntensity;
     
@@ -1211,33 +1230,58 @@ export class DrunkennessEffect {
     const posZOffset = Math.sin(this.wobblePhase * 0.7) 
       * this.maxPositionWobble * this.currentIntensity;
     
-    // Smoother rotation effect - but preserve player's ability to look up/down
-    // Only apply rotation offset to Y and Z axes, leaving X (up/down) controlled by player
+    // Set target position with wobble applied
+    this.targetCameraPosition.set(
+      this.originalPosition.x + posXOffset,
+      this.originalPosition.y + posYOffset,
+      this.originalPosition.z + posZOffset
+    );
+    
+    // Calculate rotation wobble
     const rotYOffset = Math.sin(this.wobblePhase * 0.7)
       * this.maxRotationWobble * this.currentIntensity;
     
     const rotZOffset = Math.sin(this.wobblePhase * 0.8)
-      * this.maxRotationWobble * 1.5 * this.currentIntensity; // Keep roll more pronounced
+      * this.maxRotationWobble * 1.5 * this.currentIntensity;
     
-    // Apply position offsets
-    this.camera.position.x = this.originalPosition.x + posXOffset;
-    this.camera.position.y = this.originalPosition.y + posYOffset;
-    this.camera.position.z = this.originalPosition.z + posZOffset;
+    // Set target rotation with wobble applied, respecting player X rotation
+    this.targetCameraRotation.set(
+      this.lastPlayerInput.x, // Keep player's up/down look intact
+      this.originalRotation.y + rotYOffset,
+      this.originalRotation.z + rotZOffset
+    );
     
-    // Apply rotation offsets - but only to Y and Z, preserving player's X rotation control
-    // For X rotation, we store the difference from original to preserve player input
-    const playerRotXDelta = this.camera.rotation.x - this.originalRotation.x;
-    this.camera.rotation.y = this.originalRotation.y + rotYOffset;
-    this.camera.rotation.z = this.originalRotation.z + rotZOffset;
-    
-    // Preserve the player's ability to look up/down by adding back their input delta
-    this.camera.rotation.x = this.originalRotation.x + playerRotXDelta;
-    
-    // Apply FOV effect (slight zoom in/out)
+    // Calculate FOV effect
     const fovOffset = Math.sin(this.wobblePhase * 0.4) * 5 * this.currentIntensity;
-    
     this.camera.fov = this.originalFOV + fovOffset;
     this.camera.updateProjectionMatrix();
+  }
+  
+  /**
+   * Smoothly blends camera between player input and drunk wobble
+   * @param {number} deltaTime - Time since last update in seconds
+   */
+  smoothCameraBlend(deltaTime) {
+    // Adjust lerp factor based on intensity and deltaTime
+    const lerpStrength = this.cameraLerpFactor * (1 + this.currentIntensity * 2);
+    const lerpFactor = Math.min(1.0, lerpStrength * deltaTime * 60); // Normalize for 60fps
+    
+    // Smoothly interpolate position
+    this.camera.position.lerp(this.targetCameraPosition, lerpFactor);
+    
+    // Smoothly interpolate Y and Z rotation while preserving player X rotation
+    // We only lerp Y and Z because X is controlled directly by player look
+    this.camera.rotation.y = THREE.MathUtils.lerp(
+      this.camera.rotation.y,
+      this.targetCameraRotation.y,
+      lerpFactor
+    );
+    
+    this.camera.rotation.z = THREE.MathUtils.lerp(
+      this.camera.rotation.z,
+      this.targetCameraRotation.z,
+      lerpFactor
+    );
   }
   
   /**
@@ -1292,7 +1336,9 @@ export class DrunkennessEffect {
     // Remove any existing overlay elements that might be causing darkening
     const overlaysToRemove = [
       document.querySelector('.drunk-red-overlay'), 
-      document.querySelector('.drunk-cyan-overlay')
+      document.querySelector('.drunk-cyan-overlay'),
+      document.querySelector('.drunk-chromatic-red'),
+      document.querySelector('.drunk-chromatic-blue')
     ];
     
     overlaysToRemove.forEach(overlay => {
@@ -1317,12 +1363,70 @@ export class DrunkennessEffect {
     this.filterLayer.style.backgroundColor = 'rgba(0,0,0,0)';
     this.filterLayer.style.backdropFilter = 'none';
     
+    // Add chromatic aberration effect as actual DOM elements
+    if (this.currentIntensity > 0.1) {
+      const gameCanvas = document.querySelector('canvas');
+      if (gameCanvas) {
+        const aberrationAmount = this.currentIntensity * 10; // Increased intensity
+        const redOffset = Math.sin(this.wobblePhase * 0.7) * aberrationAmount;
+        const blueOffset = Math.sin(this.wobblePhase * 0.9) * -aberrationAmount; // Opposite direction
+        
+        // Create red channel overlay
+        const redOverlay = document.createElement('div');
+        redOverlay.className = 'drunk-chromatic-red';
+        redOverlay.style.position = 'absolute';
+        redOverlay.style.top = '0';
+        redOverlay.style.left = '0';
+        redOverlay.style.width = '100%';
+        redOverlay.style.height = '100%';
+        redOverlay.style.pointerEvents = 'none';
+        redOverlay.style.zIndex = '90';
+        redOverlay.style.opacity = '0.5';
+        redOverlay.style.mixBlendMode = 'screen';
+        redOverlay.style.backgroundColor = 'transparent';
+        
+        // Clone the game canvas into this div
+        const redClone = gameCanvas.cloneNode(true);
+        redClone.style.position = 'absolute';
+        redClone.style.filter = 'url(\'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"><filter id="red"><feColorMatrix type="matrix" values="1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0"/></filter></svg>#red\')';
+        redClone.style.transform = `translate(${redOffset}px, 0)`;
+        redClone.style.opacity = '0.8';
+        redOverlay.appendChild(redClone);
+        
+        // Create blue channel overlay
+        const blueOverlay = document.createElement('div');
+        blueOverlay.className = 'drunk-chromatic-blue';
+        blueOverlay.style.position = 'absolute';
+        blueOverlay.style.top = '0';
+        blueOverlay.style.left = '0';
+        blueOverlay.style.width = '100%';
+        blueOverlay.style.height = '100%';
+        blueOverlay.style.pointerEvents = 'none';
+        blueOverlay.style.zIndex = '91';
+        blueOverlay.style.opacity = '0.5';
+        blueOverlay.style.mixBlendMode = 'screen';
+        blueOverlay.style.backgroundColor = 'transparent';
+        
+        // Clone the game canvas into this div
+        const blueClone = gameCanvas.cloneNode(true);
+        blueClone.style.position = 'absolute';
+        blueClone.style.filter = 'url(\'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"><filter id="blue"><feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 1 0"/></filter></svg>#blue\')';
+        blueClone.style.transform = `translate(${blueOffset}px, 0)`;
+        blueClone.style.opacity = '0.8';
+        blueOverlay.appendChild(blueClone);
+        
+        // Add the overlays to document
+        document.body.appendChild(redOverlay);
+        document.body.appendChild(blueOverlay);
+      }
+    }
+    
     // Simplified double vision effect without CSS filters
     // Only show double vision above certain intensity
     if (this.currentIntensity > 0.1) {
       // Calculate double vision offset based on intensity
-      const baseOffset = this.currentIntensity * 15;
-      const wobbleOffset = Math.sin(this.wobblePhase) * 5 * this.currentIntensity;
+      const baseOffset = this.currentIntensity * 25; // Increased from 15 for more intense effect
+      const wobbleOffset = Math.sin(this.wobblePhase) * 10 * this.currentIntensity; // Increased from 5 for more intense effect
       this.doubleVisionOffset = baseOffset + wobbleOffset;
       
       // Get game canvas for double vision effect
