@@ -833,7 +833,7 @@ export class Player {
     
     // Add Y offset for mobile devices to align bullets with crosshair
     if (window.isMobile) {
-      shootDir.y += 0.17;
+      shootDir.y += 0.20;
     }
     
     shootDir.normalize();

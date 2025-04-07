@@ -2778,7 +2778,7 @@ export class QuickDraw {
         
         // Add Y offset for mobile devices to align bullets with crosshair
         if (window.isMobile) {
-            bulletDirection.y += 0.17;
+            bulletDirection.y += 0.20;
             bulletDirection.normalize(); // Renormalize after adding offset
         }
         
