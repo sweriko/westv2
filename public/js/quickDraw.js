@@ -1652,28 +1652,154 @@ export class QuickDraw {
      * @param {Object} message - Death data
      */
     handleDeath(message) {
-        console.log('[QuickDraw] Player died in duel', message);
+        console.log(`You were killed by player ${message.killerId}`);
+        
+        // Set death/kill animation flag to prevent camera switching
+        this.inDeathOrKillAnimation = true;
+        
+        // Skip showing "YOU DIED" message if this is a duel death (we'll show DEFEAT instead)
+        if (!this.inDuel) {
+            // Show death message only for non-duel deaths
+            this.showMessage('YOU DIED', 1500, '#FF0000');
+        }
+        
+        // Play death sound
+        if (this.soundManager) {
+            this.soundManager.playSound("death", 0.7);
+        }
         
         // Create death effect
         this.createDeathEffect();
         
-        // Update health to zero
-        this.localPlayer.health = 0;
-        if (typeof updateHealthUI === 'function') {
-            updateHealthUI(this.localPlayer);
+        // Store original mouse handler for later restoration
+        const origMouseMove = document.onmousemove;
+        
+        // Make sure we have a local player model for the death animation
+        if (!this.localPlayerModel) {
+            this.createLocalPlayerModel();
         }
         
-        // Block all movement/shooting input
-        this.localPlayer.canMove = false;
-        this.localPlayer.canAim = false;
+        // Apply death camera effect ALWAYS, regardless of duel status
+        if (this.localPlayer && this.localPlayer.camera) {
+            // Save original camera rotation
+            const originalRotation = this.localPlayer.camera.rotation.clone();
+            
+            // Apply death camera rotation - rotate camera to look down at the ground
+            // Start a smooth rotation animation from current position to looking down
+            const deathCameraDuration = 1000; // 1 second for the rotation animation
+            const startTime = Date.now();
+            const targetRotationX = Math.PI / 2; // Looking down at the ground (90 degrees)
+            
+            // Create an animation function that rotates the camera over time
+            const rotateCameraUp = () => {
+                const elapsed = Date.now() - startTime;
+                const progress = Math.min(elapsed / deathCameraDuration, 1);
+                
+                // Use an easing function (ease-out) for smoother animation
+                const easeOut = 1 - Math.pow(1 - progress, 2);
+                
+                // Interpolate between original and target rotation
+                this.localPlayer.camera.rotation.x = originalRotation.x * (1 - easeOut) + targetRotationX * easeOut;
+                
+                // Continue the animation until complete
+                if (progress < 1) {
+                    requestAnimationFrame(rotateCameraUp);
+                }
+            };
+            
+            // Start the camera rotation animation
+            rotateCameraUp();
+            
+            // Disable mouse look temporarily
+            document.onmousemove = (e) => {
+                // Block mouse movement during death animation
+                e.stopPropagation();
+                return false;
+            };
+        }
         
-        // Restore nametags
-        this.restorePlayerNametags();
-        
-        // The screen stays in the death view briefly before respawning
-        this.createDuelTimeout(() => {
-            // Reset will be triggered by server
-        }, 3000);
+        // Keep the player's POV camera active during death
+        if (this.localPlayerModel) {
+            // Force the local player's camera to be active
+            if (window.renderer) {
+                window.renderer.camera = this.localPlayer.camera;
+                
+                // Also set the instance camera if available
+                if (window.renderer.instance) {
+                    window.renderer.instance.camera = this.localPlayer.camera;
+                }
+            }
+            
+            // Make the model visible for other players but not in our own view
+            this.localPlayerModel.group.visible = true;
+            
+            // Play the death animation
+            if (this.localPlayerModel.playDeathAnimation) {
+                console.log('[QuickDraw] Playing death animation');
+                const deathResult = this.localPlayerModel.playDeathAnimation();
+                
+                // Play the player fall sound when death animation starts
+                if (this.soundManager) {
+                    this.soundManager.playSound("playerfall", 0, 0.8);
+                }
+                
+                // Allow the death animation to complete before reset/respawn
+                const deathAnimDuration = deathResult.duration || 1500;
+                
+                // Disable player controls during death animation
+                if (this.localPlayer) {
+                    this.localPlayer.canMove = false;
+                    this.localPlayer.canAim = false;
+                    this.localPlayer.forceLockMovement = true;
+                }
+                
+                // Wait for animation to complete before server sends respawn
+                console.log(`[QuickDraw] Death animation playing, duration: ${deathAnimDuration}ms`);
+                
+                // Clear animation flag after animation completes
+                setTimeout(() => {
+                    this.inDeathOrKillAnimation = false;
+                    
+                    // Restore original mouse movement
+                    document.onmousemove = origMouseMove;
+                }, deathAnimDuration + 500); // Add a bit of buffer
+                
+                // The server will send fullStateReset message after the animation duration
+                // We're ensuring the animation has time to play fully
+                
+                // Broadcast our death animation state to other players
+                if (this.networkManager && this.networkManager.socket) {
+                    this.networkManager.socket.send(JSON.stringify({
+                        type: 'playerUpdate',
+                        isDying: true,  // Special flag to trigger death animation on other clients
+                        health: 0,
+                        position: this.localPlayer.group.position,
+                        rotation: { y: this.localPlayer.group.rotation.y }
+                    }));
+                    console.log('[QuickDraw] Broadcast death animation state to other players');
+                }
+            } else {
+                console.warn('[QuickDraw] Death animation not available on player model');
+                
+                // Clear animation flag after a default delay if no animation
+                setTimeout(() => {
+                    this.inDeathOrKillAnimation = false;
+                    
+                    // Restore original mouse movement
+                    document.onmousemove = origMouseMove;
+                }, 3000);
+            }
+        } else {
+            console.warn('[QuickDraw] Could not create local player model for death animation');
+            
+            // Clear animation flag after a default delay if no model
+            setTimeout(() => {
+                this.inDeathOrKillAnimation = false;
+                
+                // Restore original mouse movement
+                document.onmousemove = origMouseMove;
+            }, 3000);
+        }
     }
     
     /**
@@ -2235,6 +2361,54 @@ export class QuickDraw {
                 if (window.renderer.instance) {
                     window.renderer.instance.camera = this.localPlayer.camera;
                 }
+            }
+            
+            // Only apply death camera rotation if player lost
+            const playerLost = winnerId !== this.localPlayer.id;
+            if (playerLost) {
+                // Store original mouse handler for later restoration
+                const origMouseMove = document.onmousemove;
+                
+                // Save original camera rotation
+                const originalRotation = this.localPlayer.camera.rotation.clone();
+                
+                // Apply death camera rotation - rotate camera to look down at the ground
+                // Start a smooth rotation animation from current position to looking down
+                const deathCameraDuration = 1000; // 1 second for the rotation animation
+                const startTime = Date.now();
+                const targetRotationX = Math.PI / 2; // Looking down at the ground (90 degrees)
+                
+                // Create an animation function that rotates the camera over time
+                const rotateCameraUp = () => {
+                    const elapsed = Date.now() - startTime;
+                    const progress = Math.min(elapsed / deathCameraDuration, 1);
+                    
+                    // Use an easing function (ease-out) for smoother animation
+                    const easeOut = 1 - Math.pow(1 - progress, 2);
+                    
+                    // Interpolate between original and target rotation
+                    this.localPlayer.camera.rotation.x = originalRotation.x * (1 - easeOut) + targetRotationX * easeOut;
+                    
+                    // Continue the animation until complete
+                    if (progress < 1) {
+                        requestAnimationFrame(rotateCameraUp);
+                    }
+                };
+                
+                // Start the camera rotation animation
+                rotateCameraUp();
+                
+                // Disable mouse look temporarily
+                document.onmousemove = (e) => {
+                    // Block mouse movement during death animation
+                    e.stopPropagation();
+                    return false;
+                };
+                
+                // Restore mouse movement after animation completes
+                setTimeout(() => {
+                    document.onmousemove = origMouseMove;
+                }, 3000);
             }
         }
         
@@ -3394,6 +3568,9 @@ export class QuickDraw {
             this.createLocalPlayerModel();
         }
         
+        // Store original mouse handler for later restoration
+        const origMouseMove = document.onmousemove;
+        
         // Keep the player's POV camera active during death
         if (this.localPlayerModel) {
             // Force the local player's camera to be active
@@ -3405,6 +3582,35 @@ export class QuickDraw {
                     window.renderer.instance.camera = this.localPlayer.camera;
                 }
             }
+            
+            // Save original camera rotation
+            const originalRotation = this.localPlayer.camera.rotation.clone();
+            
+            // Apply death camera rotation - rotate camera to look down at the ground
+            // Start a smooth rotation animation from current position to looking down
+            const deathCameraDuration = 1000; // 1 second for the rotation animation
+            const startTime = Date.now();
+            const targetRotationX = Math.PI / 2; // Looking down at the ground (90 degrees) instead of up
+            
+            // Create an animation function that rotates the camera over time
+            const rotateCameraUp = () => {
+                const elapsed = Date.now() - startTime;
+                const progress = Math.min(elapsed / deathCameraDuration, 1);
+                
+                // Use an easing function (ease-out) for smoother animation
+                const easeOut = 1 - Math.pow(1 - progress, 2);
+                
+                // Interpolate between original and target rotation
+                this.localPlayer.camera.rotation.x = originalRotation.x * (1 - easeOut) + targetRotationX * easeOut;
+                
+                // Continue the animation until complete
+                if (progress < 1) {
+                    requestAnimationFrame(rotateCameraUp);
+                }
+            };
+            
+            // Start the camera rotation animation
+            rotateCameraUp();
             
             // Make the model visible for other players but not in our own view
             this.localPlayerModel.group.visible = true;
@@ -3427,6 +3633,13 @@ export class QuickDraw {
                     this.localPlayer.canMove = false;
                     this.localPlayer.canAim = false;
                     this.localPlayer.forceLockMovement = true;
+                    
+                    // Disable mouse look temporarily to prevent camera movement
+                    document.onmousemove = (e) => {
+                        // Block mouse movement during death animation
+                        e.stopPropagation();
+                        return false;
+                    };
                 }
                 
                 // Wait for animation to complete before server sends respawn

@@ -409,10 +409,49 @@ async function init() {
       deathOverlay.style.zIndex = '999';
       document.getElementById('game-container').appendChild(deathOverlay);
       
+      // Store original mouse handler for later restoration
+      const origMouseMove = document.onmousemove;
+      
       // Disable player controls during death animation
       if (localPlayer) {
         localPlayer.canMove = false;
         localPlayer.canAim = false;
+        
+        // Save original camera rotation
+        const originalRotation = localPlayer.camera.rotation.clone();
+        
+        // Apply death camera rotation - rotate camera to look down at the ground
+        // Start a smooth rotation animation from current position to looking down
+        const deathCameraDuration = 1000; // 1 second for the rotation animation
+        const startTime = Date.now();
+        const targetRotationX = Math.PI / 2; // Looking down at the ground (90 degrees) instead of up
+        
+        // Create an animation function that rotates the camera over time
+        const rotateCameraUp = () => {
+          const elapsed = Date.now() - startTime;
+          const progress = Math.min(elapsed / deathCameraDuration, 1);
+          
+          // Use an easing function (ease-out) for smoother animation
+          const easeOut = 1 - Math.pow(1 - progress, 2);
+          
+          // Interpolate between original and target rotation
+          localPlayer.camera.rotation.x = originalRotation.x * (1 - easeOut) + targetRotationX * easeOut;
+          
+          // Continue the animation until complete
+          if (progress < 1) {
+            requestAnimationFrame(rotateCameraUp);
+          }
+        };
+        
+        // Start the camera rotation animation
+        rotateCameraUp();
+        
+        // Disable mouse look temporarily to prevent camera movement
+        document.onmousemove = (e) => {
+          // Block mouse movement during death animation
+          e.stopPropagation();
+          return false;
+        };
         
         // Play death animation on local player model if it exists
         if (localPlayer.model && typeof localPlayer.model.playDeathAnimation === 'function') {
@@ -426,6 +465,7 @@ async function init() {
       }
       
       // Remove message and overlay after animation
+      // Also restore mouse control
       setTimeout(() => {
         if (deathMessage.parentNode) {
           deathMessage.parentNode.removeChild(deathMessage);
@@ -433,6 +473,9 @@ async function init() {
         if (deathOverlay.parentNode) {
           deathOverlay.parentNode.removeChild(deathOverlay);
         }
+        
+        // Restore mouse movement control
+        document.onmousemove = origMouseMove;
       }, 2000); // Match the server respawn delay
     };
     
