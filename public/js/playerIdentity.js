@@ -84,7 +84,7 @@ function createNewPlayerIdentity(ephemeral = false) {
   const newIdentity = {
     id: generateUUID(),
     token: generateToken(),
-    username: devSuffix, // Empty string or dev suffix
+    username: generateRandomName() + devSuffix, // Start with a random name
     createdAt: Date.now(),
     lastLogin: Date.now(),
     ephemeral: ephemeral, // Flag for when storage isn't available
@@ -93,6 +93,48 @@ function createNewPlayerIdentity(ephemeral = false) {
   
   console.log('Created new player identity');
   return newIdentity;
+}
+
+// Generate a random western-themed name
+function generateRandomName() {
+  const firstParts = [
+    // Titles
+    "Sheriff", "Deputy", "Marshal", "Doc", "Judge", "Colonel", "General", "Captain", 
+    "Ranger", "Bandit", "Outlaw", "Desperado", "Gunslinger", "Bounty", "Rustler",
+    // Adjectives
+    "Quick", "Fast", "Slick", "Dusty", "Rusty", "Wild", "Mad", "Crazy", "Lazy", 
+    "Lucky", "Unlucky", "Smoky", "Grumpy", "Gritty", "Salty", "One-eye", "One-shot",
+    "Crooked", "Sneaky", "Dead-eye", "Two-gun", "Lone", "Tall", "Short", "Big", "Little"
+  ];
+  
+  const middleParts = [
+    "Dog", "Cat", "Wolf", "Iron", "Steel", "Silver", "Gold", "Copper", "Tin", 
+    "Hand", "Eye", "Shot", "Gun", "Draw", "Boot", "Hat", "Star", "Badge", 
+    "River", "Canyon", "Mesa", "Valley", "Rock", "Stone", "Mountain", "Desert",
+    "", "", "", "", "", "" // Empty strings to increase chance of 2-part names
+  ];
+  
+  const lastParts = [
+    // Names
+    "Jack", "Jim", "Joe", "Bill", "Bob", "Sam", "Tom", "Will", "Frank", "Jesse",
+    "Wyatt", "Doc", "Billy", "Butch", "Roy", "Tex", "Hank", "Pete", "Buck", "Duke",
+    // Nouns
+    "Kid", "Smith", "Jones", "McGraw", "James", "Cassidy", "Earp", "Holliday", 
+    "Dalton", "Garrett", "Hickok", "Carson", "Crockett", "Walker", "Jackson"
+  ];
+  
+  // Randomly decide if we want 2 or 3 parts
+  const useMiddlePart = Math.random() > 0.5;
+  
+  const first = firstParts[Math.floor(Math.random() * firstParts.length)];
+  const last = lastParts[Math.floor(Math.random() * lastParts.length)];
+  
+  if (useMiddlePart) {
+    const middle = middleParts[Math.floor(Math.random() * middleParts.length)];
+    return middle ? `${first} ${middle} ${last}` : `${first} ${last}`;
+  } else {
+    return `${first} ${last}`;
+  }
 }
 
 // Save player data to storage
@@ -128,282 +170,119 @@ function savePlayerIdentity(playerData) {
 // Preload game content in background while user sets their name
 function preloadGameContent() {
   let preloadProgress = 0;
+  
+  // Create a container for progress elements
+  const progressContainer = document.createElement('div');
+  progressContainer.className = 'preload-progress-container';
+  progressContainer.style.width = '100%';
+  progressContainer.style.marginTop = '20px';
+  
+  // Create progress bar with western-themed styling
   const progressBar = document.createElement('div');
   progressBar.className = 'preload-progress';
-  progressBar.style.position = 'absolute';
-  progressBar.style.bottom = '10px';
-  progressBar.style.left = '10%';
-  progressBar.style.width = '80%';
-  progressBar.style.height = '4px';
-  progressBar.style.backgroundColor = '#333';
-  progressBar.style.borderRadius = '2px';
+  progressBar.style.position = 'relative';
+  progressBar.style.width = '100%';
+  progressBar.style.height = '8px';
+  progressBar.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
+  progressBar.style.borderRadius = '4px';
   progressBar.style.overflow = 'hidden';
+  progressBar.style.border = '1px solid #8b4513';
   
   const progressFill = document.createElement('div');
   progressFill.style.height = '100%';
   progressFill.style.width = '0%';
-  progressFill.style.backgroundColor = '#f8bb00';
+  progressFill.style.backgroundColor = '#8b0000';
   progressFill.style.transition = 'width 0.5s ease';
   progressBar.appendChild(progressFill);
   
   const progressText = document.createElement('div');
-  progressText.style.position = 'absolute';
-  progressText.style.bottom = '16px';
-  progressText.style.left = '10%';
-  progressText.style.width = '80%';
+  progressText.style.position = 'relative';
+  progressText.style.marginTop = '10px';
+  progressText.style.width = '100%';
   progressText.style.textAlign = 'center';
-  progressText.style.fontSize = '12px';
-  progressText.style.color = '#999';
-  progressText.textContent = 'Preparing your adventure...';
+  progressText.style.fontSize = '14px';
+  progressText.style.color = '#d4a45f';
+  progressText.style.fontFamily = 'Western, serif';
+  progressText.textContent = 'Loading your adventure...';
   
-  // Add progress elements to first modal we find
-  setTimeout(() => {
+  // Add bullet icon decorations
+  const leftBullet = document.createElement('div');
+  leftBullet.innerHTML = '&#x1F4A5;'; // Explosion emoji as bullet
+  leftBullet.style.position = 'absolute';
+  leftBullet.style.left = '-25px';
+  leftBullet.style.top = '50%';
+  leftBullet.style.transform = 'translateY(-50%)';
+  leftBullet.style.fontSize = '16px';
+  
+  const rightBullet = document.createElement('div');
+  rightBullet.innerHTML = '&#x1F4A5;';
+  rightBullet.style.position = 'absolute';
+  rightBullet.style.right = '-25px';
+  rightBullet.style.top = '50%';
+  rightBullet.style.transform = 'translateY(-50%)';
+  rightBullet.style.fontSize = '16px';
+  
+  progressContainer.appendChild(progressBar);
+  progressContainer.appendChild(progressText);
+  
+  // Add progress elements to modal when it appears
+  const checkForModal = setInterval(() => {
     const modal = document.querySelector('.username-modal');
     if (modal) {
       const modalContent = modal.querySelector('div');
       if (modalContent) {
-        modalContent.appendChild(progressBar);
-        modalContent.appendChild(progressText);
+        modalContent.appendChild(progressContainer);
+        clearInterval(checkForModal);
       }
     }
   }, 100);
   
-  // Apply blur effect to the background
-  // Create a scene in the background to render while user enters name
-  createPreviewScene();
+  // Loading messages to cycle through
+  const loadingMessages = [
+    "Saddling up the horses...",
+    "Polishing six-shooters...",
+    "Filling up whiskey barrels...",
+    "Dusting off the tumbleweed...",
+    "Waking up the sheriff...",
+    "Loading bullets...",
+    "Cleaning up the saloon...",
+    "Setting up the poker table...",
+    "Preparing the town for your arrival..."
+  ];
   
-  // Start preloading assets in background
-  console.log("Starting background preload of game content...");
-  
-  return new Promise((resolve) => {
-    // Preload textures - only include files that actually exist
-    const textureURLs = [
-      'models/skypart.png',
-      'models/groundpart.png'
-    ];
+  // Function to update progress with a more interesting flow
+  const updateProgress = () => {
+    // Generate some random progress increment
+    const increment = Math.random() * 5 + 2;
+    preloadProgress += increment;
     
-    // Preload sounds
-    const soundURLs = [
-      'sounds/shot.mp3',
-      'sounds/aimclick.mp3',
-      'sounds/shellejection.mp3',
-      'sounds/reloading.mp3',
-      'sounds/bellstart.mp3',
-      'sounds/woodimpact.mp3',
-      'sounds/fleshimpact.mp3',
-      'sounds/leftstep.mp3',
-      'sounds/rightstep.mp3',
-      'sounds/jump.mp3',
-      'sounds/headshotmarker.mp3'
-    ];
-    
-    // Preload 3D models - only include files that actually exist
-    const modelURLs = [
-      'models/town.glb',
-      'models/viewmodel.glb',
-      'models/playermodel.glb',
-      'models/tumbleweed.glb',
-      'models/bartender.glb',
-      'models/sheriff.glb'
-    ];
-    
-    // Track loading progress
-    const totalItems = textureURLs.length + soundURLs.length + modelURLs.length;
-    let loadedItems = 0;
-    
-    function updateProgress() {
-      loadedItems++;
-      const progress = Math.min(100, Math.round((loadedItems / totalItems) * 100));
-      progressFill.style.width = `${progress}%`;
-      
-      if (loadedItems >= totalItems) {
-        progressText.textContent = 'Ready to play!';
-        progressFill.style.backgroundColor = '#4CAF50';
-        resolve();
-      }
+    // Cap at 90% - we'll go to 100% when everything is actually loaded
+    if (preloadProgress > 90) {
+      preloadProgress = 90 + (Math.random() * 2);
     }
     
-    // Load textures
-    const textureLoader = new THREE.TextureLoader();
-    textureURLs.forEach(url => {
-      textureLoader.load(url, 
-        (texture) => {
-          // Store texture in window cache for faster access later
-          if (!window.preloadedTextures) window.preloadedTextures = {};
-          const textureName = url.split('/').pop().split('.')[0];
-          window.preloadedTextures[textureName] = texture;
-          updateProgress();
-        },
-        null, // Progress callback
-        (err) => { console.error(`Error loading texture ${url}:`, err); updateProgress(); } // Error
-      );
-    });
+    // Update progress bar
+    progressFill.style.width = `${preloadProgress}%`;
     
-    // Load sounds
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    soundURLs.forEach(url => {
-      fetch(url)
-        .then(response => response.arrayBuffer())
-        .then(arrayBuffer => audioContext.decodeAudioData(arrayBuffer))
-        .then(audioBuffer => {
-          // Store audio in window cache
-          if (!window.preloadedAudio) window.preloadedAudio = {};
-          const soundName = url.split('/').pop().split('.')[0];
-          window.preloadedAudio[soundName] = audioBuffer;
-          updateProgress();
-        })
-        .catch(err => { console.error(`Error loading sound ${url}:`, err); updateProgress(); });
-    });
+    // Change message occasionally
+    if (Math.random() > 0.7) {
+      const randomMessageIndex = Math.floor(Math.random() * loadingMessages.length);
+      progressText.textContent = loadingMessages[randomMessageIndex];
+    }
     
-    // Load models
-    const modelLoader = new THREE.GLTFLoader();
-    modelURLs.forEach(url => {
-      modelLoader.load(url, 
-        (gltf) => {
-          // Store model reference in window cache
-          if (!window.preloadedModels) window.preloadedModels = {};
-          const modelName = url.split('/').pop().split('.')[0];
-          window.preloadedModels[modelName] = gltf;
-          
-          // Clone model object and save a reference the cloned model
-          // This prevents the model from being reloaded again later
-          window.preloadedModels[`${modelName}_clone`] = {
-            scene: gltf.scene.clone(),
-            animations: gltf.animations,
-          };
-          
-          // If this is the town model, create a preview scene
-          if (modelName === 'town') {
-            updatePreviewScene(gltf);
-          }
-          
-          updateProgress();
-        },
-        (xhr) => {
-          // Report loading progress for large models
-          if (xhr.lengthComputable) {
-            const percentComplete = xhr.loaded / xhr.total * 100;
-            console.log(`${url}: ${Math.round(percentComplete)}% loaded`);
-          }
-        },
-        (err) => { console.error(`Error loading model ${url}:`, err); updateProgress(); } // Error
-      );
-    });
-    
-    // Initialize dummy scene to compile shaders
-    const dummyScene = new THREE.Scene();
-    const dummyCamera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
-    const dummyRenderer = new THREE.WebGLRenderer({ antialias: true });
-    dummyRenderer.setSize(1, 1);
-    dummyRenderer.render(dummyScene, dummyCamera);
-    
-    // Cleanup dummy renderer after use
-    setTimeout(() => {
-      dummyRenderer.dispose();
-    }, 2000);
-  });
-}
-
-// Create a preview scene to render behind the name dialog
-function createPreviewScene() {
-  // Check if we already have a container for the game
-  const gameContainer = document.getElementById('game-container');
-  if (!gameContainer) {
-    // Create a container for the game if it doesn't exist
-    const container = document.createElement('div');
-    container.id = 'game-container';
-    container.style.position = 'fixed';
-    container.style.top = '0';
-    container.style.left = '0';
-    container.style.width = '100%';
-    container.style.height = '100%';
-    container.style.zIndex = '1';
-    container.style.filter = 'blur(8px)';
-    document.body.appendChild(container);
-  } else {
-    // If container exists, just add blur effect
-    gameContainer.style.filter = 'blur(8px)';
-  }
-  
-  // Create a minimal Three.js scene for background preview
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xec9e5c); // Desert color
-  
-  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-  camera.position.set(0, 5, 10);
-  camera.lookAt(0, 0, 0);
-  
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  gameContainer.appendChild(renderer.domElement);
-  
-  // Add lights
-  const ambientLight = new THREE.AmbientLight(0xffebc8, 0.6);
-  scene.add(ambientLight);
-  
-  const directionalLight = new THREE.DirectionalLight(0xffffb3, 1.0);
-  directionalLight.position.set(1, 1.2, 0.5).normalize();
-  scene.add(directionalLight);
-  
-  // Add fog
-  const desertFogColor = new THREE.Color(0xec9e5c);
-  scene.fog = new THREE.Fog(desertFogColor, 250, 900);
-  
-  // Store in window for updating later when town model loads
-  window.previewScene = {
-    scene,
-    camera,
-    renderer
+    // Continue updating until we hit near 100%
+    if (preloadProgress < 95) {
+      setTimeout(updateProgress, Math.random() * 600 + 400);
+    } else {
+      progressText.textContent = "Ready to enter the saloon!";
+    }
   };
-
-  // Set a flag to control animation loop
-  window.previewSceneActive = true;
   
-  // Start rendering loop
-  function animate() {
-    if (!window.previewSceneActive || !window.previewScene) return;
-    
-    requestAnimationFrame(animate);
-    
-    // Gently move camera for a slight effect
-    const time = Date.now() * 0.0005;
-    camera.position.x = Math.sin(time) * 15;
-    camera.position.z = Math.cos(time) * 15;
-    camera.lookAt(0, 0, 0);
-    
-    renderer.render(scene, camera);
-  }
+  // Start progress updates
+  setTimeout(updateProgress, 500);
   
-  animate();
-  
-  // Handle window resize
-  function onWindowResize() {
-    if (!window.previewScene) return;
-    
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    
-    window.previewScene.camera.aspect = width / height;
-    window.previewScene.camera.updateProjectionMatrix();
-    window.previewScene.renderer.setSize(width, height);
-  }
-  
-  window.addEventListener('resize', onWindowResize);
-}
-
-// Update the preview scene with loaded town model
-function updatePreviewScene(gltf) {
-  if (!window.previewScene || !window.previewScene.scene) return;
-  
-  // Create a clone of the model to avoid reference issues
-  const townClone = gltf.scene.clone();
-  
-  // Add to preview scene
-  window.previewScene.scene.add(townClone);
-  
-  // Adjust camera to get a good view of the town
-  window.previewScene.camera.position.set(30, 20, 30);
-  window.previewScene.camera.lookAt(0, 0, 0);
+  console.log("Starting background preload of game content...");
+  // Actual preloading happens in parallel in main.js
 }
 
 // Show username prompt
@@ -417,53 +296,103 @@ function promptForUsername(playerData) {
     modal.style.left = '0';
     modal.style.width = '100%';
     modal.style.height = '100%';
-    modal.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-    modal.style.zIndex = '1000';
+    modal.style.backgroundColor = 'rgba(0, 0, 0, 0.65)';
+    modal.style.zIndex = '2000'; // Higher than other game overlays
     modal.style.display = 'flex';
     modal.style.justifyContent = 'center';
     modal.style.alignItems = 'center';
+    modal.style.pointerEvents = 'auto'; // Ensure it captures input
     
-    // Create modal content
+    // Create modal content with western styling
     const modalContent = document.createElement('div');
     modalContent.style.backgroundColor = '#2c2c2c';
     modalContent.style.borderRadius = '8px';
-    modalContent.style.padding = '20px';
+    modalContent.style.border = '3px solid #8b4513'; // Brown border for wooden look
+    modalContent.style.padding = '25px';
     modalContent.style.width = '90%';
-    modalContent.style.maxWidth = '400px';
-    modalContent.style.boxShadow = '0 4px 10px rgba(0, 0, 0, 0.5)';
+    modalContent.style.maxWidth = '450px';
+    modalContent.style.boxShadow = '0 4px 15px rgba(0, 0, 0, 0.7)';
     modalContent.style.textAlign = 'center';
+    modalContent.style.backgroundImage = 'url("/textures/paper_texture.png")'; // Optional: use paper texture if available
+    modalContent.style.backgroundSize = 'cover';
+    
+    // Logo/branding (optional)
+    const logo = document.createElement('div');
+    logo.style.fontFamily = 'Western, serif';
+    logo.style.fontSize = '24px';
+    logo.style.color = '#8b0000';
+    logo.style.marginBottom = '15px';
+    logo.textContent = 'WEST V2';
     
     // Title
     const title = document.createElement('h2');
     title.textContent = 'Enter Your Gunslinger Name';
-    title.style.color = '#f8bb00';
+    title.style.color = '#8b0000'; // Deep red color
     title.style.marginBottom = '20px';
     title.style.fontFamily = 'Western, serif';
+    title.style.textShadow = '1px 1px 2px rgba(0,0,0,0.3)';
+    
+    // Input container (to hold input + regenerate button side by side)
+    const inputContainer = document.createElement('div');
+    inputContainer.style.display = 'flex';
+    inputContainer.style.marginBottom = '25px';
+    inputContainer.style.gap = '8px';
     
     // Input field
     const input = document.createElement('input');
     input.type = 'text';
     input.placeholder = 'Your name, partner...';
-    input.value = playerData.username || '';
-    input.style.padding = '10px';
+    // Use generated name if no name exists yet
+    input.value = playerData.username || generateRandomName();
+    input.style.padding = '12px';
     input.style.width = '100%';
     input.style.borderRadius = '4px';
-    input.style.border = '1px solid #444';
-    input.style.backgroundColor = '#333';
+    input.style.border = '1px solid #8b4513';
+    input.style.backgroundColor = 'rgba(51, 51, 51, 0.8)';
     input.style.color = '#fff';
-    input.style.marginBottom = '20px';
     input.style.boxSizing = 'border-box';
+    input.style.fontSize = '16px';
+    
+    // Regenerate button
+    const regenButton = document.createElement('button');
+    regenButton.innerHTML = '&#x21bb;'; // Refresh symbol
+    regenButton.title = "Generate new name";
+    regenButton.style.padding = '0 15px';
+    regenButton.style.backgroundColor = '#555';
+    regenButton.style.color = '#fff';
+    regenButton.style.border = '1px solid #444';
+    regenButton.style.borderRadius = '4px';
+    regenButton.style.cursor = 'pointer';
+    regenButton.style.fontSize = '18px';
+    
+    // Add hover effect for regen button
+    regenButton.onmouseover = () => {
+      regenButton.style.backgroundColor = '#666';
+    };
+    regenButton.onmouseout = () => {
+      regenButton.style.backgroundColor = '#555';
+    };
+    
+    // Regenerate button click handler
+    regenButton.addEventListener('click', () => {
+      input.value = generateRandomName();
+      input.focus();
+    });
     
     // Submit button
     const button = document.createElement('button');
     button.textContent = 'Enter the Saloon';
-    button.style.padding = '10px 20px';
+    button.style.padding = '12px 20px';
     button.style.backgroundColor = '#8b0000';
     button.style.color = '#fff';
     button.style.border = 'none';
     button.style.borderRadius = '4px';
     button.style.cursor = 'pointer';
     button.style.fontWeight = 'bold';
+    button.style.width = '100%';
+    button.style.fontFamily = 'Western, serif';
+    button.style.fontSize = '18px';
+    button.style.transition = 'background-color 0.2s';
     
     // Hover effect
     button.onmouseover = () => {
@@ -475,8 +404,33 @@ function promptForUsername(playerData) {
     
     // Form handling
     const handleSubmit = () => {
-      const username = input.value.trim();
+      let username = input.value.trim();
+      
+      // Client-side validation to prevent XSS attacks
       if (username) {
+        // Check for potentially malicious content
+        const hasSuspiciousContent = /<[^>]*>|javascript:|on\w+=/i.test(username);
+        
+        if (hasSuspiciousContent) {
+          // Clean the username for safety
+          username = username
+            .replace(/</g, '')
+            .replace(/>/g, '')
+            .replace(/javascript:/gi, '')
+            .replace(/on\w+=/gi, '');
+          
+          // Show warning
+          input.style.border = '2px solid orange';
+          setTimeout(() => {
+            input.style.border = '1px solid #8b4513';
+          }, 2000);
+        }
+        
+        // Limit length
+        if (username.length > 20) {
+          username = username.substring(0, 20);
+        }
+        
         playerData.username = username;
         
         // Save immediately after username is set
@@ -487,18 +441,20 @@ function promptForUsername(playerData) {
           console.warn('Storage unavailable, using ephemeral player identity');
         }
         
-        // Remove blur from game container
-        const gameContainer = document.getElementById('game-container');
-        if (gameContainer) {
-          gameContainer.style.filter = 'none';
-        }
+        // Animate the modal fading out
+        modal.style.transition = 'opacity 0.3s ease';
+        modal.style.opacity = '0';
         
-        document.body.removeChild(modal);
-        resolve(playerData);
+        setTimeout(() => {
+          if (modal.parentNode) {
+            document.body.removeChild(modal);
+          }
+          resolve(playerData);
+        }, 300);
       } else {
         input.style.border = '2px solid red';
         setTimeout(() => {
-          input.style.border = '1px solid #444';
+          input.style.border = '1px solid #8b4513';
         }, 1000);
       }
     };
@@ -515,11 +471,21 @@ function promptForUsername(playerData) {
     setTimeout(() => input.focus(), 100);
     
     // Assemble modal
+    inputContainer.appendChild(input);
+    inputContainer.appendChild(regenButton);
+    modalContent.appendChild(logo);
     modalContent.appendChild(title);
-    modalContent.appendChild(input);
+    modalContent.appendChild(inputContainer);
     modalContent.appendChild(button);
     modal.appendChild(modalContent);
     document.body.appendChild(modal);
+    
+    // Add fade-in animation for a smooth appearance
+    modal.style.opacity = '0';
+    modal.style.transition = 'opacity 0.3s ease';
+    setTimeout(() => {
+      modal.style.opacity = '1';
+    }, 10);
   });
 }
 
@@ -670,16 +636,29 @@ async function initPlayerIdentity() {
   // Check if there's a conflict with stored identity
   playerData = await checkForIdentityConflict(playerData);
   
-  // If no username, prompt for one
-  if (!playerData.username) {
-    playerData = await promptForUsername(playerData);
+  // Start preloading game content in background
+  preloadGameContent();
+  
+  // For first-time users, we'll show the username prompt but game continues loading
+  const isFirstTime = playerData.createdAt === playerData.lastLogin || shouldBypassIdentity();
+  
+  if (isFirstTime) {
+    // Return a promise that will resolve when the user submits their name
+    return new Promise(resolve => {
+      // Show username prompt immediately, but don't wait for it
+      promptForUsername(playerData).then(updatedPlayerData => {
+        // Update last login time and save
+        updatedPlayerData.lastLogin = Date.now();
+        savePlayerIdentity(updatedPlayerData);
+        resolve(updatedPlayerData);
+      });
+    });
+  } else {
+    // For returning users, continue normally
+    playerData.lastLogin = Date.now();
+    savePlayerIdentity(playerData);
+    return playerData;
   }
-  
-  // Update last login time and save again
-  playerData.lastLogin = Date.now();
-  savePlayerIdentity(playerData);
-  
-  return playerData;
 }
 
 // Verify client identity with server

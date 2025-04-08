@@ -8,6 +8,7 @@
 import { PhysicsSystem } from './physics.js';
 import { createOptimizedSmokeEffect } from './input.js';
 import { updateHealthUI } from './ui.js';
+import { FlyingEagle } from './flyingEagle.js';
 
 export class QuickDraw {
     constructor(scene, localPlayer, networkManager, soundManager) {
@@ -1708,6 +1709,11 @@ export class QuickDraw {
             // Only enable aerial camera if we're not in death/kill animation
             console.log('Aerial camera not active during pre-draw phase - enabling');
             this.setupAndEnableAerialCamera();
+        }
+        
+        // Update flying eagle if it exists
+        if (window.flyingEagle && (this.aerialCameraActive || this.duelState === 'draw')) {
+            window.flyingEagle.update(deltaTime);
         }
         
         // Update aerial camera if active and not in death/kill animation
@@ -3797,6 +3803,20 @@ export class QuickDraw {
             } else {
                 console.error('Cannot add aerial camera - scene not available');
             }
+        }
+        
+        // Initialize flying eagle for aerial camera if it doesn't exist
+        if (!window.flyingEagle) {
+            console.log('Initializing flying eagle for QuickDraw aerial view');
+            window.flyingEagle = new FlyingEagle({
+                scene: this.scene,
+                camera: this.aerialCamera
+            });
+            
+            // Set default town center
+            const townCenter = new THREE.Vector3(0, 0, 0);
+            window.flyingEagle.townCenter = townCenter;
+            window.flyingEagle.setDefaultFlightPath();
         }
     }
 

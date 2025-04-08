@@ -198,18 +198,28 @@ export class FlyingEagle {
     const flightRadius = Math.max(25, distanceBetweenPlayers * 1.2); // Reduced from 40 to 25 minimum and multiplier from 2.5 to 1.2
     const flightHeight = 18; // Reduced from 25 to 18
     
+    // Set a slower flight speed for QuickDraw aerial view
+    this.flightSpeed = 0.15; // Reduced from 0.3 to 0.15 for slower circling
+    
     // Set the circular path around the duel
     this.setCircularFlightPath(duelCenter, flightHeight, flightRadius);
     
-    console.log(`Eagle quickdraw flight path set - radius: ${flightRadius.toFixed(1)}, height: ${flightHeight.toFixed(1)}`);
+    console.log(`Eagle quickdraw flight path set - radius: ${flightRadius.toFixed(1)}, height: ${flightHeight.toFixed(1)}, speed: ${this.flightSpeed}`);
   }
   
   /**
-   * Return to normal patrol mode after quickdraw is over
+   * Return to default flight path (after quickdraw)
    */
   returnToDefaultPath() {
     this.inQuickdraw = false;
+    
+    // Reset to default flight speed
+    this.flightSpeed = 0.3;
+    
+    // Reset to default flight path
     this.setDefaultFlightPath();
+    
+    console.log('Eagle returned to default flight path');
   }
 
   /**
@@ -313,8 +323,16 @@ export class FlyingEagle {
     // Update position on the circle
     this.updateCircularPosition();
     
-    // Update animations
+    // Update animations with adjusted speed for quickdraw mode
     if (this.animationMixer) {
+      // Use half animation speed when in quickdraw mode to match the flight speed
+      const animationTimeScale = this.inQuickdraw ? 0.5 : 1.0;
+      
+      // Set the time scale for each animation
+      if (this.animations['flycycle']) {
+        this.animations['flycycle'].setEffectiveTimeScale(animationTimeScale);
+      }
+      
       this.animationMixer.update(deltaTime);
     }
   }

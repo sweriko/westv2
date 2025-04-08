@@ -66,21 +66,7 @@ window.renderer = {
 // Initialize the application
 async function init() {
   try {
-    // Initialize player identity before anything else
-    const playerIdentity = await initPlayerIdentity();
-    console.log(`Welcome back, ${playerIdentity.username}! Player ID: ${playerIdentity.id}`);
-    
-    // Check if this was a first-time user to determine when to show instructions
-    const isFirstTimeUser = playerIdentity.lastLogin === playerIdentity.createdAt;
-    
-    // Verify identity with server (will be used in future server-side validation)
-    const verificationResult = await verifyIdentityWithServer(playerIdentity);
-    if (!verificationResult.verified) {
-      console.warn('Identity verification failed, using local identity only');
-    }
-    
-    // Expose player identity to window for easy access from other modules
-    window.playerIdentity = playerIdentity;
+    // Start the init process without waiting for player identity
     
     // Set debug mode flag
     window.debugMode = false; // Disabled for production
@@ -118,7 +104,7 @@ async function init() {
 
     const soundManager = new SoundManager();
     
-    // Load all sounds for everyone
+    // Start loading sounds while the user is entering their name
     // Load shot sounds
     soundManager.loadSound("shot", "sounds/shot.mp3");
     soundManager.loadSound("aimclick", "sounds/aimclick.mp3");
@@ -154,7 +140,29 @@ async function init() {
       soundManager.playSound("ambience", 0, 0.4, true); // Play at lower volume in a loop
     }, 1000); // Slight delay to ensure the sound is loaded
     
-    // Preload all visual effects to prevent FPS drops on first use - for all players now
+    // In parallel, initialize player identity
+    // This will show the name prompt for first-time users if needed
+    // but won't block the rest of the initialization
+    const playerIdentityPromise = initPlayerIdentity().then(playerIdentity => {
+      console.log(`Welcome back, ${playerIdentity.username}! Player ID: ${playerIdentity.id}`);
+      
+      // Check if this was a first-time user to determine when to show instructions
+      const isFirstTimeUser = playerIdentity.lastLogin === playerIdentity.createdAt;
+      
+      // Verify identity with server (will be used in future server-side validation)
+      return verifyIdentityWithServer(playerIdentity).then(verificationResult => {
+        if (!verificationResult.verified) {
+          console.warn('Identity verification failed, using local identity only');
+        }
+        
+        // Expose player identity to window for easy access from other modules
+        window.playerIdentity = playerIdentity;
+        
+        return playerIdentity;
+      });
+    });
+
+    // Preload all visual effects to prevent FPS drops on first use
     if (!window.isMobile) {
       console.log("Preloading visual effects...");
       // Preload muzzle flash effect
@@ -194,9 +202,12 @@ async function init() {
         scene.remove(dummyBullet.mesh);
       }, 100);
     }
-    
+
     // Set up multiplayer manager to handle other players
     multiplayerManager = new MultiplayerManager(scene, soundManager, remotePlayers);
+    
+    // Wait for player identity to be resolved before continuing with network/player setup
+    const playerIdentity = await playerIdentityPromise;
     
     // Initialize the phantom wallet adapter with network manager for NFT verification
     if (typeof phantomWalletAdapter !== 'undefined') {
@@ -213,6 +224,17 @@ async function init() {
     
     // Make multiplayerManager globally accessible
     window.multiplayerManager = multiplayerManager;
+
+    // Create flying eagle that follows the camera
+    window.flyingEagle = new FlyingEagle({
+      scene: scene,
+      camera: camera
+    });
+    
+    // Set the default town center for the eagle to fly around
+    const townCenter = new THREE.Vector3(0, 0, 0); // Center of the town
+    window.flyingEagle.townCenter = townCenter;
+    window.flyingEagle.setDefaultFlightPath();
 
     // Initialize the local player
     localPlayer = new Player({
@@ -548,18 +570,6 @@ async function init() {
       }
     };
     
-    // Create flying eagle that follows the camera
-    window.flyingEagle = new FlyingEagle({
-      scene: scene,
-      camera: camera
-    });
-    
-    // Set the default town center for the eagle to fly around
-    // This ensures the eagle is always flying overhead in the town
-    const townCenter = new THREE.Vector3(0, 0, 0); // Center of the town
-    window.flyingEagle.townCenter = townCenter;
-    window.flyingEagle.setDefaultFlightPath();
-    
     // Initialize chat system
     initChat(networkManager);
     
@@ -793,7 +803,6 @@ function animate(time) {
 
   // Update flying eagle if it exists
   if (window.flyingEagle) {
-    // Always update eagle's flight path
     window.flyingEagle.update(deltaTime);
   }
 

@@ -226,16 +226,44 @@ async function updatePlayerSkin(playerId, walletAddress) {
   }
 }
 
+// Create helper function for sanitizing text to prevent XSS
+function sanitizeText(text) {
+  if (!text || typeof text !== 'string') return '';
+  
+  // Remove potentially dangerous content first
+  text = text
+    .replace(/<[^>]*>/g, '') // Remove HTML tags
+    .replace(/javascript:/gi, '') // Remove javascript: protocol
+    .replace(/on\w+=/gi, '') // Remove event handlers
+    .trim();
+    
+  // Limit length for usernames
+  if (text.length > 20) {
+    text = text.substring(0, 20);
+  }
+  
+  // Perform HTML escaping
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 // On new connection
 wss.on('connection', (ws, req) => {
   // Parse parameters from query string
   const parameters = url.parse(req.url, true).query;
   const sessionId = parameters.sessionId;
   const clientId = parameters.clientId;
-  const username = parameters.username;
+  let username = parameters.username;
   const token = parameters.token;
   const walletAddress = parameters.walletAddress; // New: Get wallet address if provided
   
+  // Sanitize username to prevent XSS
+  username = sanitizeText(username || 'Anonymous');
+
   // Check if this is a development mode connection
   const isDev = isDevMode && (parameters.dev === 'true' || parameters.newplayer === 'true');
   
@@ -279,43 +307,43 @@ wss.on('connection', (ws, req) => {
       
       // Update the stored player identity
       storedIdentity.lastSeen = Date.now();
-      storedIdentity.username = username || storedIdentity.username;
+      storedIdentity.username = sanitizeText(username || storedIdentity.username);
       
       // Use the existing player ID for this client
       const playerId = storedIdentity.playerId;
-      console.log(`Recognized returning player ${playerId} (clientId: ${clientId}, username: ${username || storedIdentity.username})`);
+      console.log(`Recognized returning player ${playerId} (clientId: ${clientId}, username: ${sanitizeText(username || storedIdentity.username)})`);
       
       // Send Telegram notification for returning player
       if (!isDev) {
-        sendTelegramNotification(`🔄 Player reconnected: ${username || storedIdentity.username} (ID: ${playerId})`);
+        sendTelegramNotification(`🔄 Player reconnected: ${sanitizeText(username || storedIdentity.username)} (ID: ${playerId})`);
       }
       
       // Initialize player with recognized identity
-      initializePlayer(ws, playerId, sessionId, clientId, username || storedIdentity.username, token, isDev);
+      initializePlayer(ws, playerId, sessionId, clientId, sanitizeText(username || storedIdentity.username), token, isDev);
       return;
     }
   }
 
   // If we reach here, it's a new player or unrecognized returning player
   const playerId = nextPlayerId++;
-  console.log(`Player ${playerId} connected (sessionId: ${sessionId || 'none'}, username: ${username || 'Anonymous'}, isDev: ${isDev})`);
+  console.log(`Player ${playerId} connected (sessionId: ${sessionId || 'none'}, username: ${username}, isDev: ${isDev})`);
 
   // Store player identity information if provided (unless in dev mode with newplayer=true)
   if (clientId && !isDev) {
     playerIdentities.set(clientId, {
-      username: username || 'Anonymous',
+      username: username,
       playerId,
       token: token || '',
       lastSeen: Date.now()
     });
-    console.log(`Associated player ${playerId} with clientId ${clientId} and username ${username || 'Anonymous'}`);
+    console.log(`Associated player ${playerId} with clientId ${clientId} and username ${username}`);
     
     // Send Telegram notification for new player
-    sendTelegramNotification(`🎮 New player joined: ${username || 'Anonymous'} (ID: ${playerId})`);
+    sendTelegramNotification(`🎮 New player joined: ${username} (ID: ${playerId})`);
   }
 
   // Initialize the new player
-  initializePlayer(ws, playerId, sessionId, clientId, username || 'Anonymous', token, isDev);
+  initializePlayer(ws, playerId, sessionId, clientId, username, token, isDev);
 });
 
 // Extract player initialization to a separate function
@@ -2085,17 +2113,16 @@ function handleChatMessage(playerId, message) {
     timeouts.lastChat = now;
   }
   
-  // Simple message validation and sanitization
+  // Validate and sanitize message
   if (!message || typeof message !== 'string') return;
-  if (message.length > 60) message = message.substring(0, 60); // Limit message length
   
-  // Escape HTML to prevent XSS
-  message = message
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+  // Limit message length (chat messages can be longer than usernames)
+  if (message.length > 60) {
+    message = message.substring(0, 60);
+  }
+  
+  // Sanitize the message
+  message = sanitizeText(message);
   
   console.log(`Chat message from ${player.username} (${playerId}): ${message}`);
   
@@ -2132,7 +2159,7 @@ function createNpc(npcData = {}) {
   // Create NPC data structure
   const npc = {
     id: id,
-    username: npcData.name || 'Town NPC',
+    username: sanitizeText(npcData.name || 'Town NPC'),
     position: npcData.position || defaultPosition,
     rotation: npcData.rotation || { y: 0 },
     health: npcData.health || 100,
