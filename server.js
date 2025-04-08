@@ -1449,8 +1449,8 @@ function startQuickDrawDuel(duelId) {
   player1.ws.send(JSON.stringify({ type: 'quickDrawCountdown' }));
   player2.ws.send(JSON.stringify({ type: 'quickDrawCountdown' }));
   
-  // Set a random time for the draw signal (1-8 seconds)
-  const drawTime = 1000 + Math.floor(Math.random() * 7000);
+  // Set a random time for the draw signal (1-5 seconds)
+  const drawTime = 1000 + Math.floor(Math.random() * 4000);
   duel.drawTimeout = setTimeout(() => {
     if (quickDrawDuels.has(duelId)) {
       sendDrawSignal(duelId);
