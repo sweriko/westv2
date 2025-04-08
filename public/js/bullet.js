@@ -217,6 +217,30 @@ export class Bullet {
       }
     }
 
+    // Check for tumbleweed hits if tumbleweedManager exists
+    if (window.tumbleweedManager) {
+      // Update the raycaster with the bullet's movement path
+      raycaster.set(this.lastPosition, this.direction);
+      
+      // Check for intersection with tumbleweeds
+      const tumbleweedHit = window.tumbleweedManager.checkRayIntersection(raycaster);
+      
+      if (tumbleweedHit) {
+        // Create a small impact effect
+        createImpactEffect(tumbleweedHit.point, this.direction, scene, 'ground');
+        
+        // Return hit info
+        return { 
+          active: false, 
+          hit: { 
+            type: 'tumbleweed', 
+            position: tumbleweedHit.point,
+            distance: tumbleweedHit.distance
+          } 
+        };
+      }
+    }
+
     // Anti-cheat: For local bullets, collision detection is only client-side prediction
     // For remote bullets, we rely on client-side collision for visual effects
     
