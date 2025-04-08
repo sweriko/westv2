@@ -241,6 +241,33 @@ export class Bullet {
       }
     }
 
+    // Check for eagle hits if flyingEagle exists
+    if (window.flyingEagle) {
+      // Update the raycaster with the bullet's movement path
+      raycaster.set(this.lastPosition, this.direction);
+      
+      // Check for intersection with eagle's hitbox
+      const eagleIntersection = raycaster.ray.intersectSphere(window.flyingEagle.hitbox, new THREE.Vector3());
+      
+      if (eagleIntersection) {
+        // Create a small impact effect
+        createImpactEffect(eagleIntersection, this.direction, scene, 'eagle');
+        
+        // Hit the eagle
+        window.flyingEagle.hit();
+        
+        // Return hit info
+        return { 
+          active: false, 
+          hit: { 
+            type: 'eagle', 
+            position: eagleIntersection,
+            distance: eagleIntersection.distanceTo(raycaster.ray.origin)
+          } 
+        };
+      }
+    }
+
     // Anti-cheat: For local bullets, collision detection is only client-side prediction
     // For remote bullets, we rely on client-side collision for visual effects
     
