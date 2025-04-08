@@ -275,18 +275,17 @@ export class Tumbleweed {
         this.animations['tumble'].stop();
       }
       
-      // Play explosion sound
+      // Play explosion sound locally to the player
       if (window.soundManager) {
+        // Play locally without position
         window.soundManager.playSound('tumbleweedexplode', 0, 1.0);
       } else if (window.localPlayer && window.localPlayer.soundManager) {
-        // Play sound at tumbleweed position with some randomized pitch
-        window.localPlayer.soundManager.playSoundAt(
+        // Play directly without positioning
+        window.localPlayer.soundManager.playSound(
           'tumbleweedexplode',
-          this.group.position,
           0, // No cooldown
           0.8 + Math.random() * 0.4, // Volume between 0.8 and 1.2
-          false, // Don't loop
-          true // Use spatial audio
+          false // Don't loop
         );
       }
       

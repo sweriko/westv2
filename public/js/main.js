@@ -130,6 +130,7 @@ async function init() {
     // Load new sound effects
     soundManager.loadSound("dramatic", "sounds/dramatic.mp3");
     soundManager.loadSound("eaglescream", "sounds/eaglescream.mp3");
+    soundManager.loadSound("eagledeath", "sounds/eagledeath.mp3");
     soundManager.loadSound("quickdrawending", "sounds/quickdrawending.mp3");
     soundManager.loadSound("playerfall", "sounds/playerfall.mp3");
     soundManager.loadSound("gunholster", "sounds/gunholster.mp3");

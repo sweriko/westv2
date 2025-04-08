@@ -101,6 +101,10 @@ export class QuickDraw {
 
         // Third-person model for local player (only visible during aerial view)
         this.localPlayerModel = null;
+
+        // Initialize collections
+        this.outgoingChallenges = new Map(); // Track outgoing challenges by playerId
+        this.inviteCooldowns = new Map(); // Track cooldowns for accepted invites
     }
     
     /**
@@ -786,9 +790,30 @@ export class QuickDraw {
         }
         
         if (nearestPlayerId) {
+            // Check if there's an active outgoing invite to this player
+            if (this.outgoingChallenges.has(nearestPlayerId)) {
+                console.log(`[QuickDraw] Already sent challenge to player ${nearestPlayerId}, waiting for response`);
+                return;
+            }
+            
+            // Check if this player is on cooldown from a previous invite
+            if (this.inviteCooldowns.has(nearestPlayerId)) {
+                const cooldownEndTime = this.inviteCooldowns.get(nearestPlayerId);
+                if (Date.now() < cooldownEndTime) {
+                    console.log(`[QuickDraw] This player is on cooldown for ${Math.ceil((cooldownEndTime - Date.now()) / 1000)}s`);
+                    return;
+                } else {
+                    // Cooldown is over, remove it
+                    this.inviteCooldowns.delete(nearestPlayerId);
+                }
+            }
+            
             // Hide the challenge prompt
             this.challengePrompt.style.display = 'none';
             this.challengeUIVisible = false;
+            
+            // Track this outgoing challenge
+            this.outgoingChallenges.set(nearestPlayerId, Date.now());
             
             // Send challenge to server
             this.networkManager.sendQuickDrawChallenge(nearestPlayerId);
@@ -896,6 +921,12 @@ export class QuickDraw {
     handleChallengeAccepted(message) {
         console.log(`Player ${message.targetId} accepted your Quick Draw challenge`);
         
+        // Remove from outgoing challenges
+        this.outgoingChallenges.delete(message.targetId);
+        
+        // Add a cooldown of 3 seconds after accepting
+        this.inviteCooldowns.set(message.targetId, Date.now() + 3000);
+        
         // Wait for server to respond with match details
     }
 
@@ -905,6 +936,9 @@ export class QuickDraw {
      */
     handleChallengeDeclined(message) {
         console.log(`Player ${message.targetId} declined your Quick Draw challenge`);
+        
+        // Remove from outgoing challenges
+        this.outgoingChallenges.delete(message.targetId);
     }
 
     /**

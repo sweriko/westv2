@@ -383,6 +383,8 @@ export class FlyingEagle {
     // Play eagle hit sound
     if (window.soundManager) {
       window.soundManager.playSound('eaglehit', 0, 1.0);
+      // Also play eagle death sound
+      window.soundManager.playSound('eagledeath', 0, 1.0);
     } else if (window.localPlayer && window.localPlayer.soundManager) {
       window.localPlayer.soundManager.playSoundAt(
         'eaglehit',
@@ -391,6 +393,13 @@ export class FlyingEagle {
         0.8 + Math.random() * 0.4,
         false,
         true
+      );
+      // Also play eagle death sound
+      window.localPlayer.soundManager.playSound(
+        'eagledeath',
+        0,
+        0.8 + Math.random() * 0.4,
+        false
       );
     }
     
