@@ -798,16 +798,29 @@ function handlePlayerReload(playerId, data) {
 
 // Anti-cheat: Handle player hit validation
 function handlePlayerHit(playerId, targetId, hitData, bulletId) {
-  console.log(`Player ${playerId} claims hit on player ${targetId}`);
+  console.log(`Player ${playerId} claims hit on player/npc ${targetId}`);
   
   // Basic validation
-  if (!players.has(playerId) || !players.has(targetId)) {
+  const isPlayerTarget = players.has(targetId);
+  const isNpcTarget = npcs.has(targetId);
+  
+  if (!players.has(playerId) || (!isPlayerTarget && !isNpcTarget)) {
     console.log(`Hit claim invalid - player ${playerId} or target ${targetId} not found`);
     return;
   }
   
   const player = players.get(playerId);
-  const target = players.get(targetId);
+  
+  // Get target (player or NPC)
+  let target;
+  let isNpc = false;
+  
+  if (isPlayerTarget) {
+    target = players.get(targetId);
+  } else if (isNpcTarget) {
+    target = npcs.get(targetId);
+    isNpc = true;
+  }
   
   // Check if bullet ID is valid, if provided
   if (bulletId && !activeBullets.has(bulletId)) {
@@ -836,7 +849,7 @@ function handlePlayerHit(playerId, targetId, hitData, bulletId) {
   
   // ADDED: Check if this is a quickdraw duel hit
   // If the players are in a quickdraw duel, handle it using the quickdraw logic
-  if (player.inQuickDrawDuel && target.inQuickDrawDuel && player.quickDrawDuelId === target.quickDrawDuelId) {
+  if (!isNpc && player.inQuickDrawDuel && target.inQuickDrawDuel && player.quickDrawDuelId === target.quickDrawDuelId) {
     const duel = quickDrawDuels.get(player.quickDrawDuelId);
     if (duel && duel.state === 'draw') {
       console.log(`Handling hit as part of QuickDraw duel ${player.quickDrawDuelId}`);
@@ -877,8 +890,13 @@ function handlePlayerHit(playerId, targetId, hitData, bulletId) {
   // Apply damage to target
   target.health = Math.max(0, target.health - damage);
   
+  // If NPC was hit and survived, make them fight back
+  if (isNpc && target.health > 0) {
+    handleNpcAttacked(targetId, playerId);
+  }
+  
   // Notify both target and shooter
-  if (target.ws && target.ws.readyState === WebSocket.OPEN) {
+  if (!isNpc && target.ws && target.ws.readyState === WebSocket.OPEN) {
     target.ws.send(JSON.stringify({
       type: 'hit',
       sourceId: playerId,
@@ -896,24 +914,30 @@ function handlePlayerHit(playerId, targetId, hitData, bulletId) {
       hitPosition: hitData.position,
       health: target.health,
       hitZone: hitData.hitZone,
-      damage: damage
+      damage: damage,
+      isNpc: isNpc
     }));
   }
   
   // Broadcast hit to other players for visual effects
-  broadcastToOthers([playerId, targetId], {
+  broadcastToOthers([playerId, isNpc ? null : targetId], {
     type: 'playerHit',
     targetId: targetId,
     sourceId: playerId,
     hitPosition: hitData.position,
     health: target.health,
     hitZone: hitData.hitZone,
-    damage: damage
+    damage: damage,
+    isNpc: isNpc
   });
   
   // Check if target has been defeated
   if (target.health <= 0) {
-    handlePlayerDeath(targetId, playerId);
+    if (isNpc) {
+      handleNpcDeath(targetId, playerId);
+    } else {
+      handlePlayerDeath(targetId, playerId);
+    }
   }
 }
 
@@ -2485,3 +2509,247 @@ setTimeout(() => {
     console.error("Failed to spawn initial NPCs:", error);
   }
 }, 5000); // Wait for server to fully initialize
+
+/**
+ * Handle NPC fighting back when attacked
+ * @param {string} npcId - The ID of the NPC that was attacked
+ * @param {string} attackerId - The ID of the player who attacked the NPC
+ */
+function handleNpcAttacked(npcId, attackerId) {
+  const npc = npcs.get(npcId);
+  const attacker = players.get(attackerId);
+  
+  if (!npc || !attacker) return;
+  
+  // Start fighting the attacker if not already fighting
+  if (!npc.targetPlayer) {
+    console.log(`NPC ${npcId} (${npc.username}) is now fighting player ${attackerId}`);
+    
+    // Set the attacker as target
+    npc.targetPlayer = attackerId;
+    npc.lastShotTime = 0;
+    
+    // Start aiming at player
+    npc.isAiming = true;
+    
+    // Broadcast NPC state update to show it's now aiming
+    broadcastNpcState(npcId);
+    
+    // Start shooting interval (store it in the NPC object)
+    npc.shootIntervalId = setInterval(() => {
+      // Check if NPC still exists and is targeting someone
+      if (!npcs.has(npcId) || !npc.targetPlayer) {
+        if (npc.shootIntervalId) {
+          clearInterval(npc.shootIntervalId);
+          npc.shootIntervalId = null;
+        }
+        return;
+      }
+      
+      // Check if target player still exists
+      if (!players.has(npc.targetPlayer)) {
+        // Target player left, stop fighting
+        npc.targetPlayer = null;
+        npc.isAiming = false;
+        npc.isShooting = false;
+        broadcastNpcState(npcId);
+        if (npc.shootIntervalId) {
+          clearInterval(npc.shootIntervalId);
+          npc.shootIntervalId = null;
+        }
+        return;
+      }
+      
+      // Shoot at player once per second
+      const now = Date.now();
+      if (now - npc.lastShotTime >= 1000) {
+        npcShootAtPlayer(npcId, npc.targetPlayer);
+        npc.lastShotTime = now;
+      }
+    }, 100); // Check interval faster than shooting rate for responsiveness
+  }
+}
+
+/**
+ * Make an NPC shoot at a player
+ * @param {string} npcId - The ID of the NPC
+ * @param {string} targetPlayerId - The ID of the target player
+ */
+function npcShootAtPlayer(npcId, targetPlayerId) {
+  const npc = npcs.get(npcId);
+  const targetPlayer = players.get(targetPlayerId);
+  
+  if (!npc || !targetPlayer) return;
+  
+  // Calculate direction from NPC to player
+  const dirX = targetPlayer.position.x - npc.position.x;
+  const dirY = targetPlayer.position.y - npc.position.y + 0.5; // Aim for upper body
+  const dirZ = targetPlayer.position.z - npc.position.z;
+  
+  // Normalize direction
+  const length = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
+  const normalizedDir = {
+    x: dirX / length,
+    y: dirY / length,
+    z: dirZ / length
+  };
+  
+  // Update NPC rotation to face the player
+  npc.rotation.y = Math.atan2(normalizedDir.x, normalizedDir.z) + Math.PI;
+  
+  // Set NPC as shooting for animation
+  npc.isShooting = true;
+  broadcastNpcState(npcId);
+  
+  // Create bullet data for visual effects
+  const bulletPosition = {
+    x: npc.position.x,
+    y: npc.position.y - 1, // Lower gun height
+    z: npc.position.z
+  };
+  
+  // Create a server-side bullet
+  const bulletId = nextBulletId++;
+  const now = Date.now();
+  
+  const bullet = {
+    id: bulletId,
+    sourcePlayerId: npcId,  // Use NPC ID as source
+    position: bulletPosition,
+    direction: normalizedDir,
+    distanceTraveled: 0,
+    maxDistance: GAME_CONSTANTS.MAX_BULLET_DISTANCE,
+    speed: GAME_CONSTANTS.BULLET_SPEED,
+    timeCreated: now,
+    active: true
+  };
+  
+  // Add to active bullets
+  activeBullets.set(bulletId, bullet);
+  
+  // Broadcast gunshot to all clients for visual and audio effects
+  broadcastToAll({
+    type: 'playerShoot', // Match the player shoot event type exactly
+    id: npcId,
+    bulletId: bulletId,
+    bulletData: {
+      position: bulletPosition,
+      direction: normalizedDir
+    },
+    isNpc: true
+  });
+  
+  // Wait for animation to play, then reset
+  setTimeout(() => {
+    if (npcs.has(npcId)) {
+      npc.isShooting = false;
+      broadcastNpcState(npcId);
+    }
+  }, 300);
+  
+  // Determine if hit (50% chance for body shot)
+  const hitChance = 0.5;
+  const hit = Math.random() < hitChance;
+  
+  if (hit) {
+    // Create hit data
+    const hitData = {
+      hitZone: 'body',
+      position: { 
+        x: targetPlayer.position.x,
+        y: targetPlayer.position.y,
+        z: targetPlayer.position.z
+      }
+    };
+    
+    // Apply damage to player (40 damage for body shot)
+    targetPlayer.health = Math.max(0, targetPlayer.health - 40);
+    
+    // Notify player of hit
+    if (targetPlayer.ws && targetPlayer.ws.readyState === WebSocket.OPEN) {
+      targetPlayer.ws.send(JSON.stringify({
+        type: 'hit',
+        sourceId: npcId,
+        hitData: hitData,
+        hitZone: 'body',
+        health: targetPlayer.health,
+        isNpc: true
+      }));
+    }
+    
+    // Broadcast hit to all players for visual effects
+    broadcastToAll({
+      type: 'playerHit',
+      targetId: targetPlayerId,
+      sourceId: npcId,
+      hitPosition: hitData.position,
+      health: targetPlayer.health,
+      hitZone: 'body',
+      damage: 40,
+      isNpc: true
+    });
+    
+    // Check if player died
+    if (targetPlayer.health <= 0) {
+      handlePlayerDeath(targetPlayerId, npcId);
+      
+      // NPC no longer has a target
+      npc.targetPlayer = null;
+      npc.isAiming = false;
+    }
+  }
+}
+
+/**
+ * Handle NPC death
+ * @param {string} npcId - The ID of the NPC that died
+ * @param {string} killedById - The ID of the player who killed the NPC
+ */
+function handleNpcDeath(npcId, killedById) {
+  const npc = npcs.get(npcId);
+  if (!npc) return;
+  
+  console.log(`NPC ${npcId} (${npc.username}) was killed by player ${killedById}`);
+  
+  // Clean up any shooting interval
+  if (npc.shootIntervalId) {
+    clearInterval(npc.shootIntervalId);
+    npc.shootIntervalId = null;
+  }
+  
+  // Store NPC data for respawning
+  const npcData = {
+    name: npc.username,
+    position: {...npc.position},
+    rotation: {...npc.rotation},
+    walkSpeed: npc.walkSpeed,
+    path: JSON.parse(JSON.stringify(npc.path)) // Deep copy path
+  };
+  
+  // Send death notification to all clients
+  broadcastToAll({
+    type: 'playerDeath',
+    id: npcId,
+    killedById: killedById,
+    isNpc: true
+  });
+  
+  // Send kill notification to the killer
+  const killer = players.get(killedById);
+  if (killer && killer.ws && killer.ws.readyState === WebSocket.OPEN) {
+    killer.ws.send(JSON.stringify({
+      type: 'kill',
+      targetId: npcId,
+      isNpc: true
+    }));
+  }
+  
+  // Remove the NPC temporarily
+  removeNpc(npcId);
+  
+  // Respawn the NPC after a delay
+  setTimeout(() => {
+    const newNpcId = createNpc(npcData);
+    console.log(`NPC ${npcId} respawned as ${newNpcId}`);
+  }, 5000); // 5 second respawn delay
+}
