@@ -169,124 +169,41 @@ function savePlayerIdentity(playerData) {
 
 // Preload game content in background while user sets their name
 function preloadGameContent() {
-  let preloadProgress = 0;
-  
-  // Create a container for progress elements
-  const progressContainer = document.createElement('div');
-  progressContainer.className = 'preload-progress-container';
-  progressContainer.style.width = '100%';
-  progressContainer.style.marginTop = '20px';
-  
-  // Create progress bar with western-themed styling
-  const progressBar = document.createElement('div');
-  progressBar.className = 'preload-progress';
-  progressBar.style.position = 'relative';
-  progressBar.style.width = '100%';
-  progressBar.style.height = '8px';
-  progressBar.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
-  progressBar.style.borderRadius = '4px';
-  progressBar.style.overflow = 'hidden';
-  progressBar.style.border = '1px solid #8b4513';
-  
-  const progressFill = document.createElement('div');
-  progressFill.style.height = '100%';
-  progressFill.style.width = '0%';
-  progressFill.style.backgroundColor = '#8b0000';
-  progressFill.style.transition = 'width 0.5s ease';
-  progressBar.appendChild(progressFill);
-  
-  const progressText = document.createElement('div');
-  progressText.style.position = 'relative';
-  progressText.style.marginTop = '10px';
-  progressText.style.width = '100%';
-  progressText.style.textAlign = 'center';
-  progressText.style.fontSize = '14px';
-  progressText.style.color = '#d4a45f';
-  progressText.style.fontFamily = 'Western, serif';
-  progressText.textContent = 'Loading your adventure...';
-  
-  // Add bullet icon decorations
-  const leftBullet = document.createElement('div');
-  leftBullet.innerHTML = '&#x1F4A5;'; // Explosion emoji as bullet
-  leftBullet.style.position = 'absolute';
-  leftBullet.style.left = '-25px';
-  leftBullet.style.top = '50%';
-  leftBullet.style.transform = 'translateY(-50%)';
-  leftBullet.style.fontSize = '16px';
-  
-  const rightBullet = document.createElement('div');
-  rightBullet.innerHTML = '&#x1F4A5;';
-  rightBullet.style.position = 'absolute';
-  rightBullet.style.right = '-25px';
-  rightBullet.style.top = '50%';
-  rightBullet.style.transform = 'translateY(-50%)';
-  rightBullet.style.fontSize = '16px';
-  
-  progressContainer.appendChild(progressBar);
-  progressContainer.appendChild(progressText);
-  
-  // Add progress elements to modal when it appears
-  const checkForModal = setInterval(() => {
-    const modal = document.querySelector('.username-modal');
-    if (modal) {
-      const modalContent = modal.querySelector('div');
-      if (modalContent) {
-        modalContent.appendChild(progressContainer);
-        clearInterval(checkForModal);
-      }
-    }
-  }, 100);
-  
-  // Loading messages to cycle through
-  const loadingMessages = [
-    "Saddling up the horses...",
-    "Polishing six-shooters...",
-    "Filling up whiskey barrels...",
-    "Dusting off the tumbleweed...",
-    "Waking up the sheriff...",
-    "Loading bullets...",
-    "Cleaning up the saloon...",
-    "Setting up the poker table...",
-    "Preparing the town for your arrival..."
-  ];
-  
-  // Function to update progress with a more interesting flow
-  const updateProgress = () => {
-    // Generate some random progress increment
-    const increment = Math.random() * 5 + 2;
-    preloadProgress += increment;
-    
-    // Cap at 90% - we'll go to 100% when everything is actually loaded
-    if (preloadProgress > 90) {
-      preloadProgress = 90 + (Math.random() * 2);
-    }
-    
-    // Update progress bar
-    progressFill.style.width = `${preloadProgress}%`;
-    
-    // Change message occasionally
-    if (Math.random() > 0.7) {
-      const randomMessageIndex = Math.floor(Math.random() * loadingMessages.length);
-      progressText.textContent = loadingMessages[randomMessageIndex];
-    }
-    
-    // Continue updating until we hit near 100%
-    if (preloadProgress < 95) {
-      setTimeout(updateProgress, Math.random() * 600 + 400);
-    } else {
-      progressText.textContent = "Ready to enter the saloon!";
-    }
-  };
-  
-  // Start progress updates
-  setTimeout(updateProgress, 500);
-  
   console.log("Starting background preload of game content...");
-  // Actual preloading happens in parallel in main.js
+  // The actual preloading happens in parallel in main.js
+  // We've removed the progress bar but kept the preloading logic
 }
 
 // Show username prompt
 function promptForUsername(playerData) {
+  // Get device info for responsive design
+  const isMobile = window.innerWidth < 768;
+  const isSmallMobile = window.innerWidth < 480;
+  const isVerySmallMobile = window.innerWidth < 360;
+  const isSmallScreen = window.innerWidth < 1024;
+  
+  // Constants for easy adjustments - responsive values based on screen size
+  const UI_CONSTANTS = {
+    // Image sizes (percentage of container width)
+    TITLE_IMAGE_WIDTH: isVerySmallMobile ? '260px' : (isSmallMobile ? '300px' : (isMobile ? '350px' : (isSmallScreen ? '400px' : '450px'))),
+    NAME_SUBMIT_WIDTH: isVerySmallMobile ? '260px' : (isSmallMobile ? '300px' : (isMobile ? '350px' : (isSmallScreen ? '400px' : '450px'))),
+    ENTER_GAME_WIDTH: isVerySmallMobile ? '260px' : (isSmallMobile ? '300px' : (isMobile ? '350px' : (isSmallScreen ? '400px' : '450px'))),
+    
+    // Spacing
+    VERTICAL_SPACING: isMobile ? '15px' : '20px',
+    
+    // Text input positioning and sizing
+    TEXT_INPUT_WIDTH: isMobile ? '60%' : '65%',
+    TEXT_INPUT_TOP: '50%',
+    TEXT_INPUT_LEFT: isMobile ? '12%' : '9%',
+    TEXT_INPUT_FONT_SIZE: isVerySmallMobile ? '14px' : (isSmallMobile ? '16px' : (isMobile ? '18px' : (isSmallScreen ? '24px' : '28px'))),
+    
+    // Regenerate button positioning and sizing
+    REGEN_BUTTON_SIZE: isVerySmallMobile ? '28px' : (isSmallMobile ? '35px' : (isMobile ? '40px' : (isSmallScreen ? '60px' : '80px'))),
+    REGEN_BUTTON_RIGHT: isMobile ? '10%' : '6%',
+    REGEN_BUTTON_TOP: isMobile ? '50%' : '39%'
+  };
+
   return new Promise((resolve) => {
     // Create modal container
     const modal = document.createElement('div');
@@ -303,75 +220,98 @@ function promptForUsername(playerData) {
     modal.style.alignItems = 'center';
     modal.style.pointerEvents = 'auto'; // Ensure it captures input
     
-    // Create modal content with western styling
+    // Create modal content
     const modalContent = document.createElement('div');
-    modalContent.style.backgroundColor = '#2c2c2c';
-    modalContent.style.borderRadius = '8px';
-    modalContent.style.border = '3px solid #8b4513'; // Brown border for wooden look
-    modalContent.style.padding = '25px';
-    modalContent.style.width = '90%';
-    modalContent.style.maxWidth = '450px';
-    modalContent.style.boxShadow = '0 4px 15px rgba(0, 0, 0, 0.7)';
     modalContent.style.textAlign = 'center';
-    modalContent.style.backgroundImage = 'url("/textures/paper_texture.png")'; // Optional: use paper texture if available
-    modalContent.style.backgroundSize = 'cover';
+    modalContent.style.display = 'flex';
+    modalContent.style.flexDirection = 'column';
+    modalContent.style.alignItems = 'center';
+    modalContent.style.width = '100%';
+    modalContent.style.padding = isMobile ? '10px' : '20px';
     
-    // Logo/branding (optional)
-    const logo = document.createElement('div');
-    logo.style.fontFamily = 'Western, serif';
-    logo.style.fontSize = '24px';
-    logo.style.color = '#8b0000';
-    logo.style.marginBottom = '15px';
-    logo.textContent = 'WEST V2';
+    // Game title image
+    const titleImage = document.createElement('img');
+    titleImage.src = '/models/westweltbeta.png';
+    titleImage.style.marginBottom = UI_CONSTANTS.VERTICAL_SPACING;
+    titleImage.style.maxWidth = UI_CONSTANTS.TITLE_IMAGE_WIDTH;
     
-    // Title
-    const title = document.createElement('h2');
-    title.textContent = 'Enter Your Gunslinger Name';
-    title.style.color = '#8b0000'; // Deep red color
-    title.style.marginBottom = '20px';
-    title.style.fontFamily = 'Western, serif';
-    title.style.textShadow = '1px 1px 2px rgba(0,0,0,0.3)';
+    // Name submit image container
+    const nameSubmitContainer = document.createElement('div');
+    nameSubmitContainer.style.position = 'relative';
+    nameSubmitContainer.style.marginBottom = UI_CONSTANTS.VERTICAL_SPACING;
+    nameSubmitContainer.style.width = UI_CONSTANTS.NAME_SUBMIT_WIDTH;
     
-    // Input container (to hold input + regenerate button side by side)
-    const inputContainer = document.createElement('div');
-    inputContainer.style.display = 'flex';
-    inputContainer.style.marginBottom = '25px';
-    inputContainer.style.gap = '8px';
+    // Name submit image
+    const nameSubmitImage = document.createElement('img');
+    nameSubmitImage.src = '/models/namesubmit.png';
+    nameSubmitImage.style.maxWidth = '100%';
     
-    // Input field
+    // Input field (positioned on top of namesubmit.png)
     const input = document.createElement('input');
     input.type = 'text';
-    input.placeholder = 'Your name, partner...';
-    // Use generated name if no name exists yet
+    input.placeholder = isMobile ? 'Enter name...' : 'Your name, partner...';
     input.value = playerData.username || generateRandomName();
-    input.style.padding = '12px';
-    input.style.width = '100%';
-    input.style.borderRadius = '4px';
-    input.style.border = '1px solid #8b4513';
-    input.style.backgroundColor = 'rgba(51, 51, 51, 0.8)';
-    input.style.color = '#fff';
-    input.style.boxSizing = 'border-box';
-    input.style.fontSize = '16px';
+    input.maxLength = 16; // Restrict input to 16 characters
+    input.style.position = 'absolute';
+    input.style.top = UI_CONSTANTS.TEXT_INPUT_TOP;
+    input.style.left = UI_CONSTANTS.TEXT_INPUT_LEFT;
+    input.style.transform = 'translateY(-50%)'; // Only vertical centering
+    input.style.width = UI_CONSTANTS.TEXT_INPUT_WIDTH;
+    input.style.padding = isMobile ? '4px' : '8px';
+    input.style.backgroundColor = 'transparent';
+    input.style.border = 'none';
+    input.style.outline = 'none';
+    input.style.color = 'white';
+    input.style.fontSize = UI_CONSTANTS.TEXT_INPUT_FONT_SIZE;
+    input.style.textAlign = 'left'; // Left align text instead of center
     
-    // Regenerate button
+    // Regenerate button (positioned on the right side of namesubmit.png)
     const regenButton = document.createElement('button');
-    regenButton.innerHTML = '&#x21bb;'; // Refresh symbol
+    regenButton.textContent = ''; // Completely remove the symbol
     regenButton.title = "Generate new name";
-    regenButton.style.padding = '0 15px';
-    regenButton.style.backgroundColor = '#555';
-    regenButton.style.color = '#fff';
-    regenButton.style.border = '1px solid #444';
+    regenButton.style.position = 'absolute';
+    regenButton.style.top = UI_CONSTANTS.REGEN_BUTTON_TOP;
+    regenButton.style.right = UI_CONSTANTS.REGEN_BUTTON_RIGHT;
+    regenButton.style.transform = 'translateY(-50%)';
+    regenButton.style.width = UI_CONSTANTS.REGEN_BUTTON_SIZE;
+    regenButton.style.height = UI_CONSTANTS.REGEN_BUTTON_SIZE;
+    regenButton.style.backgroundColor = 'transparent';
+    regenButton.style.color = 'white';
+    regenButton.style.border = 'none';
     regenButton.style.borderRadius = '4px';
     regenButton.style.cursor = 'pointer';
     regenButton.style.fontSize = '18px';
+    regenButton.style.display = 'flex';
+    regenButton.style.justifyContent = 'center';
+    regenButton.style.alignItems = 'center';
     
-    // Add hover effect for regen button
-    regenButton.onmouseover = () => {
-      regenButton.style.backgroundColor = '#666';
+    // Add window resize handler for dynamic adjustments
+    const handleResize = () => {
+      const newIsMobile = window.innerWidth < 768;
+      const newIsSmallMobile = window.innerWidth < 480;
+      const newIsVerySmallMobile = window.innerWidth < 360;
+      const newIsSmallScreen = window.innerWidth < 1024;
+      
+      // Update sizes based on new screen dimensions
+      const titleWidth = newIsVerySmallMobile ? '260px' : (newIsSmallMobile ? '300px' : (newIsMobile ? '350px' : (newIsSmallScreen ? '400px' : '450px')));
+      titleImage.style.maxWidth = titleWidth;
+      nameSubmitContainer.style.width = titleWidth;
+      enterGameImage.style.maxWidth = titleWidth;
+      
+      // Update font size
+      input.style.fontSize = newIsVerySmallMobile ? '14px' : (newIsSmallMobile ? '16px' : (newIsMobile ? '18px' : (newIsSmallScreen ? '24px' : '28px')));
+      input.style.left = newIsMobile ? '12%' : '9%';
+      input.style.width = newIsMobile ? '60%' : '65%';
+      
+      // Update button size
+      const buttonSize = newIsVerySmallMobile ? '28px' : (newIsSmallMobile ? '35px' : (newIsMobile ? '40px' : (newIsSmallScreen ? '60px' : '80px')));
+      regenButton.style.width = buttonSize;
+      regenButton.style.height = buttonSize;
+      regenButton.style.right = newIsMobile ? '10%' : '6%';
+      regenButton.style.top = newIsMobile ? '50%' : '39%';
     };
-    regenButton.onmouseout = () => {
-      regenButton.style.backgroundColor = '#555';
-    };
+    
+    window.addEventListener('resize', handleResize);
     
     // Regenerate button click handler
     regenButton.addEventListener('click', () => {
@@ -379,28 +319,11 @@ function promptForUsername(playerData) {
       input.focus();
     });
     
-    // Submit button
-    const button = document.createElement('button');
-    button.textContent = 'Enter the Saloon';
-    button.style.padding = '12px 20px';
-    button.style.backgroundColor = '#8b0000';
-    button.style.color = '#fff';
-    button.style.border = 'none';
-    button.style.borderRadius = '4px';
-    button.style.cursor = 'pointer';
-    button.style.fontWeight = 'bold';
-    button.style.width = '100%';
-    button.style.fontFamily = 'Western, serif';
-    button.style.fontSize = '18px';
-    button.style.transition = 'background-color 0.2s';
-    
-    // Hover effect
-    button.onmouseover = () => {
-      button.style.backgroundColor = '#a00000';
-    };
-    button.onmouseout = () => {
-      button.style.backgroundColor = '#8b0000';
-    };
+    // Enter game button image
+    const enterGameImage = document.createElement('img');
+    enterGameImage.src = '/models/entergame.png';
+    enterGameImage.style.maxWidth = UI_CONSTANTS.ENTER_GAME_WIDTH;
+    enterGameImage.style.cursor = 'pointer';
     
     // Form handling
     const handleSubmit = () => {
@@ -422,13 +345,13 @@ function promptForUsername(playerData) {
           // Show warning
           input.style.border = '2px solid orange';
           setTimeout(() => {
-            input.style.border = '1px solid #8b4513';
+            input.style.border = 'none';
           }, 2000);
         }
         
         // Limit length
-        if (username.length > 20) {
-          username = username.substring(0, 20);
+        if (username.length > 16) {
+          username = username.substring(0, 16);
         }
         
         playerData.username = username;
@@ -448,19 +371,21 @@ function promptForUsername(playerData) {
         setTimeout(() => {
           if (modal.parentNode) {
             document.body.removeChild(modal);
+            // Remove resize listener when modal is closed
+            window.removeEventListener('resize', handleResize);
           }
           resolve(playerData);
         }, 300);
       } else {
         input.style.border = '2px solid red';
         setTimeout(() => {
-          input.style.border = '1px solid #8b4513';
+          input.style.border = 'none';
         }, 1000);
       }
     };
     
     // Add event listeners
-    button.addEventListener('click', handleSubmit);
+    enterGameImage.addEventListener('click', handleSubmit);
     input.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
         handleSubmit();
@@ -471,12 +396,13 @@ function promptForUsername(playerData) {
     setTimeout(() => input.focus(), 100);
     
     // Assemble modal
-    inputContainer.appendChild(input);
-    inputContainer.appendChild(regenButton);
-    modalContent.appendChild(logo);
-    modalContent.appendChild(title);
-    modalContent.appendChild(inputContainer);
-    modalContent.appendChild(button);
+    nameSubmitContainer.appendChild(nameSubmitImage);
+    nameSubmitContainer.appendChild(input);
+    nameSubmitContainer.appendChild(regenButton);
+    
+    modalContent.appendChild(titleImage);
+    modalContent.appendChild(nameSubmitContainer);
+    modalContent.appendChild(enterGameImage);
     modal.appendChild(modalContent);
     document.body.appendChild(modal);
     
