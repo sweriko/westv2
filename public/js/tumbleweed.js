@@ -275,6 +275,14 @@ export class Tumbleweed {
         this.animations['tumble'].stop();
       }
       
+      // Ensure sound is loaded before trying to play it
+      if (window.soundManager && !window.soundManager.buffers['tumbleweedexplode']) {
+        window.soundManager.loadSound('tumbleweedexplode', 'sounds/tumbleweedexplode.mp3', 'impact');
+      } else if (window.localPlayer && window.localPlayer.soundManager && 
+                !window.localPlayer.soundManager.buffers['tumbleweedexplode']) {
+        window.localPlayer.soundManager.loadSound('tumbleweedexplode', 'sounds/tumbleweedexplode.mp3', 'impact');
+      }
+      
       // Play explosion sound locally to the player
       if (window.soundManager) {
         // Play locally without position
@@ -817,14 +825,37 @@ export class Tumbleweed {
         window.localPlayer.soundManager.loadSound('tumbleweedexplode', 'sounds/tumbleweedexplode.mp3', 'impact');
       }
       
-      // In case the sound manager isn't created yet, retry after a short delay
-      setTimeout(() => {
+      // Setup retries in case the sound manager isn't created yet
+      let retryCount = 0;
+      const maxRetries = 5;
+      const retryDelay = 1000; // 1 second between retries
+      
+      const retryLoad = () => {
+        if (retryCount >= maxRetries) return;
+        
         if (window.soundManager) {
           window.soundManager.loadSound('tumbleweedexplode', 'sounds/tumbleweedexplode.mp3', 'impact');
+          // Verify it loaded correctly
+          if (window.soundManager.buffers['tumbleweedexplode']) {
+            console.log("Successfully loaded tumbleweedexplode sound");
+            return; // Successfully loaded
+          }
         } else if (window.localPlayer && window.localPlayer.soundManager) {
           window.localPlayer.soundManager.loadSound('tumbleweedexplode', 'sounds/tumbleweedexplode.mp3', 'impact');
+          // Verify it loaded correctly
+          if (window.localPlayer.soundManager.buffers['tumbleweedexplode']) {
+            console.log("Successfully loaded tumbleweedexplode sound");
+            return; // Successfully loaded
+          }
         }
-      }, 2000);
+        
+        // If we get here, retry again
+        retryCount++;
+        setTimeout(retryLoad, retryDelay);
+      };
+      
+      // Start retry process
+      setTimeout(retryLoad, retryDelay);
     }
   
     /**
