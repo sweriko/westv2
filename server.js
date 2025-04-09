@@ -124,6 +124,14 @@ const playerSequences = new Map(); // playerId -> last sequence number
 // Add NFT verification configuration
 // Hardcoded NFT token address for now (this would be a specific NFT or collection address)
 const SPECIAL_SKIN_NFT_ADDRESS = "3j4UKuFb7FDQ4ZNSbSujiak6Ps7AQVE9ynnLHorArzGz"; // Replace with actual Solana NFT mint address
+// You can add additional NFT addresses here
+const SPECIAL_SKIN_NFT_ADDRESSES = [
+  "3j4UKuFb7FDQ4ZNSbSujiak6Ps7AQVE9ynnLHorArzGz",
+  "81FNAomj6H5r2VJ3e5J6NLDShqiUaEbMwVuCssYpVm9E",
+  "58NysJG5K18zgLMN4uKVJ8HhetwwGz5fUDBCk52UfMtA",
+  "EsT86r7ZRAeqGaczHidEH8byaWjt4zgAWDLqRgNSN3i5",
+  // Add more NFT mint addresses here
+];
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY; // Helius API key
 const HELIUS_API_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
 
@@ -131,14 +139,17 @@ const HELIUS_API_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY
 const walletSkins = new Map(); // walletAddress -> { skins: { skinId: true }, ... }
 
 /**
- * Checks if a wallet owns a specific NFT via Helius API
+ * Checks if a wallet owns a specific NFT or any from a list via Helius API
  * @param {string} walletAddress - The wallet address to check
- * @param {string} nftAddress - The NFT mint address to verify ownership
- * @returns {Promise<boolean>} Whether the wallet owns the NFT
+ * @param {string|string[]} nftAddresses - Single NFT mint address or array of NFT mint addresses to verify ownership
+ * @returns {Promise<boolean>} Whether the wallet owns any of the NFTs
  */
-async function checkNftOwnership(walletAddress, nftAddress) {
+async function checkNftOwnership(walletAddress, nftAddresses) {
   try {
-    console.log(`Checking if wallet ${walletAddress} owns NFT ${nftAddress}`);
+    // Convert single address to array if needed
+    const addresses = Array.isArray(nftAddresses) ? nftAddresses : [nftAddresses];
+    
+    console.log(`Checking if wallet ${walletAddress} owns any of ${addresses.length} NFTs`);
     
     const response = await fetch(HELIUS_API_URL, {
       method: 'POST',
@@ -164,11 +175,11 @@ async function checkNftOwnership(walletAddress, nftAddress) {
       return false;
     }
     
-    // Check if the wallet owns the NFT
+    // Check if the wallet owns any of the NFTs
     const assets = data.result.items;
-    const ownsNft = assets.some(asset => asset.id === nftAddress);
+    const ownsNft = assets.some(asset => addresses.includes(asset.id));
     
-    console.log(`Wallet ${walletAddress} ${ownsNft ? 'owns' : 'does not own'} NFT ${nftAddress}`);
+    console.log(`Wallet ${walletAddress} ${ownsNft ? 'owns' : 'does not own'} one of the specified NFTs`);
     
     return ownsNft;
   } catch (error) {
@@ -184,8 +195,8 @@ async function checkNftOwnership(walletAddress, nftAddress) {
  */
 async function updatePlayerSkin(playerId, walletAddress) {
   try {
-    // Check if the wallet owns the special NFT
-    const ownsSpecialSkin = await checkNftOwnership(walletAddress, SPECIAL_SKIN_NFT_ADDRESS);
+    // Check if the wallet owns any of the special NFTs
+    const ownsSpecialSkin = await checkNftOwnership(walletAddress, SPECIAL_SKIN_NFT_ADDRESSES);
     
     // Update the player's skin permissions
     walletSkins.set(walletAddress, {
