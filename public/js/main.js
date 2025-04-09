@@ -887,6 +887,21 @@ function animate(time) {
 function handleLocalPlayerShoot(bulletStart, shootDir) {
   // Spawn bullet in our local game (client-side prediction)
   const bullet = spawnBullet(localPlayer.id, bulletStart, shootDir);
+  
+  // Create an array to track local bullet IDs if it doesn't exist
+  if (!window.localPlayer.lastFiredBulletIds) {
+    window.localPlayer.lastFiredBulletIds = [];
+  }
+  
+  // Add this bullet's ID to our tracking array (if it has one)
+  if (bullet && bullet.bulletId) {
+    window.localPlayer.lastFiredBulletIds.push(bullet.bulletId);
+    
+    // Keep the array size manageable (only store last 20 bullet IDs)
+    if (window.localPlayer.lastFiredBulletIds.length > 20) {
+      window.localPlayer.lastFiredBulletIds.shift();
+    }
+  }
 
   // Send bullet data over network
   networkManager.sendShoot({
@@ -934,6 +949,17 @@ function handleRemotePlayerShoot(playerId, bulletData, bulletId) {
     const startPos = new THREE.Vector3(bulletData.position.x, bulletData.position.y, bulletData.position.z);
     const dir = new THREE.Vector3(bulletData.direction.x, bulletData.direction.y, bulletData.direction.z);
     const bullet = new Bullet(startPos, dir, bulletId);
+    
+    // Track this bullet ID so we can identify it when impact comes back
+    if (!window.localPlayer.lastFiredBulletIds) {
+      window.localPlayer.lastFiredBulletIds = [];
+    }
+    window.localPlayer.lastFiredBulletIds.push(bulletId);
+    
+    // Keep the array size manageable
+    if (window.localPlayer.lastFiredBulletIds.length > 20) {
+      window.localPlayer.lastFiredBulletIds.shift();
+    }
     
     // Add to bullets array but skip the sound and effects
     bullet.isLocalBullet = true;
@@ -999,8 +1025,13 @@ function handleBulletImpact(bulletId, hitType, targetId, position, hitZone) {
       const defaultDir = new THREE.Vector3(0, 1, 0);
       createImpactEffect(impactPosition, defaultDir, scene, hitType);
       
-      // Play headshot sound if it was a headshot
-      if (hitZone === 'head' && localPlayer && localPlayer.soundManager) {
+      // Only play headshot sound if it was a headshot from another player (not local)
+      // Prevents double hitmarker sounds when a bullet is not found for a local hit
+      const isFromLocalPlayer = (window.localPlayer && 
+                              window.localPlayer.lastFiredBulletIds && 
+                              window.localPlayer.lastFiredBulletIds.includes(bulletId));
+      
+      if (hitZone === 'head' && localPlayer && localPlayer.soundManager && !isFromLocalPlayer) {
         // For headshots, play both a spatialized and a direct sound for better feedback
         // Direct non-spatialized sound for clear feedback
         localPlayer.soundManager.playSound("headshotmarker", 100, 0.8);

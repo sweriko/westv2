@@ -839,23 +839,11 @@ export class Bullet {
         if (hitType === 'player') {
           impactSound = "fleshimpact";
           
-          // If this is a local player's bullet, show hitmarker and play sound
+          // If this is a local player's bullet, we don't need to show hitmarker again
+          // because we already showed it in the update method when client detected the hit
           if (this.isLocalBullet) {
-            // Show hitmarker for 100ms
-            this.showHitMarker(position);
-            
-            // Play sound with 300ms delay
-            if (this.lastHitZone === 'head') {
-              // For headshots, only play the headshot sound (not both)
-              setTimeout(() => {
-                window.localPlayer.soundManager.playSound("headshotmarker", 100, 1.0);
-              }, 300);
-            } else {
-              // For body/limb hits, play regular hitmarker sound
-              setTimeout(() => {
-                window.localPlayer.soundManager.playSound("hitmarker", 100, 1.0);
-              }, 300);
-            }
+            // Don't show hitmarker or play hitmarker sound again (already done client-side)
+            // This prevents double hit markers on production servers
           }
           
           // Play headshot sound if the server reports it was a headshot
