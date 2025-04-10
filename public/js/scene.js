@@ -11,6 +11,14 @@ const SKYBOX_ROTATION_SPEED = 0.00001; // Much slower rotation speed
 // Add tumbleweed manager
 let tumbleweedManager;
 
+// Add texture state tracking
+const texturesLoaded = {
+  skyLoaded: false,
+  groundLoaded: false,
+  skyAttempts: 0,
+  groundAttempts: 0
+};
+
 /**
  * Initializes the Three.js scene, camera, and renderer.
  * @returns {Object} - Contains the camera and renderer.
@@ -33,8 +41,13 @@ export function initScene() {
   // Initialize with a desert sand color instead of blue
   scene.background = new THREE.Color(0xec9e5c);
   
-  // Load the two skybox parts - ground and sky
-  loadTwoPartSkybox();
+  // Preload textures before creating skybox
+  THREE.Cache.enabled = true;
+  // Start loading skybox immediately
+  preloadSkyboxTextures(() => {
+    // Load the two skybox parts after preloading
+    loadTwoPartSkybox();
+  });
   
   // Change fog color to match desert colors instead of blue
   const desertFogColor = new THREE.Color(0xec9e5c); // Desert sand color
@@ -70,6 +83,56 @@ export function initScene() {
 }
 
 /**
+ * Preloads skybox textures to ensure they're in memory
+ * @param {Function} callback - Function to call when preloading is complete
+ */
+function preloadSkyboxTextures(callback) {
+  const textureLoader = new THREE.TextureLoader();
+  let loadedCount = 0;
+  const totalTextures = 2;
+  
+  // Add cache-busting query parameter
+  const timestamp = Date.now();
+  const skyUrl = `models/skypart.png?t=${timestamp}`;
+  const groundUrl = `models/groundpart.png?t=${timestamp}`;
+  
+  function checkAllLoaded() {
+    loadedCount++;
+    if (loadedCount >= totalTextures) {
+      callback();
+    }
+  }
+
+  // Preload the sky texture
+  textureLoader.load(
+    skyUrl,
+    () => {
+      console.log("Sky texture preloaded successfully");
+      checkAllLoaded();
+    },
+    undefined,
+    () => {
+      console.warn("Sky texture preload failed, continuing anyway");
+      checkAllLoaded();
+    }
+  );
+  
+  // Preload the ground texture
+  textureLoader.load(
+    groundUrl,
+    () => {
+      console.log("Ground texture preloaded successfully");
+      checkAllLoaded();
+    },
+    undefined,
+    () => {
+      console.warn("Ground texture preload failed, continuing anyway");
+      checkAllLoaded();
+    }
+  );
+}
+
+/**
  * Loads the two-part skybox with separate ground and animated sky
  */
 function loadTwoPartSkybox() {
@@ -79,6 +142,13 @@ function loadTwoPartSkybox() {
   // Function to create sky part with a texture
   function createSkyPart(skyTexture) {
     console.log("Creating sky part with texture");
+    
+    // Verify if texture is valid before proceeding
+    if (!skyTexture.image || !skyTexture.image.width || !skyTexture.image.height) {
+      console.error("Sky texture is invalid, using fallback instead");
+      createFallbackSkyPart();
+      return;
+    }
     
     // Create sky mesh with LARGER radius (1.01x)
     const skyGeometry = new THREE.SphereGeometry(skyboxRadius * 1.01, 64, 32);
@@ -90,14 +160,56 @@ function loadTwoPartSkybox() {
       fog: false
     });
     
+    // Cleanup previous mesh if exists
+    if (skyMesh) {
+      scene.remove(skyMesh);
+      skyMesh.geometry.dispose();
+      skyMesh.material.dispose();
+    }
+    
     skyMesh = new THREE.Mesh(skyGeometry, skyMaterial);
     scene.add(skyMesh);
+    texturesLoaded.skyLoaded = true;
     console.log("Sky part added to scene");
+  }
+  
+  // Function to create fallback sky part
+  function createFallbackSkyPart() {
+    console.log("Creating fallback sky part");
+    
+    // Create fallback sky with solid color
+    const skyGeometry = new THREE.SphereGeometry(skyboxRadius * 1.01, 64, 32);
+    skyGeometry.scale(-1, 1, 1);
+    
+    const skyMaterial = new THREE.MeshBasicMaterial({
+      color: 0x87CEEB, // Sky blue
+      side: THREE.BackSide,
+      fog: false
+    });
+    
+    // Cleanup previous mesh if exists
+    if (skyMesh) {
+      scene.remove(skyMesh);
+      skyMesh.geometry.dispose();
+      skyMesh.material.dispose();
+    }
+    
+    skyMesh = new THREE.Mesh(skyGeometry, skyMaterial);
+    scene.add(skyMesh);
+    texturesLoaded.skyLoaded = true;
+    console.log("Fallback sky part added to scene");
   }
   
   // Function to create ground part with a texture
   function createGroundPart(groundTexture) {
     console.log("Creating ground part with texture");
+    
+    // Verify if texture is valid before proceeding
+    if (!groundTexture.image || !groundTexture.image.width || !groundTexture.image.height) {
+      console.error("Ground texture is invalid, using fallback instead");
+      createFallbackGroundPart();
+      return;
+    }
     
     // Create ground mesh with normal radius
     const groundGeometry = new THREE.SphereGeometry(skyboxRadius, 64, 32);
@@ -109,17 +221,57 @@ function loadTwoPartSkybox() {
       fog: false
     });
     
+    // Cleanup previous mesh if exists
+    if (groundMesh) {
+      scene.remove(groundMesh);
+      groundMesh.geometry.dispose();
+      groundMesh.material.dispose();
+    }
+    
     groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
     scene.add(groundMesh);
+    texturesLoaded.groundLoaded = true;
     console.log("Ground part added to scene");
   }
   
-  // Function to load sky texture with retry capability
+  // Function to create fallback ground part
+  function createFallbackGroundPart() {
+    console.log("Creating fallback ground part");
+    
+    // Create fallback ground with solid color
+    const groundGeometry = new THREE.SphereGeometry(skyboxRadius, 64, 32);
+    groundGeometry.scale(-1, 1, 1);
+    
+    const groundMaterial = new THREE.MeshBasicMaterial({
+      color: 0xAA7755, // Desert sand color
+      side: THREE.BackSide,
+      fog: false
+    });
+    
+    // Cleanup previous mesh if exists
+    if (groundMesh) {
+      scene.remove(groundMesh);
+      groundMesh.geometry.dispose();
+      groundMesh.material.dispose();
+    }
+    
+    groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
+    scene.add(groundMesh);
+    texturesLoaded.groundLoaded = true;
+    console.log("Fallback ground part added to scene");
+  }
+  
+  // Function to load sky texture with retry capability and cache-busting
   function loadSkyTexture(retryCount = 0) {
     const maxRetries = 3;
+    texturesLoaded.skyAttempts++;
+    
+    // Add cache-busting query param
+    const timestamp = Date.now();
+    const url = `models/skypart.png?t=${timestamp}`;
     
     textureLoader.load(
-      'models/skypart.png',
+      url,
       function(skyTexture) {
         console.log("Sky texture loaded successfully");
         skyTexture.needsUpdate = true; // Ensure texture is updated
@@ -138,39 +290,32 @@ function loadTwoPartSkybox() {
       function(error) {
         console.error('Error loading sky texture:', error);
         
-        // Retry logic
+        // Retry logic with increasing delay
         if (retryCount < maxRetries) {
-          console.log(`Retrying sky texture load (attempt ${retryCount + 1}/${maxRetries})...`);
+          const delay = 500 * Math.pow(2, retryCount); // Exponential backoff: 500ms, 1000ms, 2000ms
+          console.log(`Retrying sky texture load (attempt ${retryCount + 1}/${maxRetries}) in ${delay}ms...`);
           setTimeout(() => {
             loadSkyTexture(retryCount + 1);
-          }, 500); // Wait 500ms before retrying
+          }, delay);
         } else {
           console.error('Failed to load sky texture after multiple attempts');
-          
-          // Create a plain colored sky as fallback
-          const fallbackMaterial = new THREE.MeshBasicMaterial({
-            color: 0x87CEEB, // Sky blue
-            side: THREE.BackSide,
-            fog: false
-          });
-          
-          const skyGeometry = new THREE.SphereGeometry(skyboxRadius * 1.01, 64, 32);
-          skyGeometry.scale(-1, 1, 1);
-          
-          skyMesh = new THREE.Mesh(skyGeometry, fallbackMaterial);
-          scene.add(skyMesh);
-          console.log("Fallback sky part added to scene");
+          createFallbackSkyPart();
         }
       }
     );
   }
   
-  // Function to load ground texture with retry capability
+  // Function to load ground texture with retry capability and cache-busting
   function loadGroundTexture(retryCount = 0) {
     const maxRetries = 3;
+    texturesLoaded.groundAttempts++;
+    
+    // Add cache-busting query param
+    const timestamp = Date.now();
+    const url = `models/groundpart.png?t=${timestamp}`;
     
     textureLoader.load(
-      'models/groundpart.png',
+      url,
       function(groundTexture) {
         console.log("Ground texture loaded successfully");
         groundTexture.needsUpdate = true; // Ensure texture is updated
@@ -189,28 +334,16 @@ function loadTwoPartSkybox() {
       function(error) {
         console.error('Error loading ground texture:', error);
         
-        // Retry logic
+        // Retry logic with increasing delay
         if (retryCount < maxRetries) {
-          console.log(`Retrying ground texture load (attempt ${retryCount + 1}/${maxRetries})...`);
+          const delay = 500 * Math.pow(2, retryCount); // Exponential backoff: 500ms, 1000ms, 2000ms
+          console.log(`Retrying ground texture load (attempt ${retryCount + 1}/${maxRetries}) in ${delay}ms...`);
           setTimeout(() => {
             loadGroundTexture(retryCount + 1);
-          }, 500); // Wait 500ms before retrying
+          }, delay);
         } else {
           console.error('Failed to load ground texture after multiple attempts');
-          
-          // Create a plain colored ground as fallback
-          const fallbackMaterial = new THREE.MeshBasicMaterial({
-            color: 0xAA7755, // Desert sand color
-            side: THREE.BackSide,
-            fog: false
-          });
-          
-          const groundGeometry = new THREE.SphereGeometry(skyboxRadius, 64, 32);
-          groundGeometry.scale(-1, 1, 1);
-          
-          groundMesh = new THREE.Mesh(groundGeometry, fallbackMaterial);
-          scene.add(groundMesh);
-          console.log("Fallback ground part added to scene");
+          createFallbackGroundPart();
         }
       }
     );
@@ -219,6 +352,18 @@ function loadTwoPartSkybox() {
   // Start the texture loading with retry capability
   loadSkyTexture();
   loadGroundTexture();
+  
+  // Safety check - if textures aren't loaded after 10 seconds, use fallbacks
+  setTimeout(() => {
+    if (!texturesLoaded.skyLoaded && texturesLoaded.skyAttempts < 4) {
+      console.warn("Sky texture not loaded after timeout, using fallback");
+      createFallbackSkyPart();
+    }
+    if (!texturesLoaded.groundLoaded && texturesLoaded.groundAttempts < 4) {
+      console.warn("Ground texture not loaded after timeout, using fallback");
+      createFallbackGroundPart();
+    }
+  }, 10000);
 }
 
 /**
@@ -477,6 +622,12 @@ export function updateFPS(renderer, camera, deltaTime) {
   // Safely rotate the sky part of the skybox if it exists
   if (skyMesh && skyMesh.rotation) {
     skyMesh.rotation.y += SKYBOX_ROTATION_SPEED * deltaTime * 1000; // Convert to milliseconds
+  } else if (!skyMesh && !texturesLoaded.skyLoaded) {
+    // If skyMesh doesn't exist but should be loaded, attempt recovery
+    if (texturesLoaded.skyAttempts < 4) {
+      console.warn("Sky mesh missing in animation loop, attempting recovery");
+      loadTwoPartSkybox();
+    }
   }
   
   // Update tumbleweeds if manager exists
