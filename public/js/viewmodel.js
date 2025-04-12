@@ -1056,8 +1056,44 @@ export class Viewmodel {
    * @param {number} deltaTime - Time since last frame in seconds
    */
   update(deltaTime) {
-    if (this.mixer) {
-      this.mixer.update(deltaTime);
+    if (!this.isLoaded || !this.mixer) return;
+    
+    this.mixer.update(deltaTime);
+    
+    // Add animation state monitoring to detect and recover from stuck animations
+    if (!this._stateStartTime) {
+      this._stateStartTime = {};
+      this._lastAnimationState = '';
+    }
+    
+    // If animation state changed, record the start time
+    if (this.animationState !== this._lastAnimationState) {
+      this._stateStartTime[this.animationState] = Date.now();
+      this._lastAnimationState = this.animationState;
+    }
+    
+    // Check for stuck animations - if an animation has been playing too long
+    if (this.animationState && this._stateStartTime[this.animationState]) {
+      const timeInState = Date.now() - this._stateStartTime[this.animationState];
+      
+      // Empty and holster animations can get stuck
+      if ((this.animationState.includes('empty') || this.animationState.includes('holster')) && 
+          timeInState > 5000) { // 5 seconds is too long for these animations
+        console.warn(`Animation stuck in ${this.animationState} for ${timeInState}ms, resetting`);
+        
+        // Force reset animation flags
+        this.blockHolster = false;
+        this.pendingHolster = false;
+        this.forceVisible = false;
+        
+        // Reset to idle state
+        this._transitionTo('idle', {
+          resetTimeOnPlay: true
+        });
+        
+        // Reset timer
+        this._stateStartTime = {};
+      }
     }
   }
   

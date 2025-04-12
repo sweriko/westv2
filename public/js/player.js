@@ -15,6 +15,9 @@ export class Player {
    * @param {Function} config.onShoot - A callback function called when the player fires a bullet.
    */
   constructor({ scene, camera, soundManager, onShoot }) {
+    // Enable ammo debugging by default
+    window.debugAmmo = true;
+    
     this.scene = scene;
     this.camera = camera;
     this.soundManager = soundManager;
@@ -81,7 +84,14 @@ export class Player {
     this.isReloading = false;
     this.reloadTime = 4000; // Changed from 2000ms to 4000ms (4 seconds)
     this.reloadProgress = 0;
-    this.bullets = 6;
+    
+    // Track bullets for each weapon type separately
+    this.weaponAmmo = {
+      revolver: 6,
+      shotgun: 2
+    };
+    
+    this.bullets = 6; // Current active weapon's bullets
     this.maxBullets = 6;
     this.canShoot = true;
 
@@ -237,6 +247,10 @@ export class Player {
       // Update health and bullets
       this.health = health || 100;
       this.bullets = bullets || this.maxBullets;
+      
+      // Sync weapon ammo with bullets
+      this.weaponAmmo[this.activeWeapon] = this.bullets;
+      this._syncWeaponAmmo();
       
       // Reset states
       this.isReloading = false;
@@ -844,6 +858,10 @@ export class Player {
     
     // Actually shoot
     this.bullets--;
+    
+    // Update weapon-specific ammo storage and ensure consistency
+    this._syncWeaponAmmo();
+    
     updateAmmoUI(this);
 
     this.canShoot = false;
@@ -981,7 +999,15 @@ export class Player {
     this.spawnPlayerRandomly();
     
     // Reset weapon state
-    this.bullets = this.maxBullets;
+    // Reset ammo for all weapons
+    this.weaponAmmo = {
+      revolver: this.weaponStats.revolver.maxBullets,
+      shotgun: this.weaponStats.shotgun.maxBullets
+    };
+    
+    // Set active weapon's bullets
+    this.bullets = this.weaponAmmo[this.activeWeapon];
+    
     this.isReloading = false;
     this.canAim = true;
     this.isAiming = false;
@@ -1071,7 +1097,12 @@ export class Player {
    * Complete the reload process
    */
   completeReload() {
-    this.bullets = this.maxBullets; // This will now use the current weapon's max bullets
+    // Update bullets to max
+    this.bullets = this.maxBullets;
+    
+    // Sync weapon ammo state
+    this._syncWeaponAmmo();
+    
     updateAmmoUI(this);
 
     const reloadProgressContainer = document.getElementById('reload-progress-container');
@@ -1298,9 +1329,7 @@ export class Player {
         
         // Get the world position/rotation of this shape
         const shapePos = new CANNON.Vec3();
-        const shapeQuat = new CANNON.Quaternion();
         body.pointToWorldFrame(body.shapeOffsets[i], shapePos);
-        body.quaternion.mult(body.shapeOrientations[i], shapeQuat);
         
         // Convert to THREE.js objects
         const boxPos = new THREE.Vector3(shapePos.x, shapePos.y, shapePos.z);
@@ -1611,6 +1640,23 @@ export class Player {
   }
 
   /**
+   * Syncs the weapon ammo state to ensure consistency
+   * @private
+   */
+  _syncWeaponAmmo() {
+    // Ensure the current weapon's ammo in weaponAmmo matches bullets
+    this.weaponAmmo[this.activeWeapon] = this.bullets;
+    
+    // Ensure max bullets is consistent with weapon stats
+    this.maxBullets = this.weaponStats[this.activeWeapon].maxBullets;
+    
+    // Log ammo state for debugging
+    if (window.debugAmmo) {
+      console.log(`[AMMO] ${this.activeWeapon}: ${this.bullets}/${this.maxBullets} (Revolver: ${this.weaponAmmo.revolver}, Shotgun: ${this.weaponAmmo.shotgun})`);
+    }
+  }
+
+  /**
    * Switch to a different weapon
    * @param {string} weaponType - The weapon type to switch to ('revolver' or 'shotgun')
    */
@@ -1619,8 +1665,25 @@ export class Player {
       return; // Already using this weapon or currently reloading
     }
     
+    // Force sync current weapon ammo to ensure it's saved correctly
+    this._syncWeaponAmmo();
+    
     // Remember previous weapon for animation transitions
     const prevWeapon = this.activeWeapon;
+    
+    // Log the current ammo state before switching
+    if (window.debugAmmo) {
+      console.log(`[SWITCH] FROM ${prevWeapon}(${this.bullets}) TO ${weaponType}(${this.weaponAmmo[weaponType]})`);
+    }
+    
+    // Check if we're in a special animation state that might cause issues
+    const currentAnimState = this.viewmodel ? this.viewmodel.animationState : 'idle';
+    const isInBlockingAnimation = currentAnimState === `${prevWeapon}empty` || 
+                                  currentAnimState === `${prevWeapon}shot` ||
+                                  this.viewmodel.blockHolster;
+    
+    // Save current weapon's ammo state
+    this.weaponAmmo[prevWeapon] = this.bullets;
     
     // Update weapon type
     this.activeWeapon = weaponType;
@@ -1629,9 +1692,12 @@ export class Player {
     this.maxBullets = this.weaponStats[weaponType].maxBullets;
     this.reloadTime = this.weaponStats[weaponType].reloadTime;
     
-    // If no bullets, set to max for the new weapon
-    if (this.bullets <= 0 || this.bullets > this.maxBullets) {
-      this.bullets = this.maxBullets;
+    // Restore the new weapon's ammo state
+    this.bullets = this.weaponAmmo[weaponType];
+    
+    // Log the new ammo state after switching
+    if (window.debugAmmo) {
+      console.log(`[SWITCH] COMPLETE - Now ${this.activeWeapon} with ${this.bullets} bullets`);
     }
     
     // Update UI
@@ -1640,10 +1706,40 @@ export class Player {
     // Update weapon indicators in UI
     this.updateWeaponIndicators();
     
+    // Reset viewmodel animation flags if switching from a blocking animation state
+    if (isInBlockingAnimation && this.viewmodel) {
+      console.log(`Resetting viewmodel flags when switching from ${currentAnimState}`);
+      this.viewmodel.blockHolster = false;
+      this.viewmodel.pendingHolster = false;
+      this.viewmodel.forceVisible = false;
+      
+      // Force animation state to idle to ensure clean transition
+      this.viewmodel._transitionTo('idle', {
+        resetTimeOnPlay: true,
+        onComplete: () => {
+          // After forcing idle, setup for the next animation
+          if (this.isAiming) {
+            // Small delay to ensure state is stable
+            setTimeout(() => {
+              if (this.isAiming) {
+                this.viewmodel.playDrawAim();
+              }
+            }, 50);
+          }
+        }
+      });
+      
+      // If not aiming, return early to avoid additional animation calls
+      if (!this.isAiming) {
+        console.log(`Switched to ${weaponType} (not aiming)`);
+        return;
+      }
+    }
+    
     // If currently aiming, transition to the new weapon's aim animation
     if (this.isAiming && this.viewmodel) {
-      // Check current animation state to properly transition
-      const currentAnimState = this.viewmodel.animationState;
+      // If we just reset to idle, let the callback handle it
+      if (isInBlockingAnimation) return;
       
       // For clean transition, first holster current weapon
       this.viewmodel.animationState = `${prevWeapon}aim`; // Force the correct state for holstering
