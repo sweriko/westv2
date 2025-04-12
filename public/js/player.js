@@ -797,6 +797,9 @@ export class Player {
     });
   }
 
+  /**
+   * Handle shooting logic
+   */
   shoot() {
     if (this.bullets <= 0 || !this.canShoot || this.isReloading) {
       // No bullets or can't shoot
@@ -804,7 +807,7 @@ export class Player {
         const reloadMessage = document.getElementById('reload-message');
         if (reloadMessage) reloadMessage.style.display = 'block';
         
-        // Play the fakeshoot animation when no ammo
+        // Play the empty gun animation when no ammo
         if (this.isAiming && this.viewmodel) {
           this.viewmodel.playFakeShootAnim();
           
@@ -825,7 +828,7 @@ export class Player {
     this.canShoot = false;
     setTimeout(() => { this.canShoot = true; }, 250);
 
-    // Play the shooting animation on the viewmodel
+    // Play the shooting animation on the viewmodel if aiming
     if (this.isAiming) {
       this.viewmodel.playShootAnim();
     }
@@ -961,6 +964,9 @@ export class Player {
     console.log('Player respawned');
   }
 
+  /**
+   * Start the reload process
+   */
   startReload() {
     if (this.isReloading || this.bullets >= this.maxBullets) return;
 
@@ -971,7 +977,12 @@ export class Player {
     if (reloadMessage) reloadMessage.style.display = 'none';
     if (reloadProgressContainer) reloadProgressContainer.style.display = 'block';
 
-    // Always make sure viewmodel is visible during reload, regardless of aim state
+    // Reset aim state tracking to ensure it's synchronized with reload
+    if (this.updateAiming && typeof this.updateAiming.lastAimingState !== 'undefined') {
+      this.updateAiming.lastAimingState = this.isAiming;
+    }
+
+    // Always make sure viewmodel is visible during reload
     if (this.viewmodel) {
       this.viewmodel.group.visible = true;
       this.viewmodel.playReloadAnim();
@@ -1001,6 +1012,9 @@ export class Player {
     requestAnimationFrame(updateReload);
   }
 
+  /**
+   * Complete the reload process
+   */
   completeReload() {
     this.bullets = this.maxBullets;
     updateAmmoUI(this);
@@ -1012,16 +1026,24 @@ export class Player {
     
     this.isReloading = false;
 
-    // After reload, hide viewmodel if not aiming
-    if (this.viewmodel && !this.isAiming) {
-      // Play holster animation and then hide
-      this.viewmodel.playHolsterAnim();
+    // After reload finishes, we don't need to do anything with animations
+    // The viewmodel.playReloadAnim's onComplete already handles the transition to idle
+    // Just ensure visibility is properly managed after the animation finishes
+    if (this.viewmodel) {
+      // Update aim state tracking to ensure aim toggle detection will work properly
+      if (this.updateAiming && typeof this.updateAiming.lastAimingState !== 'undefined') {
+        // Force aim state to be correctly tracked
+        this.updateAiming.lastAimingState = this.isAiming;
+      }
       
-      setTimeout(() => {
-        if (!this.isAiming && !this.isReloading) {
-          this.viewmodel.group.visible = false;
-        }
-      }, 800); // Increased from 500ms to 800ms to allow for longer holster animation
+      // Let the animation system handle visibility
+      if (!this.isAiming) {
+        setTimeout(() => {
+          if (!this.isAiming && this.viewmodel && !this.viewmodel.forceVisible) {
+            this.viewmodel.group.visible = false;
+          }
+        }, 500);
+      }
     }
     
     this.sendNetworkUpdate(); // let others know
@@ -1066,23 +1088,58 @@ export class Player {
         // Starting to aim - play draw animation and show model
         this.viewmodel.group.visible = true;
         
-        // Only play the draw animation if we're not already in a shooting animation
-        if (!this.viewmodel.isInShootAnimation()) {
+        // In idle state (possibly after reload), always allow draw animation
+        if (this.viewmodel.animationState === 'idle') {
+          this.viewmodel.blockHolster = false;
+          this.viewmodel.pendingHolster = false;
+        }
+        
+        // Handle case when trying to aim during reload
+        if (this.viewmodel.animationState === 'revolverreload') {
+          // Don't play draw animation now, the reload onComplete will handle it
+          // Just update state tracking
+        } else {
+          // Always play the draw animation when toggling aim for other states
           this.viewmodel.playDrawAim();
         }
       } else {
-        // Only holster if not in a forced-visible state (fakeshoot or reload)
-        if (!this.viewmodel.forceVisible) {
+        // Stopping aim - handle holstering
+        
+        // If we're in draw animation, explicitly set pendingHolster to true to 
+        // ensure the viewmodel knows we want to holster after draw completes
+        if (this.viewmodel.animationState === 'revolverdraw') {
+          this.viewmodel.pendingHolster = true;
+        }
+        
+        // Handle case when toggling aim after reload or other animations
+        // Make sure we can always holster after animations finish
+        if (this.viewmodel.animationState === 'idle' || 
+            this.viewmodel.animationState === 'revolveraim') {
+          this.viewmodel.blockHolster = false;
+          this.viewmodel.pendingHolster = false; // Reset any pending holster flag
+        }
+        
+        // Reset any stuck flags in other states
+        if (this.viewmodel.animationState === 'revolverreload' || 
+            this.viewmodel.animationState === 'revolvershot' ||
+            this.viewmodel.animationState === 'revolverempty') {
+          this.viewmodel.pendingHolster = true;
+        }
+        
+        // Only holster if not in a forced-visible state
+        if (!this.viewmodel.blockHolster) {
           // Stopping aim - play holster animation
           this.viewmodel.playHolsterAnim();
           
-          // When holster animation finishes, hide the model
+          // When holster animation finishes, hide the model if needed
+          const holsterDuration = this.viewmodel.actions.revolverholster._clip.duration * 1000;
+          
           setTimeout(() => {
             if (!this.isAiming && !this.viewmodel.forceVisible) { 
               // Double-check we're still not aiming and not forced visible
               this.viewmodel.group.visible = false;
             }
-          }, 800); // Increased from 500ms to 800ms to allow for longer holster animation
+          }, holsterDuration + 100); // Add a small buffer to ensure animation completes
         }
       }
       
@@ -1090,8 +1147,17 @@ export class Player {
       this.updateAiming.lastAimingState = this.isAiming;
     }
     
-    // Always keep the gun visible if forceVisible is set (fakeshoot, reload, etc.)
-    if (this.viewmodel.forceVisible) {
+    // Special case: in aim state but stuck with blockHolster flag
+    // This helps recover from cases where state gets out of sync after reload
+    if (!this.isAiming && this.viewmodel.animationState === 'revolveraim' && 
+        this.viewmodel.blockHolster) {
+      // Force the blockHolster flag to false so we can holster
+      this.viewmodel.blockHolster = false;
+      this.viewmodel.playHolsterAnim();
+    }
+    
+    // Always keep the gun visible if forceVisible is set
+    if (this.viewmodel && this.viewmodel.forceVisible) {
       this.viewmodel.group.visible = true;
     }
     
