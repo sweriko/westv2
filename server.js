@@ -2881,10 +2881,15 @@ function npcShootAtPlayer(npcId, targetPlayerId) {
       targetPlayer.ws.send(JSON.stringify({
         type: 'hit',
         sourceId: npcId,
-        hitData: hitData,
+        hitData: {
+          position: hitData.position,
+          hitZone: 'body',
+          damage: 40 // Explicitly include damage value
+        },
         hitZone: 'body',
         health: targetPlayer.health,
-        isNpc: true
+        isNpc: true,
+        damage: 40 // Include damage at top level for backwards compatibility
       }));
     }
     

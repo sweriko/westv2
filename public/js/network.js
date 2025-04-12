@@ -337,6 +337,28 @@ export class NetworkManager {
         
         if (!isQuickDrawDuel && this.onPlayerHit) {
           // Only handle non-QuickDraw hits here
+          
+          // Add damage to hitData if it's missing (for NPC hits)
+          let damage = 40; // Default body shot damage
+          if (message.hitZone === 'head') {
+            damage = 100;
+          } else if (message.hitZone === 'limbs') {
+            damage = 20;
+          }
+          
+          // If hitData is missing (from NPC), create it
+          if (!message.hitData) {
+            message.hitData = {
+              damage: damage,
+              hitZone: message.hitZone || 'body'
+            };
+          }
+          
+          // Ensure damage property exists in hitData
+          if (message.hitData && !message.hitData.damage) {
+            message.hitData.damage = damage;
+          }
+          
           this.onPlayerHit(message.sourceId, message.hitData, message.health, message.hitZone);
         } else if (isQuickDrawDuel) {
           console.log(`[Network] Deferring hit handling to QuickDraw system`);

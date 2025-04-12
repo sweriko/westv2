@@ -213,7 +213,10 @@ export class MultiplayerManager {
         // Calculate damage based on the health difference or hit zone
         let damage = 20; // Default damage
         
-        if (newHealth !== undefined) {
+        // Check if hitData contains a damage value directly
+        if (hitData && typeof hitData.damage === 'number') {
+          damage = hitData.damage;
+        } else if (newHealth !== undefined) {
           // Calculate damage from previous health
           damage = window.localPlayer.health - newHealth;
           window.localPlayer.health = newHealth;
@@ -231,8 +234,12 @@ export class MultiplayerManager {
           window.localPlayer.takeDamage(damage, hitZone);
         }
         
+        // Make sure damage is a number
+        damage = Number(damage) || 40; // Default to 40 if conversion fails
+        
         // Show damage indicator with proper hit zone
         if (typeof showDamageIndicator === 'function') {
+          console.log(`Showing damage indicator: ${damage} damage to ${hitZone}`);
           showDamageIndicator(damage, hitZone);
         }
         
