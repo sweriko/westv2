@@ -396,6 +396,7 @@ export class Viewmodel {
     else if (actionName === 'revolverreload') {
       // Clear all animation state flags to ensure we start fresh
       this.pendingAimTransition = false;
+      this.blockHolster = false; // Allow interrupting even revolverempty
       
       // Clear any pending animation timeouts
       if (this._actionTimeoutId) {
@@ -407,10 +408,23 @@ export class Viewmodel {
         this._holsterTimeoutId = null;
       }
     }
+    // Special case: When transitioning from revolverempty to idle or revolveraim, ensure clean state
+    else if (this.animationState === 'revolverempty' && 
+            (actionName === 'idle' || actionName === 'revolveraim')) {
+      // Reset all animation flags for a fresh state
+      this.blockHolster = false;
+      this.pendingHolster = false;
+      this.pendingAimTransition = false;
+    }
+    // If currently playing the empty animation, don't allow interruptions except reload
+    else if (this.animationState === 'revolverempty' && actionName !== 'revolverreload') {
+      // Don't allow any animation to interrupt empty except reload
+      return;
+    }
     // If currently playing the holster animation and it was manually blocked (user initiated),
     // don't allow other animations to interrupt it unless explicitly allowed
     else if (this.animationState === 'revolverholster' && this.blockHolster && 
-        actionName !== 'idle' && actionName !== 'revolverempty' && actionName !== 'revolverreload') {
+          actionName !== 'idle' && actionName !== 'revolverempty' && actionName !== 'revolverreload') {
       // For certain critical animations (empty/reload), we'll queue them for after holster
       if (actionName === 'revolverempty' || actionName === 'revolverreload') {
         this._queueAnimation(actionName, options);
@@ -619,14 +633,55 @@ export class Viewmodel {
     // Make sure the model is visible
     this.group.visible = true;
     
-    // Can only shoot if in aim mode
+    // Can only shoot if in aim mode or already shooting
     if (this.animationState !== 'revolveraim' && 
         this.animationState !== 'revolverdraw' && 
         this.animationState !== 'revolvershot') {
       return;
     }
     
-    // Transition to shoot animation
+    // For rapid fire shooting, if we're already in the shoot animation,
+    // cancel the current animation and any pending callback
+    if (this.animationState === 'revolvershot') {
+      // Cancel pending callback for the current shot animation
+      if (this._actionTimeoutId) {
+        clearTimeout(this._actionTimeoutId);
+        this._actionTimeoutId = null;
+      }
+      
+      // Reset the shot animation to play from the beginning
+      const shootAction = this.actions.revolvershot;
+      shootAction.reset();
+      shootAction.time = 0;
+      shootAction.enabled = true;
+      shootAction.setEffectiveWeight(1);
+      shootAction.play();
+      
+      // Set up a new completion callback
+      const clipDuration = shootAction._clip.duration;
+      const timeoutDuration = clipDuration * 1000 - 50;
+      
+      this._actionTimeoutId = setTimeout(() => {
+        if (this.primaryAction === shootAction) {
+          this._actionTimeoutId = null;
+          
+          // After shot animation completes, go back to aim loop if still aiming
+          if (!this.blockHolster && !this.pendingHolster) {
+            this._transitionTo('revolveraim', {
+              resetTimeOnPlay: true
+            });
+          } else if (this.pendingHolster) {
+            // Player stopped aiming during the shot, play holster
+            this.pendingHolster = false;
+            this.playHolsterAnim();
+          }
+        }
+      }, timeoutDuration);
+      
+      return;
+    }
+    
+    // For first shot, transition to shoot animation normally
     this._transitionTo('revolvershot', {
       resetTimeOnPlay: true,
       onComplete: () => {
@@ -653,26 +708,62 @@ export class Viewmodel {
     // Make sure the model is visible
     this.group.visible = true;
     
-    // Block holstering until empty animation completes
+    // Block everything until empty animation completes
+    // This ensures it can't be interrupted except by reload
     this.blockHolster = true;
     this.pendingHolster = false;
     this.forceVisible = true; // Force viewmodel to stay visible
+    
+    // Cancel any pending callbacks that might interfere
+    if (this._actionTimeoutId) {
+      clearTimeout(this._actionTimeoutId);
+      this._actionTimeoutId = null;
+    }
+    if (this._holsterTimeoutId) {
+      clearTimeout(this._holsterTimeoutId);
+      this._holsterTimeoutId = null;
+    }
+    
+    // Reset all animations to ensure clean state
+    Object.values(this.actions).forEach(action => {
+      if (action !== this.actions.revolverempty) {
+        action.reset();
+        action.setEffectiveWeight(0);
+      }
+    });
     
     // Transition to empty animation
     this._transitionTo('revolverempty', {
       resetTimeOnPlay: true,
       onComplete: () => {
-        // After empty animation completes
+        // Perform a complete reset of all animation state flags
         this.blockHolster = false;
+        this.pendingHolster = false;
         this.forceVisible = false;
+        this.pendingAimTransition = false;
         
-        // Check if player released aim during the animation
-        if (this.pendingHolster) {
-          this.pendingHolster = false;
-          this.playHolsterAnim();
-        } else {
-          // Go back to aim loop if still aiming
+        // Clear any pending timeouts again to be absolutely sure
+        if (this._actionTimeoutId) {
+          clearTimeout(this._actionTimeoutId);
+          this._actionTimeoutId = null;
+        }
+        if (this._holsterTimeoutId) {
+          clearTimeout(this._holsterTimeoutId);
+          this._holsterTimeoutId = null;
+        }
+        
+        // Get current aim state - default to idle if we can't determine
+        const isAimingNow = window.localPlayer && window.localPlayer.isAiming || false;
+        
+        // Transition based on current aim state - default to idle
+        if (isAimingNow) {
+          // If still aiming, go to aim loop
           this._transitionTo('revolveraim', {
+            resetTimeOnPlay: true
+          });
+        } else {
+          // If not aiming or can't determine, default to idle
+          this._transitionTo('idle', {
             resetTimeOnPlay: true
           });
         }

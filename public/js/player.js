@@ -807,14 +807,17 @@ export class Player {
         const reloadMessage = document.getElementById('reload-message');
         if (reloadMessage) reloadMessage.style.display = 'block';
         
-        // Play the empty gun animation when no ammo
-        if (this.isAiming && this.viewmodel) {
-          this.viewmodel.playFakeShootAnim();
-          
-          // Play empty gun click sound if sound manager exists
-          if (this.soundManager && !window.isMobile) {
-            // Only play empty click on desktop - skip on mobile to avoid sound issues
-            this.soundManager.playSound("empty_click");
+        // If we're already in the empty animation, don't trigger it again
+        if (this.viewmodel && this.viewmodel.animationState !== 'revolverempty') {
+          // Play the empty gun animation when no ammo
+          if (this.isAiming && this.viewmodel) {
+            this.viewmodel.playFakeShootAnim();
+            
+            // Play empty gun click sound if sound manager exists
+            if (this.soundManager && !window.isMobile) {
+              // Only play empty click on desktop - skip on mobile to avoid sound issues
+              this.soundManager.playSound("empty_click");
+            }
           }
         }
       }
@@ -984,6 +987,12 @@ export class Player {
 
     // Always make sure viewmodel is visible during reload
     if (this.viewmodel) {
+      // Special handling: allow reload to interrupt empty animation
+      if (this.viewmodel.animationState === 'revolverempty') {
+        // Reset any blocking flags to ensure reload can play
+        this.viewmodel.blockHolster = false;
+      }
+      
       this.viewmodel.group.visible = true;
       this.viewmodel.playReloadAnim();
     }
