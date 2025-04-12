@@ -961,12 +961,16 @@ function handleLocalPlayerShoot(bulletStart, shootDir) {
  * @param {string|number} bulletId - Server-assigned bullet ID
  */
 function handleRemotePlayerShoot(playerId, bulletData, bulletId) {
+  // Check if this is a shotgun pellet from the metadata
+  const isShotgunPellet = bulletData.isShotgunPellet || false;
+  
   // Skip effect creation if this is our own shot coming back from the server
   if (playerId === localPlayer.id) {
     // Just create the bullet with the server's ID without spawning effects again
     const startPos = new THREE.Vector3(bulletData.position.x, bulletData.position.y, bulletData.position.z);
     const dir = new THREE.Vector3(bulletData.direction.x, bulletData.direction.y, bulletData.direction.z);
-    const bullet = new Bullet(startPos, dir, bulletId);
+    
+    const bullet = new Bullet(startPos, dir, bulletId, isShotgunPellet);
     
     // Track this bullet ID so we can identify it when impact comes back
     if (!window.localPlayer.lastFiredBulletIds) {
@@ -992,7 +996,7 @@ function handleRemotePlayerShoot(playerId, bulletData, bulletId) {
   const startPos = new THREE.Vector3(bulletData.position.x, bulletData.position.y, bulletData.position.z);
   const dir = new THREE.Vector3(bulletData.direction.x, bulletData.direction.y, bulletData.direction.z);
   
-  spawnBullet(playerId, startPos, dir, bulletId);
+  spawnBullet(playerId, startPos, dir, bulletId, isShotgunPellet);
 }
 
 /**
@@ -1066,15 +1070,21 @@ function handleBulletImpact(bulletId, hitType, targetId, position, hitZone) {
  * @param {THREE.Vector3} position 
  * @param {THREE.Vector3} direction 
  * @param {string|number} bulletId - Optional server-assigned ID (for remote bullets)
+ * @param {boolean} isShotgunPellet - Whether this bullet is a shotgun pellet
  * @returns {Bullet} The created bullet object
  */
-function spawnBullet(sourcePlayerId, position, direction, bulletId = null) {
-  const bullet = new Bullet(position, direction, bulletId);
+function spawnBullet(sourcePlayerId, position, direction, bulletId = null, isShotgunPellet = false) {
+  // For local player, determine if this is a shotgun pellet based on their weapon
+  const isLocalShotgunPellet = sourcePlayerId === localPlayer.id && localPlayer.activeWeapon === 'shotgun';
+  
+  // Use the provided flag or infer from local player weapon
+  const isPellet = isShotgunPellet || isLocalShotgunPellet;
+  
+  const bullet = new Bullet(position, direction, bulletId, isPellet);
   bullet.setSourcePlayer(sourcePlayerId);
   
-  // Check if this is a shotgun bullet from local player
-  if (sourcePlayerId === localPlayer.id && localPlayer.activeWeapon === 'shotgun') {
-    // Make shotgun pellets smaller
+  // Make shotgun pellets smaller
+  if (isPellet) {
     bullet.mesh.scale.set(0.5, 0.5, 0.5);
   }
   
@@ -1100,71 +1110,80 @@ function spawnBullet(sourcePlayerId, position, direction, bulletId = null) {
     }
   }
 
-  // Visual effects
-  createMuzzleFlash(position, direction, scene, muzzleFlashOptions);
-  createSmokeEffect(position, direction, scene);
+  // For shotgun pellets after the first one, skip visual effects to avoid overwhelming 
+  // the system with too many effects at once
+  const showEffects = !isPellet || (isPellet && bullets.length % 3 === 0);
   
-  // Add smoke ring effect (now enabled for mobile too)
-  let smokeRing = null;
-  
-  // Try to reuse an inactive smoke ring first
-  for (let i = 0; i < smokeRings.length; i++) {
-    if (!smokeRings[i].active) {
-      smokeRing = smokeRings[i];
-      break;
-    }
-  }
-  
-  // If no inactive smoke ring found, create a new one if under the limit
-  if (!smokeRing && smokeRings.length < maxSmokeRings) {
-    smokeRing = new SmokeRingEffect(scene);
-    smokeRings.push(smokeRing);
-  }
-  
-  // Activate the smoke ring
-  if (smokeRing) {
-    smokeRing.create(position, direction, smokeEffectOptions);
-  }
-
-  // Sound: play the single shot sound
-  if (localPlayer.soundManager) {
-    // Determine weapon type - try to get from source player or fallback to local player
-    let weaponType = 'revolver'; // Default fallback
+  // Visual effects - only for non-pellets or occasionally for pellets
+  if (showEffects) {
+    createMuzzleFlash(position, direction, scene, muzzleFlashOptions);
+    createSmokeEffect(position, direction, scene);
     
-    // If it's the local player, use their active weapon
-    if (sourcePlayerId === localPlayer.id) {
-      weaponType = localPlayer.activeWeapon;
-    } 
-    // If it's a remote player, try to get their weapon type from the remote players map
-    else if (remotePlayers && remotePlayers.has(sourcePlayerId)) {
-      const remotePlayer = remotePlayers.get(sourcePlayerId);
-      if (remotePlayer && remotePlayer.activeWeapon) {
-        weaponType = remotePlayer.activeWeapon;
+    // Add smoke ring effect
+    let smokeRing = null;
+    
+    // Try to reuse an inactive smoke ring first
+    for (let i = 0; i < smokeRings.length; i++) {
+      if (!smokeRings[i].active) {
+        smokeRing = smokeRings[i];
+        break;
       }
     }
     
-    // Use appropriate sound based on weapon type
-    const soundName = weaponType === 'shotgun' ? "shotgunshot" : "shot";
+    // If no inactive smoke ring found, create a new one if under the limit
+    if (!smokeRing && smokeRings.length < maxSmokeRings) {
+      smokeRing = new SmokeRingEffect(scene);
+      smokeRings.push(smokeRing);
+    }
     
-    if (sourcePlayerId === localPlayer.id) {
-      // Special handling for mobile to prevent audio duplication/sync issues
-      if (window.isMobile) {
-        // On mobile, use immediate playback with no delay and higher volume
-        // This ensures only one clean sound plays
-        localPlayer.soundManager.playSound(soundName, 0, 1.0);
-      } else {
-        // On desktop, play a non-spatialized gunshot for the local player
-        localPlayer.soundManager.playSound(soundName, 50, 1.0);
+    // Activate the smoke ring
+    if (smokeRing) {
+      smokeRing.create(position, direction, smokeEffectOptions);
+    }
+    
+    // Sound effects - only play for non-pellets or the first pellet
+    if (!isPellet || (isPellet && bullets.length <= 1)) {
+      if (localPlayer.soundManager) {
+        // Determine weapon type - try to get from source player or fallback to local player
+        let weaponType = 'revolver'; // Default fallback
+        
+        // If it's the local player, use their active weapon
+        if (sourcePlayerId === localPlayer.id) {
+          weaponType = localPlayer.activeWeapon;
+        } 
+        // If it's a remote player, try to get their weapon type from the remote players map
+        else if (remotePlayers && remotePlayers.has(sourcePlayerId)) {
+          const remotePlayer = remotePlayers.get(sourcePlayerId);
+          if (remotePlayer && remotePlayer.activeWeapon) {
+            weaponType = remotePlayer.activeWeapon;
+          }
+        }
+        
+        // Use appropriate sound based on weapon type
+        const soundName = weaponType === 'shotgun' ? "shotgunshot" : "shot";
+        
+        if (sourcePlayerId === localPlayer.id) {
+          // Special handling for mobile to prevent audio duplication/sync issues
+          if (window.isMobile) {
+            // On mobile, use immediate playback with no delay and higher volume
+            // This ensures only one clean sound plays
+            localPlayer.soundManager.playSound(soundName, 0, 1.0);
+          } else {
+            // On desktop, play a non-spatialized gunshot for the local player
+            localPlayer.soundManager.playSound(soundName, 50, 1.0);
+          }
+        } else if (!window.isMobile) {
+          // For remote players on desktop, use full spatialized audio
+          localPlayer.soundManager.playSoundAt(soundName, position, 50, 0.8);
+        } else {
+          // For remote players on mobile, use non-spatialized audio to prevent issues
+          localPlayer.soundManager.playSound(soundName, 0, 0.8);
+        }
       }
-    } else if (!window.isMobile) {
-      // For remote players on desktop, use full spatialized audio
-      localPlayer.soundManager.playSoundAt(soundName, position, 50, 0.8);
-    } else {
-      // For remote players on mobile, use non-spatialized audio to prevent issues
-      localPlayer.soundManager.playSound(soundName, 0, 0.8);
     }
   }
-
+  
+  // Return the bullet
   return bullet;
 }
 
@@ -1528,24 +1547,25 @@ function createDesktopWeaponIndicators() {
     .desktop-weapon-indicator {
       position: fixed;
       left: 20px;
-      padding: 5px 10px;
-      background-color: rgba(0, 0, 0, 0.5);
-      color: white;
+      width: 40px;
+      height: 40px;
+      background-color: rgba(0, 0, 0, 0.6);
+      border: 2px solid rgba(255, 255, 255, 0.5);
       border-radius: 5px;
-      font-family: 'Courier New', monospace;
-      font-size: 14px;
       margin-bottom: 5px;
       opacity: 0.7;
-      transition: opacity 0.3s, transform 0.3s;
+      transition: opacity 0.3s, border-color 0.3s, box-shadow 0.3s;
       cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
     }
     .desktop-weapon-indicator:hover {
       opacity: 1;
     }
     .desktop-weapon-indicator.active {
-      border-left: 3px solid #ffcc00;
-      background-color: rgba(20, 20, 20, 0.7);
-      transform: translateX(3px);
+      border-color: #ffcc00 !important;
+      box-shadow: 0 0 10px #ffcc00;
       opacity: 1;
     }
     #revolver-indicator-desktop {
@@ -1553,6 +1573,17 @@ function createDesktopWeaponIndicators() {
     }
     #shotgun-indicator-desktop {
       bottom: 120px;
+    }
+    .weapon-number {
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      background-color: rgba(0, 0, 0, 0.7);
+      color: white;
+      font-size: 12px;
+      padding: 2px 5px;
+      border-radius: 10px;
+      font-family: 'Courier New', monospace;
     }
   `;
   document.head.appendChild(style);
@@ -1565,13 +1596,39 @@ function createDesktopWeaponIndicators() {
   const revolverIndicator = document.createElement('div');
   revolverIndicator.id = 'revolver-indicator-desktop';
   revolverIndicator.className = 'desktop-weapon-indicator active';
-  revolverIndicator.innerHTML = '1: Revolver';
+  
+  // Add revolver icon (same as mobile)
+  const revolverImg = document.createElement('img');
+  revolverImg.src = 'models/revolverindicator.png';
+  revolverImg.style.width = '80%';
+  revolverImg.style.height = '80%';
+  revolverImg.style.objectFit = 'contain';
+  revolverIndicator.appendChild(revolverImg);
+  
+  // Add number indicator
+  const revolverNum = document.createElement('div');
+  revolverNum.className = 'weapon-number';
+  revolverNum.textContent = '1';
+  revolverIndicator.appendChild(revolverNum);
   
   // Create shotgun indicator
   const shotgunIndicator = document.createElement('div');
   shotgunIndicator.id = 'shotgun-indicator-desktop';
   shotgunIndicator.className = 'desktop-weapon-indicator';
-  shotgunIndicator.innerHTML = '2: Shotgun';
+  
+  // Add shotgun icon (same as mobile)
+  const shotgunImg = document.createElement('img');
+  shotgunImg.src = 'models/shotgunindicator.png';
+  shotgunImg.style.width = '80%';
+  shotgunImg.style.height = '80%';
+  shotgunImg.style.objectFit = 'contain';
+  shotgunIndicator.appendChild(shotgunImg);
+  
+  // Add number indicator
+  const shotgunNum = document.createElement('div');
+  shotgunNum.className = 'weapon-number';
+  shotgunNum.textContent = '2';
+  shotgunIndicator.appendChild(shotgunNum);
   
   // Add click handlers
   revolverIndicator.addEventListener('click', () => {

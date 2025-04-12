@@ -377,7 +377,13 @@ export class NetworkManager {
       case 'respawn':
         console.log(`Respawning at:`, message.position);
         if (this.onRespawn) {
-          this.onRespawn(message.position, message.health, message.bullets);
+          this.onRespawn(
+            message.position, 
+            message.health, 
+            message.bullets, 
+            message.maxBullets, 
+            message.activeWeapon
+          );
         }
         break;
 

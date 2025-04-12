@@ -554,7 +554,7 @@ function createMobileControls(player, soundManager) {
   const weaponContainer = document.createElement('div');
   weaponContainer.id = 'weapon-indicator-container';
   weaponContainer.style.position = 'fixed';
-  weaponContainer.style.bottom = '120px';
+  weaponContainer.style.bottom = '240px';
   weaponContainer.style.right = '20px';
   weaponContainer.style.display = 'flex';
   weaponContainer.style.flexDirection = 'row';

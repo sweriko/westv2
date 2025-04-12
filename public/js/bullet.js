@@ -14,8 +14,9 @@ export class Bullet {
    * @param {THREE.Vector3} position - Starting position
    * @param {THREE.Vector3} direction - Normalized direction vector
    * @param {string|number} bulletId - Optional server-assigned bullet ID (for remote bullets)
+   * @param {boolean} isShotgunPellet - Whether this bullet is a pellet from a shotgun
    */
-  constructor(position, direction, bulletId = null) {
+  constructor(position, direction, bulletId = null, isShotgunPellet = false) {
     // Dynamic bullet trajectory adjustment based on viewport
     this.adjustTrajectoryForViewport(direction);
     
@@ -46,6 +47,9 @@ export class Bullet {
     // Set up the bullet's ray for continuous collision detection
     this.rayOrigin = position.clone();
     this.rayDirection = direction.clone();
+    
+    // Flag to identify if this bullet is a shotgun pellet
+    this.isShotgunPellet = isShotgunPellet;
     
     // Create a visual path for trajectory debugging
     if (window.debugMode) {
@@ -355,8 +359,10 @@ export class Bullet {
             const hitKey = `${playerId}_${hitResult.zone}_${Math.round(endPos.x)}_${Math.round(endPos.y)}_${Math.round(endPos.z)}`;
             const now = performance.now();
             const lastHitTime = window.hitDebounce.get(hitKey) || 0;
-            const debounceTime = 500; // 500ms debounce time
-
+            
+            // Use a shorter debounce time for shotgun pellets to allow multiple pellets to register hits
+            const debounceTime = this.isShotgunPellet ? 50 : 500; // 50ms for shotgun, 500ms for regular bullets
+            
             if (now - lastHitTime < debounceTime) {
               // Use logger for debug logs
               if (window.logger) {
@@ -382,7 +388,8 @@ export class Bullet {
               position: { x: endPos.x, y: endPos.y, z: endPos.z },
               sourcePlayerId: this.sourcePlayerId,
               hitZone: hitResult.zone, // Send the hit zone to the server
-              damage: hitResult.damage // Send the damage amount to the server
+              damage: hitResult.damage, // Send the damage amount to the server
+              isShotgunPellet: this.isShotgunPellet // Send information about shotgun pellets
             }, this.bulletId);
             
             // Quick Draw duels with better logging
@@ -449,7 +456,10 @@ export class Bullet {
   checkPlayerHitZones(playerObj, bulletPos) {
     // If the player has a ThirdPersonModel, use its dedicated mesh-based hit detection
     if (playerObj.playerModel && playerObj.playerModel.checkBulletHit) {
-      return playerObj.playerModel.checkBulletHit(bulletPos);
+      const hitResult = playerObj.playerModel.checkBulletHit(bulletPos, this.isShotgunPellet);
+      
+      // If this is a shotgun pellet, adjust the damage (should be handled by the model now)
+      return hitResult;
     }
     
     // Fallback to box-based hit detection for local player or models without mesh hit detection
@@ -534,7 +544,9 @@ export class Bullet {
     );
     
     if (reusableBox.containsPoint(bulletPos)) {
-      return { hit: true, zone: 'head', damage: 100 };
+      // Apply different damage based on whether this is a shotgun pellet
+      const damage = this.isShotgunPellet ? 10 : 100;
+      return { hit: true, zone: 'head', damage: damage };
     }
     
     // Check body zone (medium damage)
@@ -550,7 +562,9 @@ export class Bullet {
     );
     
     if (reusableBox.containsPoint(bulletPos)) {
-      return { hit: true, zone: 'body', damage: 40 };
+      // Apply different damage based on whether this is a shotgun pellet
+      const damage = this.isShotgunPellet ? 5 : 40;
+      return { hit: true, zone: 'body', damage: damage };
     }
     
     // Check arms (low damage, simplified to two boxes on sides)
@@ -567,7 +581,9 @@ export class Bullet {
     );
     
     if (reusableBox.containsPoint(bulletPos)) {
-      return { hit: true, zone: 'limbs', damage: 20 };
+      // Apply different damage based on whether this is a shotgun pellet
+      const damage = this.isShotgunPellet ? 5 : 20;
+      return { hit: true, zone: 'limbs', damage: damage };
     }
     
     // Right arm
@@ -583,7 +599,9 @@ export class Bullet {
     );
     
     if (reusableBox.containsPoint(bulletPos)) {
-      return { hit: true, zone: 'limbs', damage: 20 };
+      // Apply different damage based on whether this is a shotgun pellet
+      const damage = this.isShotgunPellet ? 5 : 20;
+      return { hit: true, zone: 'limbs', damage: damage };
     }
     
     // Check legs (low damage)
@@ -600,7 +618,9 @@ export class Bullet {
     );
     
     if (reusableBox.containsPoint(bulletPos)) {
-      return { hit: true, zone: 'limbs', damage: 20 };
+      // Apply different damage based on whether this is a shotgun pellet
+      const damage = this.isShotgunPellet ? 5 : 20;
+      return { hit: true, zone: 'limbs', damage: damage };
     }
     
     // Right leg
@@ -616,12 +636,15 @@ export class Bullet {
     );
     
     if (reusableBox.containsPoint(bulletPos)) {
-      return { hit: true, zone: 'limbs', damage: 20 };
+      // Apply different damage based on whether this is a shotgun pellet
+      const damage = this.isShotgunPellet ? 5 : 20;
+      return { hit: true, zone: 'limbs', damage: damage };
     }
     
     // If we reach here but hit the overall box, it's a grazing hit to the body
     // Instead of no damage, register it as a body hit with reduced damage
-    return { hit: true, zone: 'body', damage: 30 };
+    const damage = this.isShotgunPellet ? 5 : 30;
+    return { hit: true, zone: 'body', damage: damage };
   }
   
   /**
@@ -906,24 +929,21 @@ export class Bullet {
    * @param {THREE.Vector3} position - The 3D world position of the hit
    */
   showHitMarker(position) {
-    // Create hit marker element if it doesn't exist
-    if (!window.hitMarkerElement) {
-      const hitMarker = document.createElement('div');
-      hitMarker.style.position = 'absolute';
-      hitMarker.style.transform = 'translate(-50%, -50%)';
-      hitMarker.style.width = '40px';
-      hitMarker.style.height = '40px';
-      hitMarker.style.backgroundImage = 'url("models/hitmarker.png")';
-      hitMarker.style.backgroundSize = 'contain';
-      hitMarker.style.backgroundRepeat = 'no-repeat';
-      hitMarker.style.pointerEvents = 'none';
-      hitMarker.style.zIndex = '1000';
-      hitMarker.style.opacity = '0';
-      hitMarker.style.transition = 'opacity 0.1s ease-in-out';
-      
-      document.body.appendChild(hitMarker);
-      window.hitMarkerElement = hitMarker;
-    }
+    // Create a new hit marker element for each hit rather than reusing one
+    const hitMarker = document.createElement('div');
+    hitMarker.style.position = 'absolute';
+    hitMarker.style.transform = 'translate(-50%, -50%)';
+    hitMarker.style.width = '40px';
+    hitMarker.style.height = '40px';
+    hitMarker.style.backgroundImage = 'url("models/hitmarker.png")';
+    hitMarker.style.backgroundSize = 'contain';
+    hitMarker.style.backgroundRepeat = 'no-repeat';
+    hitMarker.style.pointerEvents = 'none';
+    hitMarker.style.zIndex = '1000';
+    hitMarker.style.opacity = '1';
+    hitMarker.style.transition = 'opacity 0.1s ease-in-out';
+    
+    document.body.appendChild(hitMarker);
     
     // Convert 3D world position to 2D screen position
     if (position && window.localPlayer && window.localPlayer.camera) {
@@ -933,31 +953,29 @@ export class Bullet {
       // Only show if the hit is in front of the camera
       if (screenPos) {
         // Position the hit marker at the calculated screen position
-        window.hitMarkerElement.style.left = screenPos.x + 'px';
-        window.hitMarkerElement.style.top = screenPos.y + 'px';
-        
-        // Show the hitmarker
-        window.hitMarkerElement.style.opacity = '1';
-        
-        // Hide after 100ms
-        setTimeout(() => {
-          if (window.hitMarkerElement) {
-            window.hitMarkerElement.style.opacity = '0';
-          }
-        }, 100);
+        hitMarker.style.left = screenPos.x + 'px';
+        hitMarker.style.top = screenPos.y + 'px';
+      } else {
+        // Fallback to center of screen if behind camera
+        hitMarker.style.left = '50%';
+        hitMarker.style.top = '50%';
       }
     } else {
       // Fallback to center of screen if no position provided or cannot convert
-      window.hitMarkerElement.style.left = '50%';
-      window.hitMarkerElement.style.top = '50%';
-      window.hitMarkerElement.style.opacity = '1';
-      
+      hitMarker.style.left = '50%';
+      hitMarker.style.top = '50%';
+    }
+    
+    // Hide and remove after 100ms
+    setTimeout(() => {
+      hitMarker.style.opacity = '0';
+      // Remove from DOM after fade out completes
       setTimeout(() => {
-        if (window.hitMarkerElement) {
-          window.hitMarkerElement.style.opacity = '0';
+        if (hitMarker.parentNode) {
+          hitMarker.parentNode.removeChild(hitMarker);
         }
       }, 100);
-    }
+    }, 100);
   }
   
   /**

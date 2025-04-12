@@ -709,34 +709,76 @@ function handlePlayerShoot(playerId, data) {
   // Update lastShot timestamp
   timeouts.lastShot = now;
   
-  // Create a server-side bullet
-  const bulletId = nextBulletId++;
+  // Handle shotgun pellets - generate multiple projectiles with spread
+  const isShotgun = player.activeWeapon === 'shotgun';
+  const bulletCount = isShotgun ? 10 : 1; // 10 pellets for shotgun, 1 for revolver
   
-  const bullet = {
-    id: bulletId,
-    sourcePlayerId: playerId,
-    position: data.bulletData.position,
-    direction: direction,
-    distanceTraveled: 0,
-    maxDistance: GAME_CONSTANTS.MAX_BULLET_DISTANCE,
-    speed: GAME_CONSTANTS.BULLET_SPEED,
-    timeCreated: now,
-    active: true
-  };
+  // If multiple bullets come from revolver in a single shot, it's likely cheating
+  if (!isShotgun && data.bulletData.pelletCount && data.bulletData.pelletCount > 1) {
+    console.log(`Potential cheating detected: Player ${playerId} tried to fire multiple revolver bullets at once`);
+    return sendErrorToPlayer(playerId, "Invalid bullet count for weapon type", true);
+  }
   
-  // Add to active bullets
-  activeBullets.set(bulletId, bullet);
-  
-  // Notify clients of the shot
-  broadcastToAll({
-    type: 'playerShoot',
-    id: playerId,
-    bulletId: bulletId,
-    bulletData: {
-      position: data.bulletData.position,
-      direction: direction
+  // Create server-side bullets (one bullet for revolver, multiple pellets for shotgun)
+  for (let i = 0; i < bulletCount; i++) {
+    const bulletId = nextBulletId++;
+    
+    // For shotgun, apply spread to each pellet except the first one (which uses the original aim direction)
+    let pelletDirection = { ...direction };
+    
+    if (isShotgun && i > 0) {
+      // Apply realistic shotgun spread
+      const spread = 0.08; // Match client-side spread value
+      pelletDirection = {
+        x: direction.x + (Math.random() - 0.5) * spread,
+        y: direction.y + (Math.random() - 0.5) * spread,
+        z: direction.z + (Math.random() - 0.5) * spread
+      };
+      
+      // Normalize the direction after applying spread
+      const pelletDirMag = Math.sqrt(
+        pelletDirection.x * pelletDirection.x + 
+        pelletDirection.y * pelletDirection.y + 
+        pelletDirection.z * pelletDirection.z
+      );
+      
+      pelletDirection.x /= pelletDirMag;
+      pelletDirection.y /= pelletDirMag;
+      pelletDirection.z /= pelletDirMag;
     }
-  });
+    
+    const bullet = {
+      id: bulletId,
+      sourcePlayerId: playerId,
+      position: data.bulletData.position,
+      direction: pelletDirection,
+      distanceTraveled: 0,
+      maxDistance: GAME_CONSTANTS.MAX_BULLET_DISTANCE,
+      speed: GAME_CONSTANTS.BULLET_SPEED,
+      timeCreated: now,
+      active: true,
+      isShotgunPellet: isShotgun,
+      pelletIndex: i
+    };
+    
+    // Add to active bullets
+    activeBullets.set(bulletId, bullet);
+    
+    // For the first bullet/pellet or if it's a revolver shot, notify all clients
+    // For shotgun pellets after the first, only notify about first pellet to save bandwidth
+    if (i === 0 || !isShotgun) {
+      broadcastToAll({
+        type: 'playerShoot',
+        id: playerId,
+        bulletId: bulletId,
+        bulletData: {
+          position: data.bulletData.position,
+          direction: pelletDirection,
+          isShotgunPellet: isShotgun
+        }
+      });
+    }
+  }
   
   // Update the player's shooting state
   player.isShooting = true;
@@ -848,7 +890,13 @@ function handlePlayerHit(playerId, targetId, hitData, bulletId) {
   // Check for duplicate/too frequent hits on the same target
   const now = Date.now();
   const lastHitTime = player.recentHits.get(targetId) || 0;
-  const hitDebounceTime = 300; // 300ms minimum between hits on same target
+  
+  // If this is a shotgun hit, use a shorter debounce time to allow multiple pellets to hit
+  const isShotgunHit = player.activeWeapon === 'shotgun' || 
+                      (bulletId && activeBullets.has(bulletId) && activeBullets.get(bulletId).isShotgunPellet);
+  
+  // Use a shorter debounce time for shotgun pellets (50ms) vs regular bullets (300ms)
+  const hitDebounceTime = isShotgunHit ? 50 : 300;
   
   if (now - lastHitTime < hitDebounceTime) {
     console.log(`Hit debounced: Player ${playerId} hit ${targetId} too quickly after last hit (${now - lastHitTime}ms)`);
@@ -888,14 +936,29 @@ function handlePlayerHit(playerId, targetId, hitData, bulletId) {
     bullet = activeBullets.get(bulletId);
   }
   
-  // Calculate damage based on hit zone (if available)
+  // Calculate damage based on hit zone and weapon type
   let damage = GAME_CONSTANTS.DAMAGE_PER_HIT;
-  if (hitData.hitZone === 'head') {
-    damage = 100; // One-shot kill for headshots
-  } else if (hitData.hitZone === 'body') {
-    damage = 40; // Standard body shot
-  } else if (hitData.hitZone === 'limbs') {
-    damage = 20; // Reduced damage for limbs
+  
+  // Check if this is a shotgun pellet hit
+  const isShotgunPellet = player.activeWeapon === 'shotgun' || 
+                         (bullet && bullet.isShotgunPellet);
+  
+  if (isShotgunPellet) {
+    // Shotgun pellet damage
+    if (hitData.hitZone === 'head') {
+      damage = 10; // Per pellet headshot damage
+    } else {
+      damage = 5;  // Per pellet body/limb damage
+    }
+  } else {
+    // Regular bullet damage
+    if (hitData.hitZone === 'head') {
+      damage = 100; // One-shot kill for headshots
+    } else if (hitData.hitZone === 'body') {
+      damage = 40; // Standard body shot
+    } else if (hitData.hitZone === 'limbs') {
+      damage = 20; // Reduced damage for limbs
+    }
   }
   
   // Apply damage to target
@@ -1037,7 +1100,25 @@ function respawnPlayer(playerId) {
   
   // Reset player state
   player.health = 100;
+  
+  // Reset weapon state based on active weapon
+  if (!player.activeWeapon) {
+    player.activeWeapon = 'revolver'; // Default if not set
+  }
+  
+  // Define weapon capacities
+  const weaponCapacity = {
+    revolver: 6,
+    shotgun: 2
+  };
+  
+  // Set max bullets based on active weapon
+  player.maxBullets = weaponCapacity[player.activeWeapon] || 6;
+  
+  // Reset ammo to maximum
   player.bullets = player.maxBullets;
+  
+  // Reset states
   player.isReloading = false;
   player.isAiming = false;
   player.isShooting = false;
@@ -1061,7 +1142,9 @@ function respawnPlayer(playerId) {
       type: 'respawn',
       position: player.position,
       health: player.health,
-      bullets: player.bullets
+      bullets: player.bullets,
+      maxBullets: player.maxBullets,
+      activeWeapon: player.activeWeapon
     }));
   }
   
@@ -1074,7 +1157,8 @@ function respawnPlayer(playerId) {
     isReloading: false,
     isAiming: false,
     isDying: false,             // Explicitly reset death animation state
-    resetAnimationState: true   // Special flag to trigger animation reset on clients
+    resetAnimationState: true,  // Special flag to trigger animation reset on clients
+    activeWeapon: player.activeWeapon
   });
 }
 

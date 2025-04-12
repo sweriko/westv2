@@ -506,9 +506,38 @@ export class QuickDraw {
                                 console.log(`[QuickDraw] Player respawned at server position: (${message.position.x.toFixed(2)}, ${message.position.y.toFixed(2)}, ${message.position.z.toFixed(2)})`);
                             }
                             
-                            // Reset health and bullets
+                            // Set active weapon if provided by server
+                            if (message.activeWeapon && (message.activeWeapon === 'revolver' || message.activeWeapon === 'shotgun')) {
+                                // Only switch if different from current
+                                if (this.localPlayer.activeWeapon !== message.activeWeapon) {
+                                    this.localPlayer.switchWeapon(message.activeWeapon);
+                                }
+                            }
+                            
+                            // Reset all weapon ammo to maximum
+                            this.localPlayer.weaponAmmo = {
+                                revolver: this.localPlayer.weaponStats.revolver.maxBullets,
+                                shotgun: this.localPlayer.weaponStats.shotgun.maxBullets
+                            };
+                            
+                            // Set the active weapon's bullet count
+                            this.localPlayer.bullets = this.localPlayer.weaponAmmo[this.localPlayer.activeWeapon];
+                            this.localPlayer.maxBullets = this.localPlayer.weaponStats[this.localPlayer.activeWeapon].maxBullets;
+                            
+                            // Cancel any ongoing reloading
+                            if (this.localPlayer.isReloading) {
+                                // Cancel reload animation
+                                if (this.localPlayer.viewmodel) {
+                                    this.localPlayer.viewmodel.cancelReload();
+                                }
+                                
+                                // Hide reload UI elements
+                                const reloadProgressContainer = document.getElementById('reload-progress-container');
+                                if (reloadProgressContainer) reloadProgressContainer.style.display = 'none';
+                            }
+                            
+                            // Reset health
                             this.localPlayer.health = message.health || 100;
-                            this.localPlayer.bullets = message.bullets || this.localPlayer.maxBullets || 6;
                             
                             // Reset states
                             this.localPlayer.isReloading = false;
@@ -516,23 +545,18 @@ export class QuickDraw {
                             this.localPlayer.velocity.y = 0;
                             this.localPlayer.canAim = true;
                             this.localPlayer.canMove = true;
+                            this.localPlayer.canShoot = true;
                             
                             // Update UI
                             if (typeof updateHealthUI === 'function') {
                                 updateHealthUI(this.localPlayer);
                             }
                             
-                            // Make sure we're in first-person view
-                            if (this.scene && this.scene.renderer) {
-                                this.scene.renderer.camera = this.localPlayer.camera;
-                                this.scene.renderer.overrideCamera = null;
+                            if (typeof updateAmmoUI === 'function') {
+                                updateAmmoUI(this.localPlayer);
                             }
                             
-                            // Remove any local player model
-                            this.removeLocalPlayerModel();
-                            
-                            // Broadcast state reset to other players
-                            this.sendPlayerStateReset();
+                            console.log(`[QuickDraw] Respawn complete - Current weapon: ${this.localPlayer.activeWeapon}, Ammo: ${this.localPlayer.bullets}/${this.localPlayer.maxBullets}`);
                         }
                         
                         // Ensure we're not in a duel state

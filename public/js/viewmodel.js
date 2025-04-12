@@ -1290,4 +1290,49 @@ export class Viewmodel {
       this.updateSkin('default');
     }
   }
+  
+  /**
+   * Cancels the current reload animation and resets animation state
+   */
+  cancelReload() {
+    if (!this.isLoaded) return;
+    
+    // Determine which weapon prefix to use
+    const weaponPrefix = window.localPlayer && window.localPlayer.activeWeapon === 'shotgun' ? 'shotgun' : 'revolver';
+    
+    // Reset animation flags
+    this.forceVisible = false;
+    this.blockHolster = false;
+    this.pendingHolster = false;
+    this.pendingAimTransition = false;
+    
+    // Clear any pending animation timeouts
+    if (this._actionTimeoutId) {
+      clearTimeout(this._actionTimeoutId);
+      this._actionTimeoutId = null;
+    }
+    if (this._holsterTimeoutId) {
+      clearTimeout(this._holsterTimeoutId);
+      this._holsterTimeoutId = null;
+    }
+    
+    // Stop the reload animation
+    if (this.actions[`${weaponPrefix}reload`]) {
+      this.actions[`${weaponPrefix}reload`].stop();
+    }
+    
+    // Transition to idle animation
+    this._transitionTo(`${weaponPrefix}idle`, {
+      resetTimeOnPlay: true
+    });
+    
+    // If player isn't aiming, hide the viewmodel
+    if (window.localPlayer && !window.localPlayer.isAiming) {
+      setTimeout(() => {
+        this.group.visible = false;
+      }, 100); // Short delay to ensure animation transition starts
+    }
+    
+    console.log(`Canceled ${weaponPrefix} reload animation`);
+  }
 } 

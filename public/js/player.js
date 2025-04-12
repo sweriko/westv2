@@ -1,5 +1,5 @@
 import { Viewmodel } from './viewmodel.js';
-import { updateAmmoUI, updateHealthUI } from './ui.js';
+import { updateAmmoUI, updateHealthUI, showDamageIndicator } from './ui.js';
 import { applyRecoil } from './effects.js';
 import { networkManager } from './network.js';
 
@@ -108,7 +108,12 @@ export class Player {
         maxBullets: 2,
         reloadTime: 6000, // Longer reload for shotgun
         bulletCount: 10, // 10 pellets per shot
-        bulletSpread: 0.03 // Much wider spread
+        bulletSpread: 0.08, // Increased spread from 0.03 to 0.08
+        pelletDamage: {
+          head: 10,    // Headshot damage per pellet
+          body: 5,     // Body damage per pellet
+          limbs: 5     // Limb damage per pellet
+        }
       }
     };
 
@@ -200,6 +205,9 @@ export class Player {
     console.log(`Player spawned at: X=${spawnX.toFixed(2)}, Z=${spawnZ.toFixed(2)}`);
   }
 
+  /**
+   * Initialize networking for the player
+   */
   initNetworking() {
     // Start the WebSocket
     networkManager.connect();
@@ -209,58 +217,69 @@ export class Player {
       console.log(`Local player initialized with ID: ${this.id}`);
     };
     
-    // Anti-cheat: Handle position corrections from server
-    networkManager.onPositionCorrection = (correctedPosition) => {
-      console.log("Received position correction from server");
+    // Handle player hit
+    networkManager.onPlayerHit = (sourceId, hitData, newHealth, hitZone) => {
+      this.health = newHealth;
+      updateHealthUI(this);
       
-      // Instead of constant reconciliation, we'll use a "rubber-banding" approach
-      // Save server position and current client position
-      this.serverPosition = new THREE.Vector3(
-        correctedPosition.x,
-        correctedPosition.y,
-        correctedPosition.z
-      );
-      
-      // Only apply corrections when player is not actively moving
-      // This prevents teleports during active gameplay
-      if (!this.isMoving()) {
-        // Immediate reposition when not moving
-        this.group.position.copy(this.serverPosition);
-        this.previousPosition.copy(this.serverPosition);
-        console.log("Applied immediate position correction (not moving)");
-      } else {
-        // Mark for gradual correction if moving
-        this.isReconciling = true;
-        // Use a very subtle correction that's almost unnoticeable
-        this.reconciliationLerpFactor = 0.05;
-      }
+      // Show hit zone on screen for 100ms
+      showDamageIndicator(hitData.damage, hitZone);
     };
     
     // Anti-cheat: Handle respawn from server
-    networkManager.onRespawn = (position, health, bullets) => {
+    networkManager.onRespawn = (position, health, bullets, maxBullets, activeWeapon) => {
       console.log("Server-initiated respawn");
       
       // Set position
       this.group.position.copy(position);
       this.previousPosition.copy(position);
       
-      // Update health and bullets
+      // Update health
       this.health = health || 100;
-      this.bullets = bullets || this.maxBullets;
       
-      // Sync weapon ammo with bullets
-      this.weaponAmmo[this.activeWeapon] = this.bullets;
-      this._syncWeaponAmmo();
+      // Set active weapon if provided by server
+      if (activeWeapon && (activeWeapon === 'revolver' || activeWeapon === 'shotgun')) {
+        // Only switch if different from current
+        if (this.activeWeapon !== activeWeapon) {
+          this.switchWeapon(activeWeapon);
+        }
+      }
+      
+      // Reset all weapon ammo to maximum
+      this.weaponAmmo = {
+        revolver: this.weaponStats.revolver.maxBullets,
+        shotgun: this.weaponStats.shotgun.maxBullets
+      };
+      
+      // Set active weapon's bullets
+      this.bullets = this.weaponAmmo[this.activeWeapon];
+      this.maxBullets = this.weaponStats[this.activeWeapon].maxBullets;
+      
+      // Cancel any ongoing reloading
+      if (this.isReloading) {
+        // Cancel reload animation
+        if (this.viewmodel) {
+          this.viewmodel.cancelReload();
+        }
+        
+        // Hide reload UI elements
+        const reloadProgressContainer = document.getElementById('reload-progress-container');
+        if (reloadProgressContainer) reloadProgressContainer.style.display = 'none';
+      }
       
       // Reset states
       this.isReloading = false;
       this.isAiming = false;
       this.velocity.y = 0;
       this.canAim = true;
+      this.canShoot = true;
       
       // Update UI
       updateHealthUI(this);
       updateAmmoUI(this);
+      
+      console.log(`Respawn complete - Current weapon: ${this.activeWeapon}, Ammo: ${this.bullets}/${this.maxBullets}`);
+      console.log(`Weapon ammo: Revolver: ${this.weaponAmmo.revolver}, Shotgun: ${this.weaponAmmo.shotgun}`);
     };
   }
 
@@ -999,7 +1018,7 @@ export class Player {
     this.spawnPlayerRandomly();
     
     // Reset weapon state
-    // Reset ammo for all weapons
+    // Reset ammo for all weapons to their maximum values
     this.weaponAmmo = {
       revolver: this.weaponStats.revolver.maxBullets,
       shotgun: this.weaponStats.shotgun.maxBullets
@@ -1007,10 +1026,15 @@ export class Player {
     
     // Set active weapon's bullets
     this.bullets = this.weaponAmmo[this.activeWeapon];
+    this.maxBullets = this.weaponStats[this.activeWeapon].maxBullets;
     
+    // Reset animation and interaction states
     this.isReloading = false;
-    this.canAim = true;
     this.isAiming = false;
+    this.velocity.y = 0;
+    this.canAim = true;
+    
+    // Make sure UI is updated
     updateAmmoUI(this);
     
     // Reset vertical velocity
@@ -1020,6 +1044,7 @@ export class Player {
     this.quickDrawLobbyIndex = -1;
     
     console.log('Player respawned');
+    console.log(`Weapon ammo reset - Revolver: ${this.weaponAmmo.revolver}, Shotgun: ${this.weaponAmmo.shotgun}`);
   }
 
   /**
@@ -1644,6 +1669,23 @@ export class Player {
    * @private
    */
   _syncWeaponAmmo() {
+    // Make sure weaponAmmo is initialized for all weapon types
+    if (!this.weaponAmmo) {
+      this.weaponAmmo = {
+        revolver: this.weaponStats.revolver.maxBullets,
+        shotgun: this.weaponStats.shotgun.maxBullets
+      };
+    }
+    
+    // Ensure both weapons have entries in the ammo object
+    if (this.weaponAmmo.revolver === undefined) {
+      this.weaponAmmo.revolver = this.weaponStats.revolver.maxBullets;
+    }
+    
+    if (this.weaponAmmo.shotgun === undefined) {
+      this.weaponAmmo.shotgun = this.weaponStats.shotgun.maxBullets;
+    }
+    
     // Ensure the current weapon's ammo in weaponAmmo matches bullets
     this.weaponAmmo[this.activeWeapon] = this.bullets;
     

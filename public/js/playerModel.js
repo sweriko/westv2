@@ -716,9 +716,10 @@ export class ThirdPersonModel {
   /**
    * Check if a bullet hit this player model and determine which zone was hit
    * @param {THREE.Vector3} bulletPos - Position of the bullet
+   * @param {boolean} isShotgunPellet - Whether this is a shotgun pellet hit
    * @return {object} - Hit result with zone and damage information
    */
-  checkBulletHit(bulletPos) {
+  checkBulletHit(bulletPos, isShotgunPellet = false) {
     // Add a small tolerance to prevent edge cases and near-miss detections
     const PRECISION_EPSILON = 0.01;
     
@@ -741,7 +742,9 @@ export class ThirdPersonModel {
     strictHeadBox.max.sub(new THREE.Vector3(PRECISION_EPSILON, PRECISION_EPSILON, PRECISION_EPSILON));
     
     if (strictHeadBox.containsPoint(bulletPos)) {
-      return { hit: true, zone: 'head', damage: 100 };
+      // Apply appropriate damage based on weapon type
+      const damage = isShotgunPellet ? 10 : 100;
+      return { hit: true, zone: 'head', damage: damage };
     }
     
     // 2. Body check (medium damage)
@@ -750,7 +753,9 @@ export class ThirdPersonModel {
     strictBodyBox.max.sub(new THREE.Vector3(PRECISION_EPSILON, PRECISION_EPSILON, PRECISION_EPSILON));
     
     if (strictBodyBox.containsPoint(bulletPos)) {
-      return { hit: true, zone: 'body', damage: 40 };
+      // Apply appropriate damage based on weapon type
+      const damage = isShotgunPellet ? 5 : 40;
+      return { hit: true, zone: 'body', damage: damage };
     }
     
     // 3. Limbs check - we need to check each limb individually to prevent overlap issues
@@ -814,24 +819,29 @@ export class ThirdPersonModel {
     
     // Check each limb individually
     if (leftLegHitbox.containsPoint(bulletPos)) {
-      return { hit: true, zone: 'limbs', damage: 20 };
+      const damage = isShotgunPellet ? 5 : 20;
+      return { hit: true, zone: 'limbs', damage: damage };
     }
     
     if (rightLegHitbox.containsPoint(bulletPos)) {
-      return { hit: true, zone: 'limbs', damage: 20 };
+      const damage = isShotgunPellet ? 5 : 20;
+      return { hit: true, zone: 'limbs', damage: damage };
     }
     
     if (leftArmHitbox.containsPoint(bulletPos)) {
-      return { hit: true, zone: 'limbs', damage: 20 };
+      const damage = isShotgunPellet ? 5 : 20;
+      return { hit: true, zone: 'limbs', damage: damage };
     }
     
     if (rightArmHitbox.containsPoint(bulletPos)) {
-      return { hit: true, zone: 'limbs', damage: 20 };
+      const damage = isShotgunPellet ? 5 : 20;
+      return { hit: true, zone: 'limbs', damage: damage };
     }
     
     // If we're here, the bullet is inside the overall collision box but not in any specific zone
     // Instead of returning no hit, we'll count it as a partial body hit with reduced damage
-    return { hit: true, zone: 'body', damage: 30 };
+    const damage = isShotgunPellet ? 5 : 30;
+    return { hit: true, zone: 'body', damage: damage };
   }
 
   /**
