@@ -791,6 +791,64 @@ export function applyRecoil(player, multiplier = 1.0) {
   player.camera.fov -= 5 * multiplier;
   player.camera.updateProjectionMatrix();
 
+  // Apply physical recoil force for shotgun
+  if (player.activeWeapon === 'shotgun') {
+    // Get the direction the player is aiming in WORLD space
+    const lookDir = new THREE.Vector3(0, 0, -1); // Forward in camera local space
+    lookDir.applyQuaternion(player.camera.getWorldQuaternion(new THREE.Quaternion()));
+    lookDir.normalize();
+    
+    // Calculate recoil direction - inverse of look direction
+    const recoilDir = lookDir.clone().negate();
+    
+    // Enable recoil boost mode to prevent normal movement dampening
+    player.recoilBoosted = true;
+    player.recoilBoostTime = player.recoilBoostDuration;
+    
+    // Get player's world rotation 
+    const playerRotationY = player.group.rotation.y;
+    
+    // Determine if looking down (for rocket jump)
+    if (lookDir.y < -0.3) {
+      // Player is aiming down, apply RIDICULOUS upward force
+      player.velocity.y = 50.0; // Extreme upward force
+      
+      // Apply horizontal force aligned with player forward direction
+      // This ensures the recoil pushes you in the correct direction
+      player.velocity.x = Math.sin(playerRotationY) * -30.0 * recoilDir.z;
+      player.velocity.z = Math.cos(playerRotationY) * -30.0 * recoilDir.z;
+      
+      console.log("🚀 SHOTGUN UPWARD BLAST!", player.velocity);
+    } else {
+      // Apply force directly opposed to look direction in world space
+      // These are applied directly as world-space velocities
+      player.velocity.x = recoilDir.x * 50.0;
+      player.velocity.z = recoilDir.z * 50.0;
+      player.velocity.y = 15.0 + Math.abs(recoilDir.y * 30.0); // Add upward boost
+      
+      console.log("💥 EXTREME SHOTGUN KNOCKBACK!", player.velocity, "Look dir:", lookDir);
+    }
+    
+    // Disable gravity for a short moment to allow full force expression
+    const originalGravity = player.gravity;
+    player.gravity = 0;
+    setTimeout(() => {
+      player.gravity = originalGravity;
+    }, 150); // 150ms of zero gravity for maximum effect
+    
+    // Force jump state regardless of ground contact
+    player.canJump = false;
+    player.isJumping = true;
+    
+    // Play an extra sound for the force feedback
+    if (player.soundManager) {
+      player.soundManager.playSound("jump", 0); // Remove delay for immediacy
+      
+      // Also play an extra impact sound for drama
+      player.soundManager.playSound("shotgunshot", 0, 1.5); // Higher volume
+    }
+  }
+
   const recoilSteps = [
     { time: 20, cameraX: -0.04, cameraZ: 0.005, offsetZ: 0.2, offsetY: 0.08, offsetX: 0.03 },
     { time: 40, cameraX: -0.06, cameraZ: 0.008, offsetZ: 0.3, offsetY: 0.12, offsetX: 0.04 },

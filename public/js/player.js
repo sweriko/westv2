@@ -37,6 +37,11 @@ export class Player {
     this.canJump = false;
     this.gravity = 25; // Increased from 15 for much stronger gravity pull
 
+    // Add recoil boost flag to prevent normal velocity dampening
+    this.recoilBoosted = false;
+    this.recoilBoostTime = 0;
+    this.recoilBoostDuration = 0.3; // How long the velocity boost lasts
+
     // Movement flags
     this.moveForward = false;
     this.moveBackward = false;
@@ -406,14 +411,25 @@ export class Player {
     if (this.jumpCooldown > 0) {
       this.jumpCooldown = Math.max(0, this.jumpCooldown - deltaTime);
     }
+    
+    // Update recoil boost timer if active
+    if (this.recoilBoosted) {
+      this.recoilBoostTime -= deltaTime;
+      if (this.recoilBoostTime <= 0) {
+        this.recoilBoosted = false;
+      }
+    }
 
-    if (this.moveForward) this.velocity.z = -this.getMoveSpeed();
-    else if (this.moveBackward) this.velocity.z = this.getMoveSpeed();
-    else this.velocity.z = 0;
+    // Only apply movement inputs if not in recoil boost mode
+    if (!this.recoilBoosted) {
+      if (this.moveForward) this.velocity.z = -this.getMoveSpeed();
+      else if (this.moveBackward) this.velocity.z = this.getMoveSpeed();
+      else this.velocity.z = 0;
 
-    if (this.moveRight) this.velocity.x = this.getMoveSpeed();
-    else if (this.moveLeft) this.velocity.x = -this.getMoveSpeed();
-    else this.velocity.x = 0;
+      if (this.moveRight) this.velocity.x = this.getMoveSpeed();
+      else if (this.moveLeft) this.velocity.x = -this.getMoveSpeed();
+      else this.velocity.x = 0;
+    }
 
     // Store previous position before movement for collision detection
     this.previousPosition.copy(this.group.position);
@@ -422,8 +438,8 @@ export class Player {
     const wasOnGround = this.group.position.y <= 2.72 || this.isOnObject;
     const wasJumping = this.isJumping;
     
-    // Calculate new vertical position with gravity
-    if (!wasOnGround) {
+    // Calculate new vertical position with gravity - always apply gravity unless in recoil boost
+    if (!wasOnGround && (!this.recoilBoosted || this.velocity.y < 0)) {
       this.velocity.y -= this.gravity * deltaTime;
     }
     const newVerticalPos = {
@@ -484,17 +500,24 @@ export class Player {
     
     // Apply horizontal movement to a test position (don't actually move yet)
     const movement = new THREE.Vector3();
-    movement.x = this.velocity.x * deltaTime;
-    movement.z = this.velocity.z * deltaTime;
     
-    // Rotate movement to match player's direction
-    movement.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.group.rotation.y);
+    // Special handling for recoil boost - use absolute world direction
+    if (this.recoilBoosted) {
+      // For recoil, we use the velocity directly as world-space movement
+      movement.x = this.velocity.x * deltaTime;
+      movement.z = this.velocity.z * deltaTime;
+    } else {
+      // Normal movement - apply player rotation
+      movement.x = this.velocity.x * deltaTime;
+      movement.z = this.velocity.z * deltaTime;
+      movement.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.group.rotation.y);
+    }
     
     // Calculate desired new position
     const newPosition = this.group.position.clone().add(movement);
     
     // Auto-step detection - check if there's a small step in front of us that we can climb
-    const stepHeight = 0.9; // Increased for higher steps
+    const stepHeight = 0.9;
     const stepPosition = this.checkForStep(newPosition, stepHeight);
     if (stepPosition) {
       // Found a step we can climb - adjust our position to step up onto it
