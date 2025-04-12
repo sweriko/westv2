@@ -75,6 +75,16 @@ export function initInput(renderer, player, soundManager) {
       }
     }
     
+    // Weapon switching with number keys
+    if (event.code === 'Digit1') {
+      player.switchWeapon('revolver');
+      return;
+    }
+    if (event.code === 'Digit2') {
+      player.switchWeapon('shotgun');
+      return;
+    }
+    
     switch (event.code) {
       case 'KeyW':
         player.moveForward = true;
@@ -540,6 +550,92 @@ function createMobileControls(player, soundManager) {
   bartenderButton.style.color = 'white';
   bartenderButton.style.zIndex = '1004';
   
+  // Create weapon indicator UI (toggle buttons)
+  const weaponContainer = document.createElement('div');
+  weaponContainer.id = 'weapon-indicator-container';
+  weaponContainer.style.position = 'fixed';
+  weaponContainer.style.bottom = '120px';
+  weaponContainer.style.right = '20px';
+  weaponContainer.style.display = 'flex';
+  weaponContainer.style.flexDirection = 'row';
+  weaponContainer.style.gap = '10px';
+  weaponContainer.style.zIndex = '1000';
+  
+  // Revolver indicator
+  const revolverIndicator = document.createElement('div');
+  revolverIndicator.id = 'revolver-indicator';
+  revolverIndicator.className = 'weapon-indicator active'; // Start with revolver active
+  revolverIndicator.style.width = '40px';
+  revolverIndicator.style.height = '40px';
+  revolverIndicator.style.backgroundColor = 'rgba(0, 0, 0, 0.6)';
+  revolverIndicator.style.border = '2px solid rgba(255, 255, 255, 0.7)';
+  revolverIndicator.style.borderRadius = '5px';
+  revolverIndicator.style.display = 'flex';
+  revolverIndicator.style.justifyContent = 'center';
+  revolverIndicator.style.alignItems = 'center';
+  
+  // Set revolver icon (can be replaced with image)
+  const revolverImg = document.createElement('img');
+  revolverImg.src = 'models/revolverindicator.png';
+  revolverImg.style.width = '80%';
+  revolverImg.style.height = '80%';
+  revolverImg.style.objectFit = 'contain';
+  revolverIndicator.appendChild(revolverImg);
+  
+  // Shotgun indicator
+  const shotgunIndicator = document.createElement('div');
+  shotgunIndicator.id = 'shotgun-indicator';
+  shotgunIndicator.className = 'weapon-indicator';
+  shotgunIndicator.style.width = '40px';
+  shotgunIndicator.style.height = '40px';
+  shotgunIndicator.style.backgroundColor = 'rgba(0, 0, 0, 0.6)';
+  shotgunIndicator.style.border = '2px solid rgba(255, 255, 255, 0.5)';
+  shotgunIndicator.style.borderRadius = '5px';
+  shotgunIndicator.style.display = 'flex';
+  shotgunIndicator.style.justifyContent = 'center';
+  shotgunIndicator.style.alignItems = 'center';
+  
+  // Set shotgun icon (can be replaced with image)
+  const shotgunImg = document.createElement('img');
+  shotgunImg.src = 'models/shotgunindicator.png';
+  shotgunImg.style.width = '80%';
+  shotgunImg.style.height = '80%';
+  shotgunImg.style.objectFit = 'contain';
+  shotgunIndicator.appendChild(shotgunImg);
+  
+  // Add indicators to container
+  weaponContainer.appendChild(revolverIndicator);
+  weaponContainer.appendChild(shotgunIndicator);
+  
+  // Add CSS for active weapon
+  const style = document.createElement('style');
+  style.textContent = `
+    .weapon-indicator.active {
+      border-color: #ffcc00 !important;
+      box-shadow: 0 0 10px #ffcc00;
+    }
+  `;
+  document.head.appendChild(style);
+  
+  // Add touch event listeners for weapon switching
+  revolverIndicator.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (player.activeWeapon !== 'revolver') {
+      player.switchWeapon('revolver');
+      revolverIndicator.className = 'weapon-indicator active';
+      shotgunIndicator.className = 'weapon-indicator';
+    }
+  });
+  
+  shotgunIndicator.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (player.activeWeapon !== 'shotgun') {
+      player.switchWeapon('shotgun');
+      shotgunIndicator.className = 'weapon-indicator active';
+      revolverIndicator.className = 'weapon-indicator';
+    }
+  });
+  
   // Create visual joystick hint for movement (left side)
   const leftControlHint = document.createElement('div');
   leftControlHint.id = 'left-control-hint';
@@ -648,6 +744,7 @@ function createMobileControls(player, soundManager) {
   orientationMsg.style.display = 'none';
   
   // Add elements to document
+  document.body.appendChild(weaponContainer);
   document.body.appendChild(jumpButton);
   document.body.appendChild(reloadButton);
   document.body.appendChild(inviteButton);

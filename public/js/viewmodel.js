@@ -239,6 +239,43 @@ export class Viewmodel {
       alternatives: ['fakeshoot', 'empty', 'dryfire', 'no_ammo']
     });
     
+    // Configure shotgun animation actions
+    this._findAndConfigureAction('shotgundraw', {
+      loop: THREE.LoopOnce,
+      clampWhenFinished: true,
+      alternatives: ['shotgunDraw', 'ShotgunDraw']
+    });
+    
+    this._findAndConfigureAction('shotgunaim', {
+      loop: THREE.LoopRepeat,
+      clampWhenFinished: false,
+      alternatives: ['shotgunAim', 'ShotgunAim', 'shotgunaimloop', 'ShotgunAimLoop']
+    });
+    
+    this._findAndConfigureAction('shotgunholster', {
+      loop: THREE.LoopOnce,
+      clampWhenFinished: true,
+      alternatives: ['shotgunHolster', 'ShotgunHolster', 'shotgunholstering']
+    });
+    
+    this._findAndConfigureAction('shotgunshot', {
+      loop: THREE.LoopOnce,
+      clampWhenFinished: true,
+      alternatives: ['shotgunShoot', 'ShotgunShoot', 'shotgunfire', 'ShotgunFire']
+    });
+    
+    this._findAndConfigureAction('shotgunreload', {
+      loop: THREE.LoopOnce,
+      clampWhenFinished: true,
+      alternatives: ['shotgunReload', 'ShotgunReload']
+    });
+    
+    this._findAndConfigureAction('shotgunempty', {
+      loop: THREE.LoopOnce,
+      clampWhenFinished: true,
+      alternatives: ['shotgunEmpty', 'ShotgunEmpty', 'shotgundryfire', 'ShotgunDryFire']
+    });
+    
     // Initialize with the idle animation
     if (this.actions.idle) {
       const idleAction = this.actions.idle;
@@ -362,7 +399,7 @@ export class Viewmodel {
     
     // If we're transitioning to revolveraim but the player has already requested to holster
     // (indicated by pendingHolster), cancel this transition and play holster instead
-    if (actionName === 'revolveraim' && this.pendingHolster) {
+    if ((actionName === 'revolveraim' || actionName === 'shotgunaim') && this.pendingHolster) {
       this.pendingHolster = false;
       this.pendingAimTransition = false;
       this.playHolsterAnim();
@@ -371,13 +408,15 @@ export class Viewmodel {
     
     // If we're transitioning to revolveraim but the pendingAimTransition flag was cancelled,
     // simply abort this transition and return to idle
-    if (actionName === 'revolveraim' && !this.pendingAimTransition && this.animationState === 'revolverdraw') {
+    if ((actionName === 'revolveraim' && !this.pendingAimTransition && this.animationState === 'revolverdraw') ||
+        (actionName === 'shotgunaim' && !this.pendingAimTransition && this.animationState === 'shotgundraw')) {
       this._transitionTo('idle', { resetTimeOnPlay: true });
       return;
     }
     
     // Special case: Always allow draw to interrupt holster when re-toggling aim
-    if (actionName === 'revolverdraw' && this.animationState === 'revolverholster') {
+    if ((actionName === 'revolverdraw' && this.animationState === 'revolverholster') ||
+        (actionName === 'shotgundraw' && this.animationState === 'shotgunholster')) {
       // We're interrupting a holster animation to draw again - allow it
       this.blockHolster = false;
       
@@ -387,16 +426,17 @@ export class Viewmodel {
         this._holsterTimeoutId = null;
       }
     } 
-    // Special case: Always allow holster to interrupt revolveraim
-    else if (actionName === 'revolverholster' && this.animationState === 'revolveraim') {
+    // Special case: Always allow holster to interrupt aim
+    else if ((actionName === 'revolverholster' && this.animationState === 'revolveraim') ||
+              (actionName === 'shotgunholster' && this.animationState === 'shotgunaim')) {
       // Reset any blocking flags that might prevent holstering
       this.blockHolster = false;
     }
     // Special case: Always allow reload to interrupt any animation
-    else if (actionName === 'revolverreload') {
+    else if (actionName === 'revolverreload' || actionName === 'shotgunreload') {
       // Clear all animation state flags to ensure we start fresh
       this.pendingAimTransition = false;
-      this.blockHolster = false; // Allow interrupting even revolverempty
+      this.blockHolster = false; // Allow interrupting even empty animation
       
       // Clear any pending animation timeouts
       if (this._actionTimeoutId) {
@@ -416,17 +456,36 @@ export class Viewmodel {
       this.pendingHolster = false;
       this.pendingAimTransition = false;
     }
+    // Special case: Shotgun empty animation handling, similar to revolver empty
+    else if (this.animationState === 'shotgunempty' && 
+            (actionName === 'idle' || actionName === 'shotgunaim')) {
+      // Reset all animation flags for a fresh state
+      this.blockHolster = false;
+      this.pendingHolster = false;
+      this.pendingAimTransition = false;
+    }
     // If currently playing the empty animation, don't allow interruptions except reload
     else if (this.animationState === 'revolverempty' && actionName !== 'revolverreload') {
       // Don't allow any animation to interrupt empty except reload
       return;
     }
+    // Shotgun version of the above
+    else if (this.animationState === 'shotgunempty' && actionName !== 'shotgunreload') {
+      // Don't allow any animation to interrupt empty except reload
+      return;
+    }
     // If currently playing the holster animation and it was manually blocked (user initiated),
     // don't allow other animations to interrupt it unless explicitly allowed
-    else if (this.animationState === 'revolverholster' && this.blockHolster && 
-          actionName !== 'idle' && actionName !== 'revolverempty' && actionName !== 'revolverreload') {
+    else if ((this.animationState === 'revolverholster' || this.animationState === 'shotgunholster') 
+            && this.blockHolster && 
+            actionName !== 'idle' && 
+            actionName !== 'revolverempty' && 
+            actionName !== 'revolverreload' &&
+            actionName !== 'shotgunempty' && 
+            actionName !== 'shotgunreload') {
       // For certain critical animations (empty/reload), we'll queue them for after holster
-      if (actionName === 'revolverempty' || actionName === 'revolverreload') {
+      if (actionName === 'revolverempty' || actionName === 'revolverreload' ||
+          actionName === 'shotgunempty' || actionName === 'shotgunreload') {
         this._queueAnimation(actionName, options);
       }
       return;
@@ -555,24 +614,31 @@ export class Viewmodel {
   }
   
   /**
-   * Play the draw animation (when player aims)
+   * Play the draw animation when starting to aim.
+   * Transitions to aim when completed.
    */
   playDrawAim() {
     if (!this.isLoaded) return;
+    
+    // Weapon type prefix based on active weapon
+    const weaponPrefix = window.localPlayer && window.localPlayer.activeWeapon === 'shotgun' ? 'shotgun' : 'revolver';
     
     // Reset any block or pending flags that might prevent proper animation
     this.pendingHolster = false;
     
     // If we're already in aim mode, we don't need to do anything
-    if (this.animationState === 'revolveraim') {
+    if (this.animationState === `${weaponPrefix}aim`) {
       return;
     }
     
+    // Make sure the model is visible during draw
+    this.group.visible = true;
+    
     // If we're holstering, interrupt it and switch to draw
     // This handles the case of re-toggling aim during holster
-    if (this.animationState === 'revolverholster') {
+    if (this.animationState === `${weaponPrefix}holster`) {
       // Cancel any pending callbacks from the holster animation
-      if (this.primaryAction === this.actions.revolverholster) {
+      if (this.primaryAction === this.actions[`${weaponPrefix}holster`]) {
         // Reset block holster flag to allow interruption
         this.blockHolster = false;
       }
@@ -582,14 +648,16 @@ export class Viewmodel {
         this._holsterTimeoutId = null;
       }
       
-      this._transitionTo('revolverdraw', {
+      // Play the gun draw sound - removed as we don't want sound here
+      
+      this._transitionTo(`${weaponPrefix}draw`, {
         resetTimeOnPlay: true,
         onComplete: () => {
           // Only transition to aim if we haven't requested to holster again
           if (!this.pendingHolster) {
             // After draw animation completes, transition to aim loop
             this.pendingAimTransition = true;
-            this._transitionTo('revolveraim', {
+            this._transitionTo(`${weaponPrefix}aim`, {
               resetTimeOnPlay: true
             });
             this.pendingAimTransition = false;
@@ -603,15 +671,26 @@ export class Viewmodel {
       return;
     }
     
+    // Cancel any pending callbacks
+    if (this._actionTimeoutId) {
+      clearTimeout(this._actionTimeoutId);
+      this._actionTimeoutId = null;
+    }
+    
+    // Ensure we aren't blocking transitions
+    this.blockHolster = false;
+    
+    // Remove gun draw sound - we don't want to play holster sound on draw
+    
     // Transition to draw with immediate stitching
-    this._transitionTo('revolverdraw', {
+    this._transitionTo(`${weaponPrefix}draw`, {
       resetTimeOnPlay: true,
       onComplete: () => {
         // Only transition to aim if we haven't requested to holster again
         if (!this.pendingHolster) {
           // After draw animation completes, transition to aim loop
           this.pendingAimTransition = true;
-          this._transitionTo('revolveraim', {
+          this._transitionTo(`${weaponPrefix}aim`, {
             resetTimeOnPlay: true
           });
           this.pendingAimTransition = false;
@@ -630,19 +709,22 @@ export class Viewmodel {
   playShootAnim() {
     if (!this.isLoaded) return;
     
+    // Determine which weapon prefix to use
+    const weaponPrefix = window.localPlayer && window.localPlayer.activeWeapon === 'shotgun' ? 'shotgun' : 'revolver';
+    
     // Make sure the model is visible
     this.group.visible = true;
     
     // Can only shoot if in aim mode or already shooting
-    if (this.animationState !== 'revolveraim' && 
-        this.animationState !== 'revolverdraw' && 
-        this.animationState !== 'revolvershot') {
+    if (this.animationState !== `${weaponPrefix}aim` && 
+        this.animationState !== `${weaponPrefix}draw` && 
+        this.animationState !== `${weaponPrefix}shot`) {
       return;
     }
     
     // For rapid fire shooting, if we're already in the shoot animation,
     // cancel the current animation and any pending callback
-    if (this.animationState === 'revolvershot') {
+    if (this.animationState === `${weaponPrefix}shot`) {
       // Cancel pending callback for the current shot animation
       if (this._actionTimeoutId) {
         clearTimeout(this._actionTimeoutId);
@@ -650,7 +732,7 @@ export class Viewmodel {
       }
       
       // Reset the shot animation to play from the beginning
-      const shootAction = this.actions.revolvershot;
+      const shootAction = this.actions[`${weaponPrefix}shot`];
       shootAction.reset();
       shootAction.time = 0;
       shootAction.enabled = true;
@@ -667,7 +749,7 @@ export class Viewmodel {
           
           // After shot animation completes, go back to aim loop if still aiming
           if (!this.blockHolster && !this.pendingHolster) {
-            this._transitionTo('revolveraim', {
+            this._transitionTo(`${weaponPrefix}aim`, {
               resetTimeOnPlay: true
             });
           } else if (this.pendingHolster) {
@@ -682,12 +764,12 @@ export class Viewmodel {
     }
     
     // For first shot, transition to shoot animation normally
-    this._transitionTo('revolvershot', {
+    this._transitionTo(`${weaponPrefix}shot`, {
       resetTimeOnPlay: true,
       onComplete: () => {
         // After shot animation completes, go back to aim loop if still aiming
         if (!this.blockHolster && !this.pendingHolster) {
-          this._transitionTo('revolveraim', {
+          this._transitionTo(`${weaponPrefix}aim`, {
             resetTimeOnPlay: true
           });
         } else if (this.pendingHolster) {
@@ -704,6 +786,9 @@ export class Viewmodel {
    */
   playFakeShootAnim() {
     if (!this.isLoaded) return;
+    
+    // Determine which weapon prefix to use
+    const weaponPrefix = window.localPlayer && window.localPlayer.activeWeapon === 'shotgun' ? 'shotgun' : 'revolver';
     
     // Make sure the model is visible
     this.group.visible = true;
@@ -726,14 +811,14 @@ export class Viewmodel {
     
     // Reset all animations to ensure clean state
     Object.values(this.actions).forEach(action => {
-      if (action !== this.actions.revolverempty) {
+      if (action !== this.actions[`${weaponPrefix}empty`]) {
         action.reset();
         action.setEffectiveWeight(0);
       }
     });
     
     // Transition to empty animation
-    this._transitionTo('revolverempty', {
+    this._transitionTo(`${weaponPrefix}empty`, {
       resetTimeOnPlay: true,
       onComplete: () => {
         // Perform a complete reset of all animation state flags
@@ -758,7 +843,7 @@ export class Viewmodel {
         // Transition based on current aim state - default to idle
         if (isAimingNow) {
           // If still aiming, go to aim loop
-          this._transitionTo('revolveraim', {
+          this._transitionTo(`${weaponPrefix}aim`, {
             resetTimeOnPlay: true
           });
         } else {
@@ -777,20 +862,23 @@ export class Viewmodel {
   playHolsterAnim() {
     if (!this.isLoaded) return;
     
+    // Determine which weapon prefix to use
+    const weaponPrefix = window.localPlayer && window.localPlayer.activeWeapon === 'shotgun' ? 'shotgun' : 'revolver';
+    
     // If we're currently playing empty or reload animations, don't interrupt
-    if (this.blockHolster && this.animationState !== 'revolveraim') {
+    if (this.blockHolster && this.animationState !== `${weaponPrefix}aim`) {
       this.pendingHolster = true;
       return;
     }
     
     // If we're in aim state, we should always be able to holster
     // This fixes issues after reload
-    if (this.animationState === 'revolveraim') {
+    if (this.animationState === `${weaponPrefix}aim`) {
       this.blockHolster = false;
     }
     
     // Cancel any pending transition to aim state if we're still in drawing phase
-    if (this.animationState === 'revolverdraw' && this.pendingAimTransition) {
+    if (this.animationState === `${weaponPrefix}draw` && this.pendingAimTransition) {
       this.pendingAimTransition = false;
     }
     
@@ -805,10 +893,10 @@ export class Viewmodel {
     
     // If we were interrupted while holstering previously, make sure we use a fresh holster animation
     // This ensures the holster animation plays fully after rapid toggling
-    if (this.animationState === 'revolverdraw' || this.animationState === 'revolveraim') {
+    if (this.animationState === `${weaponPrefix}draw` || this.animationState === `${weaponPrefix}aim`) {
       // Reset the holster animation to ensure it plays from the beginning
-      if (this.actions.revolverholster) {
-        this.actions.revolverholster.reset();
+      if (this.actions[`${weaponPrefix}holster`]) {
+        this.actions[`${weaponPrefix}holster`].reset();
       }
     }
     
@@ -817,21 +905,31 @@ export class Viewmodel {
     
     // Play the gun holster sound
     if (window.localPlayer && window.localPlayer.soundManager) {
-      window.localPlayer.soundManager.playSound("gunholster", 0, 0.6);
+      const soundName = weaponPrefix === 'shotgun' ? "shotgunholstering" : "revolverholstering";
+      window.localPlayer.soundManager.playSound(soundName, 0, 0.6);
     }
     
-    // Transition to holster
-    this._transitionTo('revolverholster', {
+    // Transition to holster animation
+    this._transitionTo(`${weaponPrefix}holster`, {
       resetTimeOnPlay: true,
       onComplete: () => {
-        // After holster completes, go back to idle
+        // After holster completes, transition to idle and hide model
         this._transitionTo('idle', {
-          resetTimeOnPlay: true
+          resetTimeOnPlay: true,
+          onComplete: () => {
+            // Reset flags after animation finishes
+            this.blockHolster = false;
+            this.pendingHolster = false;
+            this.forceVisible = false;
+            
+            // Hide viewmodel when transitioning back to idle from holster
+            setTimeout(() => {
+              if (!this.forceVisible) {
+                this.group.visible = false;
+              }
+            }, 50);
+          }
         });
-        
-        // Allow the model to be hidden and unblock holster
-        this.forceVisible = false;
-        this.blockHolster = false;
       }
     });
   }
@@ -841,6 +939,9 @@ export class Viewmodel {
    */
   playReloadAnim() {
     if (!this.isLoaded) return;
+    
+    // Determine which weapon prefix to use
+    const weaponPrefix = window.localPlayer && window.localPlayer.activeWeapon === 'shotgun' ? 'shotgun' : 'revolver';
     
     // Make sure the model is visible during reload
     this.group.visible = true;
@@ -864,15 +965,21 @@ export class Viewmodel {
     
     // Reset all animations to ensure clean state
     Object.values(this.actions).forEach(action => {
-      if (action !== this.actions.revolverreload) {
+      if (action !== this.actions[`${weaponPrefix}reload`]) {
         action.reset();
         action.enabled = false;
         action.setEffectiveWeight(0);
       }
     });
     
+    // Play reload sound
+    if (window.localPlayer && window.localPlayer.soundManager) {
+      const soundName = weaponPrefix === 'shotgun' ? "shotgunreloading" : "reloading";
+      window.localPlayer.soundManager.playSound(soundName, 0, 0.6);
+    }
+    
     // Transition to reload animation
-    this._transitionTo('revolverreload', {
+    this._transitionTo(`${weaponPrefix}reload`, {
       resetTimeOnPlay: true,
       onComplete: () => {
         // After reload completes, always go back to idle animation first
@@ -938,7 +1045,10 @@ export class Viewmodel {
    * @returns {boolean} True if currently in shooting animation
    */
   isInShootAnimation() {
-    return this.animationState === 'revolvershot' || this.animationState === 'revolverempty';
+    return this.animationState === 'revolvershot' || 
+           this.animationState === 'revolverempty' ||
+           this.animationState === 'shotgunshot' ||
+           this.animationState === 'shotgunempty';
   }
   
   /**

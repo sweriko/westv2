@@ -136,6 +136,21 @@ async function init() {
     soundManager.loadSound("gunholster", "sounds/gunholster.mp3");
     soundManager.loadSound("ambience", "sounds/ambience.mp3");
     
+    // Load gun sounds
+    soundManager.loadSound("shot", "sounds/shot.mp3");
+    soundManager.loadSound("aimclick", "sounds/aimclick.mp3");
+    soundManager.loadSound("reloading", "sounds/reloading.mp3");
+    soundManager.loadSound("empty_click", "sounds/empty_click.mp3");
+    soundManager.loadSound("gunholster", "sounds/gunholster.mp3");
+    
+    // Load shotgun sounds
+    soundManager.loadSound("shotgunshot", "sounds/shotgunshot.mp3");
+    soundManager.loadSound("shotgunreloading", "sounds/shotgunreloading.mp3");
+    soundManager.loadSound("shotgunholstering", "sounds/shotgunholstering.mp3");
+    
+    // Load impact sounds
+    soundManager.loadSound("woodimpact", "sounds/woodimpact.mp3");
+    
     // Start background ambient music loop
     setTimeout(() => {
       soundManager.playSound("ambience", 0, 0.4, true); // Play at lower volume in a loop
@@ -247,12 +262,15 @@ async function init() {
     // Make localPlayer globally accessible for hit updates.
     window.localPlayer = localPlayer;
 
-    // Initialize input system
-    const inputControls = initInput(renderer, localPlayer, soundManager);
+    // Initialize UI elements - desktop weapon indicators
+    createDesktopWeaponIndicators();
+    
+    // Initialize first-person controls
+    const mobileControls = initInput(renderer, localPlayer, soundManager);
     
     // Make mobile controls globally accessible
     if (isMobileDevice()) {
-      window.mobileControls = inputControls;
+      window.mobileControls = mobileControls;
     }
     
     // Make scene globally accessible for physics visualization
@@ -1053,6 +1071,13 @@ function handleBulletImpact(bulletId, hitType, targetId, position, hitZone) {
 function spawnBullet(sourcePlayerId, position, direction, bulletId = null) {
   const bullet = new Bullet(position, direction, bulletId);
   bullet.setSourcePlayer(sourcePlayerId);
+  
+  // Check if this is a shotgun bullet from local player
+  if (sourcePlayerId === localPlayer.id && localPlayer.activeWeapon === 'shotgun') {
+    // Make shotgun pellets smaller
+    bullet.mesh.scale.set(0.5, 0.5, 0.5);
+  }
+  
   bullets.push(bullet);
   scene.add(bullet.mesh);
   
@@ -1103,22 +1128,40 @@ function spawnBullet(sourcePlayerId, position, direction, bulletId = null) {
 
   // Sound: play the single shot sound
   if (localPlayer.soundManager) {
+    // Determine weapon type - try to get from source player or fallback to local player
+    let weaponType = 'revolver'; // Default fallback
+    
+    // If it's the local player, use their active weapon
+    if (sourcePlayerId === localPlayer.id) {
+      weaponType = localPlayer.activeWeapon;
+    } 
+    // If it's a remote player, try to get their weapon type from the remote players map
+    else if (remotePlayers && remotePlayers.has(sourcePlayerId)) {
+      const remotePlayer = remotePlayers.get(sourcePlayerId);
+      if (remotePlayer && remotePlayer.activeWeapon) {
+        weaponType = remotePlayer.activeWeapon;
+      }
+    }
+    
+    // Use appropriate sound based on weapon type
+    const soundName = weaponType === 'shotgun' ? "shotgunshot" : "shot";
+    
     if (sourcePlayerId === localPlayer.id) {
       // Special handling for mobile to prevent audio duplication/sync issues
       if (window.isMobile) {
         // On mobile, use immediate playback with no delay and higher volume
         // This ensures only one clean sound plays
-        localPlayer.soundManager.playSound("shot", 0, 1.0);
+        localPlayer.soundManager.playSound(soundName, 0, 1.0);
       } else {
         // On desktop, play a non-spatialized gunshot for the local player
-        localPlayer.soundManager.playSound("shot", 50, 1.0);
+        localPlayer.soundManager.playSound(soundName, 50, 1.0);
       }
     } else if (!window.isMobile) {
       // For remote players on desktop, use full spatialized audio
-      localPlayer.soundManager.playSoundAt("shot", position, 50, 0.8);
+      localPlayer.soundManager.playSoundAt(soundName, position, 50, 0.8);
     } else {
       // For remote players on mobile, use non-spatialized audio to prevent issues
-      localPlayer.soundManager.playSound("shot", 0, 0.8);
+      localPlayer.soundManager.playSound(soundName, 0, 0.8);
     }
   }
 
@@ -1471,6 +1514,81 @@ function applyViewportAdjustments() {
   if (window.renderer && window.renderer.instance) {
     window.renderer.instance.setSize(window.innerWidth, window.innerHeight);
   }
+}
+
+/**
+ * Creates weapon indicator UI for desktop
+ */
+function createDesktopWeaponIndicators() {
+  if (isMobileDevice()) return; // Mobile has its own indicators
+  
+  // Add styles for weapon indicators
+  const style = document.createElement('style');
+  style.textContent = `
+    .desktop-weapon-indicator {
+      position: fixed;
+      left: 20px;
+      padding: 5px 10px;
+      background-color: rgba(0, 0, 0, 0.5);
+      color: white;
+      border-radius: 5px;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      margin-bottom: 5px;
+      opacity: 0.7;
+      transition: opacity 0.3s, transform 0.3s;
+      cursor: pointer;
+    }
+    .desktop-weapon-indicator:hover {
+      opacity: 1;
+    }
+    .desktop-weapon-indicator.active {
+      border-left: 3px solid #ffcc00;
+      background-color: rgba(20, 20, 20, 0.7);
+      transform: translateX(3px);
+      opacity: 1;
+    }
+    #revolver-indicator-desktop {
+      bottom: 150px;
+    }
+    #shotgun-indicator-desktop {
+      bottom: 120px;
+    }
+  `;
+  document.head.appendChild(style);
+  
+  // Create container for both indicators
+  const container = document.createElement('div');
+  container.id = 'desktop-weapon-indicators';
+  
+  // Create revolver indicator
+  const revolverIndicator = document.createElement('div');
+  revolverIndicator.id = 'revolver-indicator-desktop';
+  revolverIndicator.className = 'desktop-weapon-indicator active';
+  revolverIndicator.innerHTML = '1: Revolver';
+  
+  // Create shotgun indicator
+  const shotgunIndicator = document.createElement('div');
+  shotgunIndicator.id = 'shotgun-indicator-desktop';
+  shotgunIndicator.className = 'desktop-weapon-indicator';
+  shotgunIndicator.innerHTML = '2: Shotgun';
+  
+  // Add click handlers
+  revolverIndicator.addEventListener('click', () => {
+    if (window.localPlayer) {
+      window.localPlayer.switchWeapon('revolver');
+    }
+  });
+  
+  shotgunIndicator.addEventListener('click', () => {
+    if (window.localPlayer) {
+      window.localPlayer.switchWeapon('shotgun');
+    }
+  });
+  
+  // Add to DOM
+  document.body.appendChild(revolverIndicator);
+  document.body.appendChild(shotgunIndicator);
 }
 
 // Call init() to start the application

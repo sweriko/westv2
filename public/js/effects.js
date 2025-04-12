@@ -772,22 +772,23 @@ export function createImpactEffect(position, direction, scene, hitType) {
 }
 
 /**
- * Applies a realistic recoil effect.
+ * Apply recoil effect to the player's camera.
  * @param {Player} player - The player instance.
+ * @param {number} multiplier - Recoil strength multiplier (default: 1.0).
  */
-export function applyRecoil(player) {
+export function applyRecoil(player, multiplier = 1.0) {
   const originalAimOffset = player.aimOffset.clone();
   const originalFOV = player.camera.fov;
   const originalCameraPos = player.camera.position.clone();
   const originalRotation = player.camera.rotation.clone();
 
   // Initial recoil changes.
-  player.camera.rotation.x -= 0.08;
-  player.camera.rotation.z += 0.01;
-  player.aimOffset.z += 0.4;
-  player.aimOffset.y += 0.15;
-  player.aimOffset.x += 0.05;
-  player.camera.fov -= 5;
+  player.camera.rotation.x -= 0.08 * multiplier;
+  player.camera.rotation.z += 0.01 * multiplier;
+  player.aimOffset.z += 0.4 * multiplier;
+  player.aimOffset.y += 0.15 * multiplier;
+  player.aimOffset.x += 0.05 * multiplier;
+  player.camera.fov -= 5 * multiplier;
   player.camera.updateProjectionMatrix();
 
   const recoilSteps = [
@@ -800,15 +801,15 @@ export function applyRecoil(player) {
 
   recoilSteps.forEach(step => {
     setTimeout(() => {
-      player.camera.rotation.x = originalRotation.x + step.cameraX;
-      player.camera.rotation.z = originalRotation.z + step.cameraZ;
-      player.aimOffset.z = originalAimOffset.z + step.offsetZ;
-      player.aimOffset.y = originalAimOffset.y + step.offsetY;
-      player.aimOffset.x = originalAimOffset.x + step.offsetX;
+      player.camera.rotation.x = originalRotation.x + step.cameraX * multiplier;
+      player.camera.rotation.z = originalRotation.z + step.cameraZ * multiplier;
+      player.aimOffset.z = originalAimOffset.z + step.offsetZ * multiplier;
+      player.aimOffset.y = originalAimOffset.y + step.offsetY * multiplier;
+      player.aimOffset.x = originalAimOffset.x + step.offsetX * multiplier;
     }, step.time);
   });
 
-  let shakeIntensity = 0.03;
+  let shakeIntensity = 0.03 * multiplier;
   const shakeDecay = 0.9;
   const shakeInterval = setInterval(() => {
     if (shakeIntensity > 0.002) {

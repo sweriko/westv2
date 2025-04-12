@@ -85,6 +85,23 @@ export class Player {
     this.maxBullets = 6;
     this.canShoot = true;
 
+    // Weapon types and switching
+    this.activeWeapon = 'revolver'; // 'revolver' or 'shotgun'
+    this.weaponStats = {
+      revolver: {
+        maxBullets: 6,
+        reloadTime: 4000,
+        bulletCount: 1, // Single bullet per shot
+        bulletSpread: 0.0005 // Default spread
+      },
+      shotgun: {
+        maxBullets: 2,
+        reloadTime: 6000, // Longer reload for shotgun
+        bulletCount: 10, // 10 pellets per shot
+        bulletSpread: 0.03 // Much wider spread
+      }
+    };
+
     // Health
     this.health = 100;
 
@@ -808,7 +825,8 @@ export class Player {
         if (reloadMessage) reloadMessage.style.display = 'block';
         
         // If we're already in the empty animation, don't trigger it again
-        if (this.viewmodel && this.viewmodel.animationState !== 'revolverempty') {
+        if (this.viewmodel && 
+            this.viewmodel.animationState !== `${this.activeWeapon}empty`) {
           // Play the empty gun animation when no ammo
           if (this.isAiming && this.viewmodel) {
             this.viewmodel.playFakeShootAnim();
@@ -838,31 +856,42 @@ export class Player {
 
     // Find bullet spawn - use viewmodel instead of revolver
     const bulletStart = this.viewmodel.getBarrelTipWorldPosition();
-    const shootDir = new THREE.Vector3();
-    this.camera.getWorldDirection(shootDir);
-
-    // Slight random spread
-    shootDir.x += (Math.random() - 0.5) * 0.0005;
-    shootDir.y += (Math.random() - 0.5) * 0.0005;
-    shootDir.z += (Math.random() - 0.5) * 0.0005;
     
-    // NOTE: We're no longer adjusting trajectory here
-    // The Bullet class will handle any needed adjustments
+    // Get weapon stats for spread and bullet count
+    const weaponStats = this.weaponStats[this.activeWeapon];
     
-    shootDir.normalize();
-
-    // Recoil effect
-    applyRecoil(this);
-
-    // IMPORTANT: We do NOT play gunshot sounds here!
-    // All sound handling for shooting is done centrally in main.js's spawnBullet function
-    // to avoid duplicate sounds, especially important on mobile devices
+    // Play the appropriate gunshot sound
+    if (this.soundManager) {
+      // Set a specific sound name based on weapon type
+      const soundName = this.activeWeapon === 'shotgun' ? "shotgunshot" : "shot";
+      
+      // Play the sound (let the sound manager handle cooldowns internally)
+      this.soundManager.playSound(soundName, 100, 0.8);
+    }
     
-    // Call the callback to spawn bullet in main.js
-    if (typeof this.onShootCallback === 'function') {
-      this.onShootCallback(bulletStart, shootDir);
+    // For shotgun, create multiple pellets with spread
+    for (let i = 0; i < weaponStats.bulletCount; i++) {
+      const shootDir = new THREE.Vector3();
+      this.camera.getWorldDirection(shootDir);
+      
+      // Apply spread - more spread for shotgun, less for revolver
+      const spread = weaponStats.bulletSpread;
+      shootDir.x += (Math.random() - 0.5) * spread;
+      shootDir.y += (Math.random() - 0.5) * spread;
+      shootDir.z += (Math.random() - 0.5) * spread;
+      
+      shootDir.normalize();
+      
+      // Call the callback to spawn bullet in main.js
+      if (typeof this.onShootCallback === 'function') {
+        this.onShootCallback(bulletStart, shootDir);
+      }
     }
 
+    // Recoil effect - stronger for shotgun
+    const recoilMultiplier = this.activeWeapon === 'shotgun' ? 2.5 : 1.0;
+    applyRecoil(this, recoilMultiplier);
+    
     // If out of bullets, show reload hint
     if (this.bullets === 0) {
       const reloadMessage = document.getElementById('reload-message');
@@ -972,9 +1001,13 @@ export class Player {
    */
   startReload() {
     if (this.isReloading || this.bullets >= this.maxBullets) return;
-
+    
     this.isReloading = true;
     this.reloadProgress = 0;
+    
+    // Use the current weapon's reload time
+    const reloadTime = this.weaponStats[this.activeWeapon].reloadTime;
+    
     const reloadMessage = document.getElementById('reload-message');
     const reloadProgressContainer = document.getElementById('reload-progress-container');
     if (reloadMessage) reloadMessage.style.display = 'none';
@@ -984,11 +1017,12 @@ export class Player {
     if (this.updateAiming && typeof this.updateAiming.lastAimingState !== 'undefined') {
       this.updateAiming.lastAimingState = this.isAiming;
     }
-
+    
     // Always make sure viewmodel is visible during reload
     if (this.viewmodel) {
       // Special handling: allow reload to interrupt empty animation
-      if (this.viewmodel.animationState === 'revolverempty') {
+      const emptyAnimName = `${this.activeWeapon}empty`;
+      if (this.viewmodel.animationState === emptyAnimName) {
         // Reset any blocking flags to ensure reload can play
         this.viewmodel.blockHolster = false;
       }
@@ -996,36 +1030,48 @@ export class Player {
       this.viewmodel.group.visible = true;
       this.viewmodel.playReloadAnim();
     }
-
+    
+    // Play reload sound based on weapon type
     if (this.soundManager) {
-      this.soundManager.playSound("reloading");
+      const soundName = this.activeWeapon === 'shotgun' ? "shotgunreloading" : "reloading";
+      this.soundManager.playSound(soundName);
     }
 
     // Anti-cheat: Notify server about reload start
     networkManager.sendReload();
-
+    
+    // Animate the reload progress
     const startTime = performance.now();
     const updateReload = (currentTime) => {
+      if (!this.isReloading) return;
+      
       const elapsed = currentTime - startTime;
-      this.reloadProgress = Math.min((elapsed / this.reloadTime) * 100, 100);
+      this.reloadProgress = Math.min(100, (elapsed / reloadTime) * 100);
+      
       const reloadProgressBar = document.getElementById('reload-progress-bar');
       if (reloadProgressBar) {
         reloadProgressBar.style.width = this.reloadProgress + '%';
       }
-      if (elapsed < this.reloadTime) {
+      
+      if (elapsed < reloadTime) {
         requestAnimationFrame(updateReload);
       } else {
         this.completeReload();
       }
     };
+    
+    // Start reload progress animation
     requestAnimationFrame(updateReload);
+    
+    // Notify server about reload state
+    this.sendNetworkUpdate();
   }
 
   /**
    * Complete the reload process
    */
   completeReload() {
-    this.bullets = this.maxBullets;
+    this.bullets = this.maxBullets; // This will now use the current weapon's max bullets
     updateAmmoUI(this);
 
     const reloadProgressContainer = document.getElementById('reload-progress-container');
@@ -1562,5 +1608,94 @@ export class Player {
     
     // Return the highest step found, or false if none
     return highestStep;
+  }
+
+  /**
+   * Switch to a different weapon
+   * @param {string} weaponType - The weapon type to switch to ('revolver' or 'shotgun')
+   */
+  switchWeapon(weaponType) {
+    if (this.activeWeapon === weaponType || this.isReloading) {
+      return; // Already using this weapon or currently reloading
+    }
+    
+    // Remember previous weapon for animation transitions
+    const prevWeapon = this.activeWeapon;
+    
+    // Update weapon type
+    this.activeWeapon = weaponType;
+    
+    // Update bullet count and max bullets based on new weapon
+    this.maxBullets = this.weaponStats[weaponType].maxBullets;
+    this.reloadTime = this.weaponStats[weaponType].reloadTime;
+    
+    // If no bullets, set to max for the new weapon
+    if (this.bullets <= 0 || this.bullets > this.maxBullets) {
+      this.bullets = this.maxBullets;
+    }
+    
+    // Update UI
+    updateAmmoUI(this);
+    
+    // Update weapon indicators in UI
+    this.updateWeaponIndicators();
+    
+    // If currently aiming, transition to the new weapon's aim animation
+    if (this.isAiming && this.viewmodel) {
+      // Check current animation state to properly transition
+      const currentAnimState = this.viewmodel.animationState;
+      
+      // For clean transition, first holster current weapon
+      this.viewmodel.animationState = `${prevWeapon}aim`; // Force the correct state for holstering
+      this.viewmodel.playHolsterAnim();
+      
+      // After holstering, draw new weapon
+      setTimeout(() => {
+        // Force viewmodel to be visible (might have been hidden during holster)
+        this.viewmodel.group.visible = true;
+        
+        // Reset any animation state flags to ensure clean transition
+        this.viewmodel.pendingHolster = false;
+        this.viewmodel.blockHolster = false;
+        
+        // Play draw animation for new weapon
+        this.viewmodel.playDrawAim();
+      }, 400); // Allow slightly more time for holster animation to complete
+    }
+    
+    console.log(`Switched to ${weaponType}`);
+  }
+  
+  /**
+   * Update the weapon indicators in the UI to match the current weapon
+   */
+  updateWeaponIndicators() {
+    // Handle mobile UI weapon indicators
+    const revolverIndicator = document.getElementById('revolver-indicator');
+    const shotgunIndicator = document.getElementById('shotgun-indicator');
+    
+    if (revolverIndicator && shotgunIndicator) {
+      if (this.activeWeapon === 'revolver') {
+        revolverIndicator.className = 'weapon-indicator active';
+        shotgunIndicator.className = 'weapon-indicator';
+      } else {
+        shotgunIndicator.className = 'weapon-indicator active';
+        revolverIndicator.className = 'weapon-indicator';
+      }
+    }
+    
+    // Handle desktop UI weapon indicators
+    const revolverDesktopIndicator = document.getElementById('revolver-indicator-desktop');
+    const shotgunDesktopIndicator = document.getElementById('shotgun-indicator-desktop');
+    
+    if (revolverDesktopIndicator && shotgunDesktopIndicator) {
+      if (this.activeWeapon === 'revolver') {
+        revolverDesktopIndicator.className = 'desktop-weapon-indicator active';
+        shotgunDesktopIndicator.className = 'desktop-weapon-indicator';
+      } else {
+        shotgunDesktopIndicator.className = 'desktop-weapon-indicator active';
+        revolverDesktopIndicator.className = 'desktop-weapon-indicator';
+      }
+    }
   }
 }

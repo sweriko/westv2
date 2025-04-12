@@ -18,6 +18,7 @@ export class SoundManager {
     // Default category mapping for common sounds
     this.soundCategoryMap = {
       'shot': 'weapon',
+      'shotgunshot': 'weapon',  // Explicitly add shotgunshot to ensure it's properly categorized
       'aimclick': 'ui',
       'reloading': 'weapon',
       'bellstart': 'ui',
@@ -32,6 +33,8 @@ export class SoundManager {
       'quickdrawending': 'ui',
       'playerfall': 'impact',
       'gunholster': 'weapon',
+      'revolverholstering': 'weapon',  // Add the new sound name
+      'shotgunholstering': 'weapon',   // Add the new sound name
       'ambience': 'ambient'
     };
     
@@ -342,23 +345,39 @@ export class SoundManager {
     // Stronger duplicate protection for all sounds, especially gunshots
     const now = Date.now();
     
-    // Use higher default cooldown for gunshots
-    if (name === "shot") {
-      // Always use at least 150ms cooldown for gunshots to prevent duplicates
-      cooldown = Math.max(cooldown, 150);
+    // Group similar sounds together for cooldown purposes
+    let soundGroup = name;
+    
+    // Special handling for shot sounds - treat them as the same group
+    if (name === "shot" || name === "shotgunshot") {
+      soundGroup = "gunshotSounds";
+      cooldown = Math.max(cooldown, 50); // Use at least 50ms cooldown for shots
       
-      // Check if we're already playing a shot sound within the cooldown period
-      if (this.soundCooldowns[name] && (now - this.soundCooldowns[name] < cooldown)) {
-        console.log(`Skipping duplicate ${name} sound (cooldown still active)`);
+      // Check if any shot sound is in cooldown
+      if (this.soundCooldowns[soundGroup] && (now - this.soundCooldowns[soundGroup] < cooldown)) {
+        console.log(`Skipping ${name} sound (gunshot cooldown still active)`);
         return null;
       }
       
-      // Record the time we played this shot
+      // Record the time for the entire group
+      this.soundCooldowns[soundGroup] = now;
+      
+      // Record time for the specific sound name too to track which one played
+      this.soundCooldowns[name] = now;
+      
+      // Record the last shot time for other effects
       this.lastShotTime = now;
+    }
+    // For other sounds, use normal cooldown behavior
+    else if (cooldown > 0) {
+      if (this.soundCooldowns[name] && now - this.soundCooldowns[name] < cooldown) {
+        return null;
+      }
+      this.soundCooldowns[name] = now;
     }
     
     // Special handling for gunshot sounds on mobile to prevent duplication issues
-    if (name === "shot" && window.isMobile) {
+    if ((name === "shot" || name === "shotgunshot") && window.isMobile) {
       // On mobile, always use a compact sound buffer for gunshots to prevent issues
       // This helps with memory and performance on mobile devices
       if (window.isMobile && !this._mobileOptimized) {
@@ -370,14 +389,6 @@ export class SoundManager {
     if (!this.buffers[name]) {
       console.warn(`Sound "${name}" not loaded`);
       return null;
-    }
-
-    // Check cooldown for all sounds
-    if (cooldown > 0) {
-      if (this.soundCooldowns[name] && now - this.soundCooldowns[name] < cooldown) {
-        return null;
-      }
-      this.soundCooldowns[name] = now;
     }
 
     // Get category info
