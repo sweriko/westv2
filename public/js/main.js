@@ -142,6 +142,7 @@ async function init() {
     soundManager.loadSound("reloading", "sounds/reloading.mp3");
     soundManager.loadSound("empty_click", "sounds/empty_click.mp3");
     soundManager.loadSound("gunholster", "sounds/gunholster.mp3");
+    soundManager.loadSound("revolverholstering", "sounds/revolverholstering.mp3");
     
     // Load shotgun sounds
     soundManager.loadSound("shotgunshot", "sounds/shotgunshot.mp3");
