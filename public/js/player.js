@@ -474,7 +474,7 @@ export class Player {
       if (this.velocity.y < -3 && !wasOnGround) {
         // Play landing sound if falling fast enough
         if (this.soundManager) {
-          this.soundManager.playSound("leftstep", 0, 1.2);
+          this.soundManager.playSound("jumpland", 0, 1.2);
         }
       }
       
@@ -540,10 +540,7 @@ export class Player {
     this.group.position.x = finalPosition.x;
     this.group.position.z = finalPosition.z;
     
-    // Handle jump sound - only play when we first start jumping (not previously jumping)
-    if (this.isJumping && !wasJumping && this.soundManager) {
-      this.soundManager.playSound("jump", 300); // Play jump sound with 300ms cooldown
-    }
+    // We no longer need to handle jump sound here since it's handled in the jump() method
   }
 
   /**
@@ -890,7 +887,9 @@ export class Player {
             // Play empty gun click sound if sound manager exists
             if (this.soundManager && !window.isMobile) {
               // Only play empty click on desktop - skip on mobile to avoid sound issues
-              this.soundManager.playSound("empty_click");
+              if (this.activeWeapon === 'shotgun') {
+                this.soundManager.playSound("shotgunempty");
+              }
             }
           }
         }
@@ -1580,10 +1579,10 @@ export class Player {
       this.isJumping = true;
       this.jumpCooldown = this.jumpCooldownTime; // Apply cooldown
       
-      // Play jump sound with delay to match animation timing
+      // Play jump sound - IMMEDIATELY with full volume
       if (this.soundManager) {
-        // Play jump sound with cooldown
-        this.soundManager.playSound("jump", 50);
+        console.log("Playing jumpup sound from jump method");
+        this.soundManager.playSound("jumpup", 0, 1.5);
       }
       
       // Log for debugging

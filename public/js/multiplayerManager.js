@@ -332,7 +332,7 @@ export class MultiplayerManager {
 
     // Optional hit sound
     if (this.soundManager) {
-      this.soundManager.playSound("aimclick");
+      this.soundManager.playSound("revolverdraw");
     }
   }
 

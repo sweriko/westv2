@@ -118,7 +118,7 @@ export function initInput(renderer, player, soundManager) {
           }
 
           if (soundManager) {
-            soundManager.playSound("aimclick");
+            soundManager.playSound(player.activeWeapon === 'shotgun' ? "shotgundraw" : "revolverdraw");
           }
         }
         break;
@@ -127,6 +127,13 @@ export function initInput(renderer, player, soundManager) {
           // If sprinting, jump higher
           player.velocity.y = player.isSprinting ? 15 : 10;
           player.canJump = false;
+          player.isJumping = true;
+          
+          // Play jump sound
+          if (player.soundManager) {
+            console.log("Playing jumpup sound from space key");
+            player.soundManager.playSound("jumpup", 0, 1.5);
+          }
         }
         break;
       case 'KeyR':
@@ -221,7 +228,7 @@ export function initInput(renderer, player, soundManager) {
         }
 
         if (soundManager) {
-          soundManager.playSound("aimclick");
+          soundManager.playSound(player.activeWeapon === 'shotgun' ? "shotgundraw" : "revolverdraw");
         }
       } else if (player.isFAiming) {
         // RMB pressed while F-aiming - prepare for shoot on release
@@ -817,8 +824,8 @@ function createMobileControls(player, soundManager) {
       soundManager.audioContext.resume().then(() => {
         console.log('AudioContext resumed successfully');
         // Play a silent sound to fully activate audio
-        if (soundManager.buffers['aimclick']) {
-          const silentSound = soundManager.playSound('aimclick', 0, 0.01);
+        if (soundManager.buffers['revolverdraw']) {
+          const silentSound = soundManager.playSound('revolverdraw', 0, 0.01);
           if (silentSound && silentSound.gainNode) {
             silentSound.gainNode.gain.value = 0.01;
           }
@@ -929,7 +936,7 @@ function createMobileControls(player, soundManager) {
           }
           
           if (soundManager) {
-            soundManager.playSound("aimclick");
+            soundManager.playSound(player.activeWeapon === 'shotgun' ? "shotgundraw" : "revolverdraw");
           }
         }
       }
@@ -1238,8 +1245,15 @@ function createMobileControls(player, soundManager) {
   // Jump button handler
   jumpButton.addEventListener('touchstart', (e) => {
     if (player.canJump) {
+      // Original jump behavior
       player.velocity.y = player.isSprinting ? 15 : 10;
       player.canJump = false;
+      player.isJumping = true;
+      
+      // Play jump sound
+      if (player.soundManager) {
+        player.soundManager.playSound("jumpup", 0, 1.5);
+      }
     }
     e.preventDefault();
   });

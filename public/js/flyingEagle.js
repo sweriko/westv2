@@ -382,19 +382,10 @@ export class FlyingEagle {
     
     // Play eagle hit sound
     if (window.soundManager) {
-      window.soundManager.playSound('eaglehit', 0, 1.0);
-      // Also play eagle death sound
+      // Play eagle death sound only
       window.soundManager.playSound('eagledeath', 0, 1.0);
     } else if (window.localPlayer && window.localPlayer.soundManager) {
-      window.localPlayer.soundManager.playSoundAt(
-        'eaglehit',
-        this.group.position,
-        0,
-        0.8 + Math.random() * 0.4,
-        false,
-        true
-      );
-      // Also play eagle death sound
+      // Play eagle death sound only
       window.localPlayer.soundManager.playSound(
         'eagledeath',
         0,
@@ -496,20 +487,6 @@ export class FlyingEagle {
           this.tumbleAcceleration.x = 0;
           this.tumbleAcceleration.y = 0;
           this.tumbleAcceleration.z = 0;
-          
-          // Play landing sound
-          if (window.soundManager) {
-            window.soundManager.playSound('eagleland', 0, 1.0);
-          } else if (window.localPlayer && window.localPlayer.soundManager) {
-            window.localPlayer.soundManager.playSoundAt(
-              'eagleland',
-              this.group.position,
-              0,
-              0.8 + Math.random() * 0.4,
-              false,
-              true
-            );
-          }
         }
       } else {
         // Handle sinking into ground

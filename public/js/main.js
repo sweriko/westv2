@@ -107,7 +107,7 @@ async function init() {
     // Start loading sounds while the user is entering their name
     // Load shot sounds
     soundManager.loadSound("shot", "sounds/shot.mp3");
-    soundManager.loadSound("aimclick", "sounds/aimclick.mp3");
+    soundManager.loadSound("revolverdraw", "sounds/revolverdraw.mp3");
     // replacing shellejection with the combined reloading sound
     soundManager.loadSound("reloading", "sounds/reloading.mp3");
     // Load the bell start sound for Quick Draw start signal
@@ -119,7 +119,9 @@ async function init() {
     // Load footstep and jump sounds
     soundManager.loadSound("leftstep", "sounds/leftstep.mp3");
     soundManager.loadSound("rightstep", "sounds/rightstep.mp3");
-    soundManager.loadSound("jump", "sounds/jump.mp3");
+    soundManager.loadSound("jumpup", "sounds/jumpup.mp3");
+    soundManager.loadSound("jumpland", "sounds/jumpland.mp3");
+    soundManager.loadSound("recoiljump", "sounds/recoiljump.mp3");
     
     // Load headshot marker sound
     soundManager.loadSound("headshotmarker", "sounds/headshotmarker.mp3");
@@ -133,18 +135,17 @@ async function init() {
     soundManager.loadSound("eagledeath", "sounds/eagledeath.mp3");
     soundManager.loadSound("quickdrawending", "sounds/quickdrawending.mp3");
     soundManager.loadSound("playerfall", "sounds/playerfall.mp3");
-    soundManager.loadSound("gunholster", "sounds/gunholster.mp3");
     soundManager.loadSound("ambience", "sounds/ambience.mp3");
     
     // Load gun sounds
     soundManager.loadSound("shot", "sounds/shot.mp3");
-    soundManager.loadSound("aimclick", "sounds/aimclick.mp3");
+    soundManager.loadSound("revolverdraw", "sounds/revolverdraw.mp3");
     soundManager.loadSound("reloading", "sounds/reloading.mp3");
-    soundManager.loadSound("empty_click", "sounds/empty_click.mp3");
-    soundManager.loadSound("gunholster", "sounds/gunholster.mp3");
+    soundManager.loadSound("shotgunempty", "sounds/shotgunempty.mp3");
     soundManager.loadSound("revolverholstering", "sounds/revolverholstering.mp3");
     
     // Load shotgun sounds
+    soundManager.loadSound("shotgundraw", "sounds/shotgundraw.mp3");
     soundManager.loadSound("shotgunshot", "sounds/shotgunshot.mp3");
     soundManager.loadSound("shotgunreloading", "sounds/shotgunreloading.mp3");
     soundManager.loadSound("shotgunholstering", "sounds/shotgunholstering.mp3");

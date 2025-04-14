@@ -842,7 +842,7 @@ export function applyRecoil(player, multiplier = 1.0) {
     
     // Play an extra sound for the force feedback
     if (player.soundManager) {
-      player.soundManager.playSound("jump", 0); // Remove delay for immediacy
+      player.soundManager.playSound("recoiljump", 0); // Remove delay for immediacy
       
       // Also play an extra impact sound for drama
       player.soundManager.playSound("shotgunshot", 0, 1.5); // Higher volume

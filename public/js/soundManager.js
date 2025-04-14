@@ -19,22 +19,26 @@ export class SoundManager {
     this.soundCategoryMap = {
       'shot': 'weapon',
       'shotgunshot': 'weapon',  // Explicitly add shotgunshot to ensure it's properly categorized
-      'aimclick': 'ui',
+      'revolverdraw': 'ui',
+      'shotgundraw': 'ui',
       'reloading': 'weapon',
       'bellstart': 'ui',
       'woodimpact': 'impact',
       'fleshimpact': 'impact',
       'leftstep': 'footstep',
       'rightstep': 'footstep',
-      'jump': 'footstep',
+      'jumpup': 'ui',         // Change from footstep to ui for higher priority
+      'jumpland': 'footstep',
+      'recoiljump': 'footstep',
       'headshotmarker': 'ui',
       'dramatic': 'ui',
       'eaglescream': 'ui',
       'quickdrawending': 'ui',
       'playerfall': 'impact',
-      'gunholster': 'weapon',
       'revolverholstering': 'weapon',  // Add the new sound name
       'shotgunholstering': 'weapon',   // Add the new sound name
+      'shotgunempty': 'weapon',        // Add shotgun empty sound
+      'eagledeath': 'ui',              // Keep only eagledeath
       'ambience': 'ambient'
     };
     
