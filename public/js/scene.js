@@ -11,6 +11,21 @@ const SKYBOX_ROTATION_SPEED = 0.00001; // Much slower rotation speed
 // Add tumbleweed manager
 let tumbleweedManager;
 
+// Add train animation components
+let train;
+let trainPath;
+let trainProgress = 0;
+const TRAIN_SPEED = 0.0003; // Reduced speed for slower train movement
+const TRAIN_TRACK_LENGTH = 2000; // 2000m straight track - much longer
+let trainDirection = 1; // 1 = forward, -1 = backward
+// Position the track along Z axis (rotated 90°) with one end at the town edge and extending far beyond
+const TRAIN_TRACK_START = new THREE.Vector3(0, 0, -1000);
+const TRAIN_TRACK_END = new THREE.Vector3(0, 0, 1000);
+
+// Make train track endpoints globally available for terrain system
+window.TRAIN_TRACK_START = TRAIN_TRACK_START;
+window.TRAIN_TRACK_END = TRAIN_TRACK_END;
+
 // Add texture state tracking
 const texturesLoaded = {
   skyLoaded: false,
@@ -18,6 +33,9 @@ const texturesLoaded = {
   skyAttempts: 0,
   groundAttempts: 0
 };
+
+// Track FPS updates
+let fpsUpdateCounter = 0;
 
 /**
  * Initializes the Three.js scene, camera, and renderer.
@@ -78,6 +96,9 @@ export function initScene() {
   
   // Create the desert terrain
   createDesertTerrain();
+  
+  // Create circular train track and load train
+  createTrainSystem();
 
   return { camera, renderer };
 }
@@ -613,6 +634,180 @@ function createWesternBuilding(x, y, z) {
 }
 
 /**
+ * Creates a straight train track and loads the train model
+ */
+function createTrainSystem() {
+  // Create a straight path for the train
+  const numPoints = 2; // Just need two points for a straight line
+  const points = [];
+  const trackElevation = 0.5; // Slightly elevated above ground
+
+  // Add track endpoints
+  points.push(new THREE.Vector3(TRAIN_TRACK_START.x, TRAIN_TRACK_START.y + trackElevation, TRAIN_TRACK_START.z));
+  points.push(new THREE.Vector3(TRAIN_TRACK_END.x, TRAIN_TRACK_END.y + trackElevation, TRAIN_TRACK_END.z));
+
+  // Create spline from points
+  trainPath = new THREE.CatmullRomCurve3(points);
+  trainPath.closed = false; // Open path, not a loop
+
+  // Visualize the path with a line - helps with debugging, can be removed later
+  const pathGeometry = new THREE.BufferGeometry().setFromPoints(trainPath.getPoints(200));
+  const pathMaterial = new THREE.LineBasicMaterial({ color: 0x888888 });
+  const pathLine = new THREE.Line(pathGeometry, pathMaterial);
+  scene.add(pathLine);
+  
+  // Load train model
+  const loader = new THREE.GLTFLoader();
+  loader.load(
+    'models/train.glb',
+    (gltf) => {
+      train = gltf.scene;
+      train.traverse((node) => {
+        if (node.isMesh) {
+          node.castShadow = true;
+          node.receiveShadow = true;
+        }
+      });
+      
+      // Scale and position the train
+      train.scale.set(2, 2, 2);
+      
+      // Initial position at the start of track
+      const trackElevation = 0.5;
+      train.position.copy(new THREE.Vector3(TRAIN_TRACK_START.x, trackElevation, TRAIN_TRACK_START.z));
+      
+      // Initial rotation - look toward the end of track
+      const direction = new THREE.Vector3().subVectors(TRAIN_TRACK_END, TRAIN_TRACK_START).normalize();
+      const target = new THREE.Vector3().copy(train.position).add(direction);
+      train.lookAt(target);
+      
+      // Add to scene
+      scene.add(train);
+      
+      console.log('Train model loaded successfully');
+    },
+    (xhr) => {
+      console.log(`Loading train: ${(xhr.loaded / xhr.total) * 100}% loaded`);
+    },
+    (error) => {
+      console.error('Error loading train model:', error);
+      
+      // Fallback: create a simple train placeholder if model fails to load
+      createSimpleTrainPlaceholder();
+    }
+  );
+}
+
+/**
+ * Creates a simple placeholder train if the model fails to load
+ */
+function createSimpleTrainPlaceholder() {
+  // Create a simple train placeholder using basic shapes
+  const trainGroup = new THREE.Group();
+  
+  // Create main body
+  const trainBody = new THREE.Mesh(
+    new THREE.BoxGeometry(5, 2, 2),
+    new THREE.MeshStandardMaterial({ color: 0x333333 })
+  );
+  trainGroup.add(trainBody);
+  
+  // Create locomotive top
+  const trainTop = new THREE.Mesh(
+    new THREE.BoxGeometry(2, 1, 1.8),
+    new THREE.MeshStandardMaterial({ color: 0x222222 })
+  );
+  trainTop.position.set(-1.5, 1.5, 0);
+  trainGroup.add(trainTop);
+  
+  // Create wheels
+  const wheelGeometry = new THREE.CylinderGeometry(0.5, 0.5, 0.2, 16);
+  const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x111111 });
+  
+  // Front wheels
+  const frontWheel1 = new THREE.Mesh(wheelGeometry, wheelMaterial);
+  frontWheel1.rotation.z = Math.PI / 2;
+  frontWheel1.position.set(-1.5, -1, -1);
+  trainGroup.add(frontWheel1);
+  
+  const frontWheel2 = new THREE.Mesh(wheelGeometry, wheelMaterial);
+  frontWheel2.rotation.z = Math.PI / 2;
+  frontWheel2.position.set(-1.5, -1, 1);
+  trainGroup.add(frontWheel2);
+  
+  // Back wheels
+  const backWheel1 = new THREE.Mesh(wheelGeometry, wheelMaterial);
+  backWheel1.rotation.z = Math.PI / 2;
+  backWheel1.position.set(1.5, -1, -1);
+  trainGroup.add(backWheel1);
+  
+  const backWheel2 = new THREE.Mesh(wheelGeometry, wheelMaterial);
+  backWheel2.rotation.z = Math.PI / 2;
+  backWheel2.position.set(1.5, -1, 1);
+  trainGroup.add(backWheel2);
+  
+  // Add chimney
+  const chimney = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.3, 0.3, 1, 8),
+    new THREE.MeshStandardMaterial({ color: 0x222222 })
+  );
+  chimney.position.set(-2, 2, 0);
+  trainGroup.add(chimney);
+  
+  // Set up train as the placeholder
+  train = trainGroup;
+  train.castShadow = true;
+  
+  // Initial position at the start of track
+  const trackElevation = 0.5;
+  train.position.copy(new THREE.Vector3(TRAIN_TRACK_START.x, trackElevation, TRAIN_TRACK_START.z));
+  
+  // Initial rotation - look toward the end of track
+  const direction = new THREE.Vector3().subVectors(TRAIN_TRACK_END, TRAIN_TRACK_START).normalize();
+  const target = new THREE.Vector3().copy(train.position).add(direction);
+  train.lookAt(target);
+  
+  scene.add(train);
+  
+  console.log('Using simple train placeholder');
+}
+
+/**
+ * Updates the train position along the straight track
+ * @param {number} deltaTime - Time since last frame in seconds
+ */
+export function updateTrain(deltaTime) {
+  if (train) {
+    // Increment progress based on direction
+    trainProgress += TRAIN_SPEED * trainDirection;
+    
+    // Change direction and "respawn" when reaching either end
+    if (trainProgress >= 1) {
+      // Reached the end, turn around
+      trainDirection = -1;
+      trainProgress = 1;
+      
+      // Rotate 180 degrees
+      const currentRotation = train.rotation.y;
+      train.rotation.y = currentRotation + Math.PI;
+      
+    } else if (trainProgress <= 0) {
+      // Reached the start, turn around
+      trainDirection = 1;
+      trainProgress = 0;
+      
+      // Rotate 180 degrees
+      const currentRotation = train.rotation.y;
+      train.rotation.y = currentRotation + Math.PI;
+    }
+    
+    // Get position on the path
+    const position = trainPath.getPointAt(trainProgress);
+    train.position.copy(position);
+  }
+}
+
+/**
  * Updates the FPS counter and handles animation
  * @param {THREE.WebGLRenderer} renderer - The renderer.
  * @param {THREE.Camera} camera - The camera.
@@ -630,17 +825,29 @@ export function updateFPS(renderer, camera, deltaTime) {
     }
   }
   
-  // Update tumbleweeds if manager exists
+  // Update FPS counter if enabled
+  if (window.fpsCounterEnabled) {
+    fpsUpdateCounter++;
+    if (fpsUpdateCounter >= 10) { // Update every 10 frames
+      const fps = Math.round(1 / deltaTime);
+      const fpsElement = document.getElementById('fps-counter');
+      if (fpsElement) {
+        fpsElement.textContent = `FPS: ${fps}`;
+      }
+      fpsUpdateCounter = 0;
+    }
+  }
+  
+  // Update tumbleweed positions if manager exists
   if (tumbleweedManager) {
     tumbleweedManager.update(deltaTime);
   }
   
-  // Update FPS counter
-  const fpsCounter = document.getElementById('fps-counter');
-  if (fpsCounter && deltaTime > 0) {
-    const fps = Math.round(1 / deltaTime);
-    fpsCounter.textContent = `FPS: ${fps}`;
-  }
+  // Update train position
+  updateTrain(deltaTime);
+  
+  // Render the final scene
+  renderer.render(scene, camera);
 }
 
 /**

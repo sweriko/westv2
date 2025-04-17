@@ -198,33 +198,60 @@ export class DesertTerrain {
         return duneHeight + secondaryHeight + ridgeHeight;
     }
     
-    // Calculate blend factor based on distance from town center
+    // Check if a point is near the train track
+    isNearTrainTrack(x, z) {
+        // Access global train track constants
+        const trackStart = window.TRAIN_TRACK_START || new THREE.Vector3(0, 0, -1000);
+        const trackEnd = window.TRAIN_TRACK_END || new THREE.Vector3(0, 0, 1000);
+        
+        // Width of the flattened area on each side of the track (1m as requested)
+        const trackWidth = 1.0;
+        
+        // Create a line segment representing the track
+        const trackVector = new THREE.Vector3().subVectors(trackEnd, trackStart).normalize();
+        const pointVector = new THREE.Vector3(x, 0, z);
+        
+        // Calculate the projection of the point onto the track line
+        const trackStartToPoint = new THREE.Vector3().subVectors(pointVector, trackStart);
+        const dotProduct = trackStartToPoint.dot(trackVector);
+        
+        // Clamp the projection to the track segment
+        const projectionScalar = Math.max(0, Math.min(dotProduct, trackEnd.distanceTo(trackStart)));
+        
+        // Calculate the closest point on the track
+        const closestPoint = new THREE.Vector3().copy(trackStart).addScaledVector(trackVector, projectionScalar);
+        
+        // Calculate the distance from the point to the closest point on the track
+        const distance = pointVector.distanceTo(closestPoint);
+        
+        // Check if the point is within the track width and within the track segment
+        return distance <= trackWidth && projectionScalar >= 0 && projectionScalar <= trackEnd.distanceTo(trackStart);
+    }
+    
+    // Get blend factor for town area (0 = in town, 1 = full desert)
     getTownBlendFactor(x, z) {
         // Calculate distance from town center
-        // Town is centered at (0,0,0) in the world
-        const distFromTownCenter = Math.sqrt(
-            Math.pow(x, 2) + 
-            Math.pow(z, 2)
-        );
+        const distFromTown = Math.sqrt(x * x + z * z);
         
-        // Calculate town extents with buffer
-        const townExtent = Math.max(
-            this.townDimensions.width,
-            this.townDimensions.length
-        ) / 2 + this.config.townBuffer;
+        // Check if point is near train track
+        const isOnTrack = this.isNearTrainTrack(x, z);
         
-        // Create smooth blend from town to desert
-        const blendDistance = 50; // Distance over which to blend
-        const blendStart = townExtent;
-        const blendEnd = blendStart + blendDistance;
+        // If near train track, return 0 to make it flat
+        if (isOnTrack) {
+            return 0;
+        }
         
-        if (distFromTownCenter < blendStart) {
-            return 0; // Fully town (flat)
-        } else if (distFromTownCenter > blendEnd) {
-            return 1; // Fully desert
+        // Normal town blending
+        if (distFromTown < this.config.townBuffer) {
+            // Completely flat within town
+            return 0;
+        } else if (distFromTown < this.config.townBuffer * 1.5) {
+            // Gradual transition at edge of town
+            const transitionFactor = (distFromTown - this.config.townBuffer) / (this.config.townBuffer * 0.5);
+            return Math.pow(transitionFactor, 2.0); // Squared for smoother transition
         } else {
-            // Smooth blend in between
-            return (distFromTownCenter - blendStart) / blendDistance;
+            // Full desert terrain
+            return 1.0;
         }
     }
     
