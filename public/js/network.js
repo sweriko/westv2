@@ -22,6 +22,10 @@ export class NetworkManager {
     this.onError = null;
     this.onChatMessage = null;       // When a chat message is received
 
+    // Train system callbacks
+    this.onTrainInit = null;         // When initial train state is received
+    this.onTrainState = null;        // When train state updates are received
+
     // Anti-cheat callbacks
     this.onPositionCorrection = null;// When server corrects client position
     this.onBulletImpact = null;      // When a bullet hits something
@@ -463,6 +467,20 @@ export class NetworkManager {
         }
         break;
 
+      // Train system: Initial train state
+      case 'trainInit':
+        if (this.onTrainInit) {
+          this.onTrainInit(message);
+        }
+        break;
+
+      // Train system: Ongoing train state updates
+      case 'trainState':
+        if (this.onTrainState) {
+          this.onTrainState(message);
+        }
+        break;
+
       default:
         console.warn('Unhandled message:', message);
         break;
@@ -649,6 +667,20 @@ export class NetworkManager {
         type: 'chat',
         message: message
       }));
+    }
+  }
+
+  /**
+   * Explicitly requests current train state from the server
+   */
+  requestTrainState() {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      console.log("Requesting train state from server");
+      this.socket.send(JSON.stringify({
+        type: 'requestTrainState'
+      }));
+    } else {
+      console.warn("Cannot request train state, not connected to server");
     }
   }
 }

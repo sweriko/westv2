@@ -372,6 +372,23 @@ async function init() {
       }
     };
     
+    // Train synchronization: Handle initial train state
+    networkManager.onTrainInit = (data) => {
+      // Import the train functions from scene.js
+      import('./scene.js').then(sceneModule => {
+        sceneModule.setTrainInitialState(data);
+      });
+    };
+    
+    // Train synchronization: Handle ongoing train state updates
+    // We only process the first trainState message if we haven't received trainInit yet
+    networkManager.onTrainState = (data) => {
+      // Import the train functions from scene.js
+      import('./scene.js').then(sceneModule => {
+        sceneModule.updateTrainState(data);
+      });
+    };
+    
     // Anti-cheat: Listen for server-initiated respawn
     networkManager.onRespawn = (position, health, bullets) => {
       if (localPlayer) {

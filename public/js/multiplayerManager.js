@@ -85,6 +85,14 @@ export class MultiplayerManager {
         });
         this.notifyPlayersUpdated();
       }
+      
+      // Request train state explicitly after a short delay to ensure it's received
+      setTimeout(() => {
+        if (networkManager && typeof networkManager.requestTrainState === 'function') {
+          console.log("Requesting train state from server after initialization");
+          networkManager.requestTrainState();
+        }
+      }, 1000);
     };
 
     networkManager.onPlayerJoined = (playerData) => {

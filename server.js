@@ -423,6 +423,9 @@ function initializePlayer(ws, playerId, sessionId, clientId, username, token, is
       }))
   }));
 
+  // Send initial train state
+  sendInitialTrainState(ws);
+
   // Notify others that a new player joined
   broadcastToOthers(playerId, {
     type: 'playerJoined',
@@ -579,6 +582,12 @@ function initializePlayer(ws, playerId, sessionId, clientId, username, token, is
           // Check NFT ownership and update skin permissions
           updatePlayerSkin(playerId, data.walletAddress);
           break;
+
+        // Handle train state request
+        case 'requestTrainState':
+          console.log(`Player ${playerId} requested train state`);
+          sendInitialTrainState(player.ws);
+          return;
 
         default:
           break;
@@ -3116,3 +3125,108 @@ setTimeout(() => {
     console.error("Failed to spawn initial NPCs:", error);
   }
 }, 5000); // Wait for server to fully initialize
+
+// =============================================
+// Train System - Server Side Implementation
+// =============================================
+
+// Train variables
+const TRAIN_SPEED = 0.0003; // Same speed as client to maintain consistency
+const TRAIN_TRACK_START = { x: 0, y: 0, z: -1000 };
+const TRAIN_TRACK_END = { x: 0, y: 0, z: 1000 };
+const TRAIN_TRACK_LENGTH = 2000; // Total length between start and end
+const TRAIN_CYCLE_TIME = Math.floor(TRAIN_TRACK_LENGTH / (TRAIN_SPEED * 60)); // Time in ms for a full one-way trip
+
+// Time-based tracking
+const TRAIN_START_TIME = Date.now(); // Global reference time when train started
+let trainDirection = 1; // Current direction (1 = forward, -1 = backward)
+
+// Send train updates every 2 seconds
+const TRAIN_BROADCAST_INTERVAL = 2000;
+setInterval(() => {
+  broadcastTrainState();
+}, TRAIN_BROADCAST_INTERVAL);
+
+/**
+ * Get current train direction based on elapsed time
+ * @returns {number} 1 for forward, -1 for backward
+ */
+function getCurrentTrainDirection() {
+  const elapsedTime = Date.now() - TRAIN_START_TIME;
+  const cycleCount = Math.floor(elapsedTime / TRAIN_CYCLE_TIME);
+  // Direction changes every cycle
+  return cycleCount % 2 === 0 ? 1 : -1;
+}
+
+/**
+ * Calculate train progress (0-1) based on elapsed time
+ * @returns {number} Progress value between 0-1
+ */
+function calculateTrainProgress() {
+  const elapsedTime = Date.now() - TRAIN_START_TIME;
+  const cycleCount = Math.floor(elapsedTime / TRAIN_CYCLE_TIME);
+  const timeInCurrentCycle = elapsedTime % TRAIN_CYCLE_TIME;
+  
+  // Calculate progress within current cycle (0-1)
+  const cycleProgress = timeInCurrentCycle / TRAIN_CYCLE_TIME;
+  
+  // If even cycle, progress from 0 to 1 (forward)
+  // If odd cycle, progress from 1 to 0 (backward)
+  return cycleCount % 2 === 0 ? cycleProgress : 1 - cycleProgress;
+}
+
+/**
+ * Broadcasts the current train state to all connected clients
+ */
+function broadcastTrainState() {
+  // Only broadcast if there are connected players
+  if (players.size === 0) return;
+  
+  // Get current values
+  const progress = calculateTrainProgress();
+  const direction = getCurrentTrainDirection();
+  
+  const trainState = {
+    type: 'trainState',
+    startTime: TRAIN_START_TIME,
+    cycleTime: TRAIN_CYCLE_TIME,
+    speed: TRAIN_SPEED,
+    trackLength: TRAIN_TRACK_LENGTH,
+    timestamp: Date.now(),
+    // Include current values for debugging
+    progress,
+    direction
+  };
+  
+  console.log(`Broadcasting train state: startTime=${TRAIN_START_TIME}, progress=${progress.toFixed(4)}, direction=${direction}`);
+  broadcastToAll(trainState);
+}
+
+/**
+ * Sends initial train state when a player connects
+ * @param {WebSocket} ws - Player's WebSocket connection
+ */
+function sendInitialTrainState(ws) {
+  if (ws.readyState === WebSocket.OPEN) {
+    // Get current values
+    const progress = calculateTrainProgress();
+    const direction = getCurrentTrainDirection();
+    
+    const trainStateMsg = {
+      type: 'trainInit',
+      startTime: TRAIN_START_TIME,
+      cycleTime: TRAIN_CYCLE_TIME,
+      speed: TRAIN_SPEED,
+      trackLength: TRAIN_TRACK_LENGTH,
+      trackStart: TRAIN_TRACK_START,
+      trackEnd: TRAIN_TRACK_END,
+      timestamp: Date.now(),
+      // Include current values for debugging
+      progress,
+      direction
+    };
+    
+    console.log(`Sending initial train state: startTime=${TRAIN_START_TIME}, progress=${progress.toFixed(4)}, direction=${direction}`);
+    ws.send(JSON.stringify(trainStateMsg));
+  }
+}

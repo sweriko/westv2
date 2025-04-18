@@ -15,12 +15,20 @@ let tumbleweedManager;
 let train;
 let trainPath;
 let trainProgress = 0;
-const TRAIN_SPEED = 0.0003; // Reduced speed for slower train movement
-const TRAIN_TRACK_LENGTH = 2000; // 2000m straight track - much longer
-let trainDirection = 1; // 1 = forward, -1 = backward
-// Position the track along Z axis (rotated 90°) with one end at the town edge and extending far beyond
+// Time-based train tracking
+let trainStartTime = 0; // Global reference time when train started
+let trainCycleTime = 0; // Time in ms for a full one-way trip
+let trainSpeed = 0.0003; // Speed received from server
+let trainTrackLength = 2000; // Track length (matching server)
+let trainDirection = 1; // Current direction
+
+// Position the track along Z axis
 const TRAIN_TRACK_START = new THREE.Vector3(0, 0, -1000);
 const TRAIN_TRACK_END = new THREE.Vector3(0, 0, 1000);
+
+// Flag to control if train has been initialized from server
+let trainInitialized = false;
+let trainLogMessages = true; // Control train update logs
 
 // Make train track endpoints globally available for terrain system
 window.TRAIN_TRACK_START = TRAIN_TRACK_START;
@@ -672,14 +680,40 @@ function createTrainSystem() {
       // Scale and position the train
       train.scale.set(2, 2, 2);
       
-      // Initial position at the start of track
-      const trackElevation = 0.5;
-      train.position.copy(new THREE.Vector3(TRAIN_TRACK_START.x, trackElevation, TRAIN_TRACK_START.z));
+      // Initialize userData for direction tracking
+      train.userData = { lastDirection: trainDirection };
       
-      // Initial rotation - look toward the end of track
-      const direction = new THREE.Vector3().subVectors(TRAIN_TRACK_END, TRAIN_TRACK_START).normalize();
-      const target = new THREE.Vector3().copy(train.position).add(direction);
-      train.lookAt(target);
+      // Position based on current progress (either from server sync or default)
+      if (trainInitialized) {
+        // Calculate position using time-based approach if already initialized
+        trainProgress = calculateTrainProgress();
+        trainDirection = getCurrentTrainDirection();
+        train.userData.lastDirection = trainDirection;
+        
+        console.log(`Train model loaded - positioning using time-based sync: progress=${trainProgress.toFixed(4)}, direction=${trainDirection}`);
+      } else {
+        // Initial position at the start of track as default
+        trainProgress = 0;
+        trainDirection = 1;
+        console.log("Train model loaded - using default starting position");
+      }
+      
+      // Position the train
+      const position = trainPath.getPointAt(trainProgress);
+      train.position.copy(position);
+      
+      // Set rotation based on direction
+      if (trainDirection < 0) {
+        // Should be facing TRAIN_TRACK_START from TRAIN_TRACK_END
+        const dirVector = new THREE.Vector3().subVectors(TRAIN_TRACK_START, TRAIN_TRACK_END).normalize();
+        const target = new THREE.Vector3().copy(train.position).add(dirVector);
+        train.lookAt(target);
+      } else {
+        // Should be facing TRAIN_TRACK_END from TRAIN_TRACK_START
+        const dirVector = new THREE.Vector3().subVectors(TRAIN_TRACK_END, TRAIN_TRACK_START).normalize();
+        const target = new THREE.Vector3().copy(train.position).add(dirVector);
+        train.lookAt(target);
+      }
       
       // Add to scene
       scene.add(train);
@@ -758,14 +792,40 @@ function createSimpleTrainPlaceholder() {
   train = trainGroup;
   train.castShadow = true;
   
-  // Initial position at the start of track
-  const trackElevation = 0.5;
-  train.position.copy(new THREE.Vector3(TRAIN_TRACK_START.x, trackElevation, TRAIN_TRACK_START.z));
+  // Initialize userData for direction tracking
+  train.userData = { lastDirection: trainDirection };
   
-  // Initial rotation - look toward the end of track
-  const direction = new THREE.Vector3().subVectors(TRAIN_TRACK_END, TRAIN_TRACK_START).normalize();
-  const target = new THREE.Vector3().copy(train.position).add(direction);
-  train.lookAt(target);
+  // Position based on current progress (either from server sync or default)
+  if (trainInitialized) {
+    // Calculate position using time-based approach if already initialized
+    trainProgress = calculateTrainProgress();
+    trainDirection = getCurrentTrainDirection();
+    train.userData.lastDirection = trainDirection;
+    
+    console.log(`Train placeholder - positioning using time-based sync: progress=${trainProgress.toFixed(4)}, direction=${trainDirection}`);
+  } else {
+    // Initial position at the start of track as default
+    trainProgress = 0;
+    trainDirection = 1;
+    console.log("Train placeholder - using default starting position");
+  }
+  
+  // Position the train
+  const position = trainPath.getPointAt(trainProgress);
+  train.position.copy(position);
+  
+  // Set rotation based on direction
+  if (trainDirection < 0) {
+    // Should be facing TRAIN_TRACK_START from TRAIN_TRACK_END
+    const dirVector = new THREE.Vector3().subVectors(TRAIN_TRACK_START, TRAIN_TRACK_END).normalize();
+    const target = new THREE.Vector3().copy(train.position).add(dirVector);
+    train.lookAt(target);
+  } else {
+    // Should be facing TRAIN_TRACK_END from TRAIN_TRACK_START
+    const dirVector = new THREE.Vector3().subVectors(TRAIN_TRACK_END, TRAIN_TRACK_START).normalize();
+    const target = new THREE.Vector3().copy(train.position).add(dirVector);
+    train.lookAt(target);
+  }
   
   scene.add(train);
   
@@ -773,15 +833,76 @@ function createSimpleTrainPlaceholder() {
 }
 
 /**
+ * Calculate train progress (0-1) based on elapsed time since train system started
+ * @returns {number} Progress value between 0-1
+ */
+function calculateTrainProgress() {
+  if (!trainInitialized || !trainStartTime || !trainCycleTime) {
+    // Fall back to default
+    return trainProgress;
+  }
+  
+  const elapsedTime = Date.now() - trainStartTime;
+  const cycleCount = Math.floor(elapsedTime / trainCycleTime);
+  const timeInCurrentCycle = elapsedTime % trainCycleTime;
+  
+  // Calculate progress within current cycle (0-1)
+  const cycleProgress = timeInCurrentCycle / trainCycleTime;
+  
+  // If even cycle, progress from 0 to 1 (forward)
+  // If odd cycle, progress from 1 to 0 (backward)
+  return cycleCount % 2 === 0 ? cycleProgress : 1 - cycleProgress;
+}
+
+/**
+ * Get current train direction based on elapsed time
+ * @returns {number} 1 for forward, -1 for backward
+ */
+function getCurrentTrainDirection() {
+  if (!trainInitialized || !trainStartTime || !trainCycleTime) {
+    // Fall back to default
+    return trainDirection;
+  }
+  
+  const elapsedTime = Date.now() - trainStartTime;
+  const cycleCount = Math.floor(elapsedTime / trainCycleTime);
+  // Direction changes every cycle
+  return cycleCount % 2 === 0 ? 1 : -1;
+}
+
+/**
  * Updates the train position along the straight track
  * @param {number} deltaTime - Time since last frame in seconds
  */
 export function updateTrain(deltaTime) {
-  if (train) {
-    // Increment progress based on direction
-    trainProgress += TRAIN_SPEED * trainDirection;
+  if (!train) return;
+  
+  if (trainInitialized) {
+    // Time-based train movement - calculate position based on global timer
+    trainProgress = calculateTrainProgress();
+    trainDirection = getCurrentTrainDirection();
     
-    // Change direction and "respawn" when reaching either end
+    // Get position on the path
+    const position = trainPath.getPointAt(trainProgress);
+    train.position.copy(position);
+    
+    // Check if we need to update train rotation when changing direction
+    const expectedDirection = getCurrentTrainDirection();
+    if (train.userData.lastDirection !== expectedDirection) {
+      // Direction changed, rotate 180 degrees
+      const currentRotation = train.rotation.y;
+      train.rotation.y = currentRotation + Math.PI;
+      train.userData.lastDirection = expectedDirection;
+      
+      if (trainLogMessages) {
+        console.log(`Train changed direction to ${expectedDirection > 0 ? 'forwards' : 'backwards'}`);
+      }
+    }
+  } else {
+    // Original client-side train movement (fallback before server sync)
+    trainProgress += 0.0003 * trainDirection * deltaTime * 60;
+    
+    // Change direction when reaching either end
     if (trainProgress >= 1) {
       // Reached the end, turn around
       trainDirection = -1;
@@ -804,6 +925,82 @@ export function updateTrain(deltaTime) {
     // Get position on the path
     const position = trainPath.getPointAt(trainProgress);
     train.position.copy(position);
+  }
+}
+
+/**
+ * Sets train state from server's initial data
+ * @param {Object} data - Train initialization data from server
+ */
+export function setTrainInitialState(data) {
+  console.log('Received initial train state:', data);
+  
+  if (!data || typeof data.startTime !== 'number' || typeof data.cycleTime !== 'number') {
+    console.error("Invalid train initialization data:", data);
+    return;
+  }
+  
+  // Store time-based tracking values
+  trainStartTime = data.startTime;
+  trainCycleTime = data.cycleTime;
+  trainSpeed = data.speed || 0.0003;
+  trainTrackLength = data.trackLength || 2000;
+  
+  // Calculate current position
+  trainProgress = calculateTrainProgress();
+  trainDirection = getCurrentTrainDirection();
+  
+  console.log(`Train synchronized: startTime=${trainStartTime}, progress=${trainProgress.toFixed(4)}, direction=${trainDirection}`);
+  
+  // Update train position if it exists
+  if (train) {
+    // Store the direction in the train object for rotation tracking
+    if (!train.userData) train.userData = {};
+    train.userData.lastDirection = trainDirection;
+    
+    // Update train position
+    const position = trainPath.getPointAt(trainProgress);
+    train.position.copy(position);
+    
+    // Set initial rotation
+    if (trainDirection < 0) {
+      // Should be facing TRAIN_TRACK_START from TRAIN_TRACK_END
+      const dirVector = new THREE.Vector3().subVectors(TRAIN_TRACK_START, TRAIN_TRACK_END).normalize();
+      const target = new THREE.Vector3().copy(train.position).add(dirVector);
+      train.lookAt(target);
+    } else {
+      // Should be facing TRAIN_TRACK_END from TRAIN_TRACK_START
+      const dirVector = new THREE.Vector3().subVectors(TRAIN_TRACK_END, TRAIN_TRACK_START).normalize();
+      const target = new THREE.Vector3().copy(train.position).add(dirVector);
+      train.lookAt(target);
+    }
+    
+    console.log(`Train positioned at progress=${trainProgress.toFixed(4)}`);
+  } else {
+    console.log("Train model not loaded yet, will position when available");
+  }
+  
+  trainInitialized = true;
+  
+  // Disable verbose logging after 5 seconds
+  setTimeout(() => {
+    trainLogMessages = false;
+    console.log("Train logging reduced");
+  }, 5000);
+}
+
+/**
+ * Updates train state from server updates
+ * @param {Object} data - Train state update from server
+ */
+export function updateTrainState(data) {
+  // Process if we haven't initialized yet
+  if (!trainInitialized) {
+    console.log("Processing train state as initial");
+    setTrainInitialState(data);
+  } else if (trainLogMessages) {
+    // Only log if verbose logging is enabled
+    console.log("Received train update (already initialized)");
   }
 }
 
