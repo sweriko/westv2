@@ -31,11 +31,58 @@ export function updateHealthUI(player) {
 }
 
 /**
-* Creates a temporary damage indicator overlay when player takes damage.
+* Shows a damage indicator when the player takes damage.
 * @param {number} damage - The amount of damage taken.
 * @param {string} hitZone - The hit zone ('head', 'body', 'limbs').
 */
 export function showDamageIndicator(damage, hitZone) {
+  // Use static variables to track combined damage
+  if (!showDamageIndicator.lastTime) {
+    showDamageIndicator.lastTime = 0;
+    showDamageIndicator.combinedDamage = 0;
+    showDamageIndicator.lastHitZone = null;
+    showDamageIndicator.pendingTimeoutId = null;
+  }
+  
+  const now = performance.now();
+  const timeSinceLastHit = now - showDamageIndicator.lastTime;
+  
+  // If this hit is within 50ms of the previous one (shotgun pellets typically arrive together),
+  // or it's the same hit zone, combine the damage
+  if (timeSinceLastHit < 50 || (hitZone === showDamageIndicator.lastHitZone && timeSinceLastHit < 150)) {
+    // Add to the combined damage
+    showDamageIndicator.combinedDamage += damage;
+    showDamageIndicator.lastTime = now;
+    showDamageIndicator.lastHitZone = hitZone;
+    
+    // Clear any pending timeout
+    if (showDamageIndicator.pendingTimeoutId) {
+      clearTimeout(showDamageIndicator.pendingTimeoutId);
+    }
+    
+    // Set a new timeout to show the combined damage
+    showDamageIndicator.pendingTimeoutId = setTimeout(() => {
+      displayDamageIndicator(showDamageIndicator.combinedDamage, showDamageIndicator.lastHitZone);
+      // Reset the tracking variables
+      showDamageIndicator.combinedDamage = 0;
+      showDamageIndicator.pendingTimeoutId = null;
+    }, 50);
+  } else {
+    // This is a new hit, not part of a shotgun blast, show it immediately
+    showDamageIndicator.lastTime = now;
+    showDamageIndicator.lastHitZone = hitZone;
+    showDamageIndicator.combinedDamage = damage;
+    
+    displayDamageIndicator(damage, hitZone);
+  }
+}
+
+/**
+* Helper function to display the damage indicator UI element
+* @param {number} damage - The amount of damage to display
+* @param {string} hitZone - The hit zone ('head', 'body', 'limbs')
+*/
+function displayDamageIndicator(damage, hitZone) {
   // Create damage indicator element if it doesn't exist
   let damageIndicator = document.getElementById('damage-indicator');
   if (!damageIndicator) {

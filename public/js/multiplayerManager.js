@@ -21,6 +21,9 @@ export class MultiplayerManager {
     // Map to track username labels
     this.playerLabels = new Map(); // playerId -> { sprite, div }
     
+    // Initialize nametag visibility - visible by default
+    this._nametagsVisible = true;
+    
     // Create a container for the username labels
     this.createLabelContainer();
 
@@ -33,10 +36,16 @@ export class MultiplayerManager {
     this.initNetwork();
   }
   
+  /**
+   * Creates the container for player username labels
+   */
   createLabelContainer() {
-    // Create a container for all player labels if it doesn't exist
-    if (!document.getElementById('player-labels-container')) {
-      const container = document.createElement('div');
+    // Check if container already exists
+    let container = document.getElementById('player-labels-container');
+    
+    if (!container) {
+      // Create a new container
+      container = document.createElement('div');
       container.id = 'player-labels-container';
       container.style.position = 'absolute';
       container.style.top = '0';
@@ -45,8 +54,19 @@ export class MultiplayerManager {
       container.style.height = '100%';
       container.style.pointerEvents = 'none';
       container.style.overflow = 'hidden';
-      document.body.appendChild(container);
+      container.style.zIndex = '10';
+      
+      // Add to the game container
+      const gameContainer = document.getElementById('game-container');
+      if (gameContainer) {
+        gameContainer.appendChild(container);
+      } else {
+        document.body.appendChild(container);
+      }
     }
+    
+    // Store the reference to the container
+    this.labelContainer = container;
   }
   
   initNetwork() {
@@ -55,6 +75,9 @@ export class MultiplayerManager {
       this.localPlayerId = initData.id;
       console.log(`Local player initialized with ID: ${this.localPlayerId}`);
 
+      // Remove any existing duplicate of the local player (safety check)
+      this.removeLocalPlayerDuplicates();
+
       // Add all existing players (these are remote from our POV)
       if (initData.players && Array.isArray(initData.players)) {
         initData.players.forEach(playerData => {
@@ -62,18 +85,40 @@ export class MultiplayerManager {
         });
         this.notifyPlayersUpdated();
       }
+      
+      // Request train state explicitly after a short delay to ensure it's received
+      setTimeout(() => {
+        if (networkManager && typeof networkManager.requestTrainState === 'function') {
+          console.log("Requesting train state from server after initialization");
+          networkManager.requestTrainState();
+        }
+      }, 1000);
     };
 
     networkManager.onPlayerJoined = (playerData) => {
       if (playerData && playerData.id !== this.localPlayerId) {
+        console.log(`Player joined: ${playerData.id}${playerData.isNpc ? ' (NPC)' : (playerData.isBot ? ' (BOT)' : '')}`);
         this.addPlayer(playerData.id, playerData);
         this.notifyPlayersUpdated();
       }
     };
 
     networkManager.onPlayerLeft = (playerId) => {
+      console.log(`Player left: ${playerId}`);
       this.removePlayer(playerId);
       this.notifyPlayersUpdated();
+    };
+
+    // Add handler for player death events
+    networkManager.onPlayerDeath = (playerId, killedById) => {
+      console.log(`Player ${playerId} was killed by player ${killedById}`);
+      
+      // Find the player model and play death animation
+      const playerModel = this.remotePlayers.get(playerId);
+      if (playerModel && typeof playerModel.playDeathAnimation === 'function') {
+        console.log(`Playing death animation for player ${playerId}`);
+        playerModel.playDeathAnimation();
+      }
     };
 
     networkManager.onPlayerUpdate = (playerId, updatedData) => {
@@ -107,8 +152,42 @@ export class MultiplayerManager {
         return; // Skip normal update as death animation takes precedence
       }
       
+      // Check if player animation state should be reset (after respawn)
+      if (updatedData && updatedData.resetAnimationState === true && playerModel && typeof playerModel.resetAnimationState === 'function') {
+        console.log(`[MultiplayerManager] Resetting animation state for player ${playerId}`);
+        playerModel.resetAnimationState();
+        // Continue with normal update
+      }
+      
       // Normal update
       if (playerModel) {
+        // For NPCs/Bots, cache the latest network data to use in the animation update
+        if (updatedData && (playerModel.isBot || playerModel.isNpc || (updatedData.isNpc || updatedData.isBot))) {
+          // Cache the network data for use in the animation update
+          playerModel._cachedNetworkData = {
+            ...updatedData,
+            isNpc: updatedData.isNpc || playerModel.isNpc,
+            isBot: updatedData.isBot || playerModel.isBot
+          };
+          
+          // Ensure isNpc/isBot flags are set on the model
+          playerModel.isNpc = playerModel._cachedNetworkData.isNpc;
+          playerModel.isBot = playerModel._cachedNetworkData.isBot;
+          
+          // If the NPC is walking, direct to walking animation immediately
+          if (updatedData.isWalking && !playerModel.isWalking) {
+            playerModel.isWalking = true;
+            if (playerModel.directToWalking) {
+              playerModel.directToWalking(false);
+            }
+          } else if (!updatedData.isWalking && playerModel.isWalking) {
+            playerModel.isWalking = false;
+            if (playerModel.directToIdle) {
+              playerModel.directToIdle();
+            }
+          }
+        }
+        
         playerModel.update(updatedData);
       } else if (updatedData) {
         // If we don't have this model yet, create it
@@ -142,7 +221,10 @@ export class MultiplayerManager {
         // Calculate damage based on the health difference or hit zone
         let damage = 20; // Default damage
         
-        if (newHealth !== undefined) {
+        // Check if hitData contains a damage value directly
+        if (hitData && typeof hitData.damage === 'number') {
+          damage = hitData.damage;
+        } else if (newHealth !== undefined) {
           // Calculate damage from previous health
           damage = window.localPlayer.health - newHealth;
           window.localPlayer.health = newHealth;
@@ -160,8 +242,12 @@ export class MultiplayerManager {
           window.localPlayer.takeDamage(damage, hitZone);
         }
         
+        // Make sure damage is a number
+        damage = Number(damage) || 40; // Default to 40 if conversion fails
+        
         // Show damage indicator with proper hit zone
         if (typeof showDamageIndicator === 'function') {
+          console.log(`Showing damage indicator: ${damage} damage to ${hitZone}`);
           showDamageIndicator(damage, hitZone);
         }
         
@@ -254,7 +340,7 @@ export class MultiplayerManager {
 
     // Optional hit sound
     if (this.soundManager) {
-      this.soundManager.playSound("aimclick");
+      this.soundManager.playSound("revolverdraw");
     }
   }
 
@@ -338,46 +424,176 @@ export class MultiplayerManager {
     }
   }
 
-  addPlayer(playerId, data) {
-    const playerModel = new ThirdPersonModel(this.scene, playerId);
-    playerModel.update(data);
+  /**
+   * Adds a remote player to the scene with proper model
+   * @param {number} playerId - ID of the player to add
+   * @param {Object} initialData - Initial player data from server
+   */
+  addPlayer(playerId, initialData = {}) {
+    // Skip if we already have this player
+    if (this.remotePlayers.has(playerId)) return;
+    
+    // Skip if this is the local player ID (safety check to prevent ghost duplicates)
+    if (playerId === this.localPlayerId) {
+      console.log(`MultiplayerManager: Skipping attempt to add local player (ID: ${playerId}) as remote player`);
+      return null;
+    }
+    
+    console.log(`Adding remote player ${playerId} to scene`);
+    
+    let playerModel;
+    
+    // Check if this is an NPC or bot
+    const isNpc = initialData.isNpc || false;
+    const isBot = initialData.isBot || false;
+    
+    // Use specialized NPC models for NPCs
+    if (isNpc && window.npcManager && window.npcManager.instance) {
+      // Let the NPC manager handle creating the appropriate model
+      playerModel = window.npcManager.instance.createOrUpdateNpc(playerId, initialData);
+    } else {
+      // Create standard player model for regular players and bots
+      playerModel = new ThirdPersonModel(this.scene, playerId);
+    }
+    
+    // Set bot/NPC flag if this is not a human player
+    playerModel.isBot = isBot;
+    playerModel.isNpc = isNpc;
+    
+    // Track if this is an AI-controlled character
+    const isAiControlled = playerModel.isBot || playerModel.isNpc;
+    
+    // Add to tracking map - used by main.js for bullet hit detection
     this.remotePlayers.set(playerId, playerModel);
     
-    // Create a username label for this player
-    this.createPlayerLabel(playerId, data.username || `Player ${playerId}`);
+    // Set initial position if provided
+    if (initialData.position) {
+      playerModel.targetPosition.set(
+        initialData.position.x, 
+        initialData.position.y, 
+        initialData.position.z
+      );
+      playerModel.group.position.copy(playerModel.targetPosition);
+    }
+    
+    // Set initial rotation if provided
+    if (initialData.rotation && initialData.rotation.y !== undefined) {
+      playerModel.targetRotation = initialData.rotation.y;
+      playerModel.group.rotation.y = initialData.rotation.y;
+    }
+    
+    // Apply skin information if provided and not an NPC/bot
+    if (!isNpc && !isBot && initialData.skins) {
+      console.log(`Applying initial skin data for player ${playerId}:`, initialData.skins);
+      
+      // Update skin permissions
+      playerModel.updateSkinPermissions(initialData.skins);
+      
+      // Apply banana skin if permission is granted
+      if (initialData.skins.bananaSkin) {
+        console.log(`Player ${playerId} has bananaSkin permission, applying skin on initial join`);
+        
+        // Ensure the model is loaded first
+        if (!playerModel.playerModel) {
+          console.log(`Waiting for player model to load before applying skin for player ${playerId}`);
+          // Add a delay to wait for model to load
+          setTimeout(() => {
+            if (playerModel.playerModel) {
+              playerModel.updateSkin('bananaSkin');
+              // Mark as initially applied to prevent duplicate application
+              playerModel._initialSkinApplied = true;
+              // Store the skin data to prevent redundant updates
+              playerModel._lastSkinUpdate = JSON.stringify(initialData.skins);
+            } else {
+              console.warn(`Player model still not loaded for player ${playerId} after delay`);
+            }
+          }, 1500); // Longer delay to ensure model loads
+        } else {
+          playerModel.updateSkin('bananaSkin');
+          // Mark as initially applied to prevent duplicate application
+          playerModel._initialSkinApplied = true;
+          // Store the skin data to prevent redundant updates
+          playerModel._lastSkinUpdate = JSON.stringify(initialData.skins);
+        }
+      }
+    }
+    
+    // For NPCs/Bots, ensure model is prepared correctly and animation is initialized
+    if (isAiControlled) {
+      // Store the network data for future updates
+      playerModel._cachedNetworkData = { ...initialData };
+      
+      // Ensure animations load and initialize correctly
+      setTimeout(() => {
+        // Set initial animation state based on data
+        if (initialData.isWalking && playerModel.directToWalking) {
+          playerModel.isWalking = true;
+          playerModel.directToWalking(false);
+        } else if (playerModel.directToIdle) {
+          playerModel.isWalking = false;
+          playerModel.directToIdle();
+        }
+      }, 500); // Delay slightly to ensure model is loaded
+    }
+    
+    // Create username label
+    this.createPlayerLabel(playerId, initialData.username || `Player_${playerId}`, isAiControlled);
     
     return playerModel;
   }
 
-  createPlayerLabel(playerId, username) {
-    // Create DOM label
-    const label = document.createElement('div');
-    label.className = 'player-username-label';
-    label.textContent = username;
-    label.style.position = 'absolute';
-    label.style.padding = '2px 8px';
-    label.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-    label.style.color = 'white';
-    label.style.borderRadius = '4px';
-    label.style.fontSize = '14px';
-    label.style.fontWeight = 'bold';
-    label.style.textAlign = 'center';
-    label.style.transition = 'opacity 0.3s';
-    label.style.zIndex = '5';
-    label.style.pointerEvents = 'none';
-    label.style.transform = 'translate(-50%, -100%)';
-    label.style.textShadow = '1px 1px 2px rgba(0, 0, 0, 0.8)';
+  /**
+   * Creates a floating username label for a player
+   * @param {number} playerId - ID of the player
+   * @param {string} username - Username to display
+   * @param {boolean} isAiControlled - Whether this is a bot or NPC
+   */
+  createPlayerLabel(playerId, username, isAiControlled = false) {
+    // Remove any existing label first
+    this.removePlayerLabel(playerId);
     
-    // Add to DOM
-    const container = document.getElementById('player-labels-container');
-    if (container) {
-      container.appendChild(label);
+    // Create label container
+    const div = document.createElement('div');
+    div.className = 'player-label';
+    
+    // Style the label
+    div.style.position = 'absolute';
+    div.style.color = 'white';
+    div.style.fontFamily = 'Arial, sans-serif';
+    div.style.fontSize = '14px';
+    div.style.fontWeight = 'bold';
+    div.style.textShadow = '1px 1px 2px black';
+    div.style.padding = '3px 6px';
+    div.style.borderRadius = '4px';
+    div.style.pointerEvents = 'none';
+    div.style.userSelect = 'none';
+    div.style.zIndex = '10';
+    
+    // Add special styling for AI-controlled characters
+    if (isAiControlled) {
+      div.classList.add('ai-controlled');
+      div.style.backgroundColor = 'rgba(50, 150, 255, 0.5)'; // Blue background for NPCs
+      div.textContent = username; // Remove robot emoji, just use the name
     } else {
-      document.body.appendChild(label);
+      div.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'; // Regular background for players
+      div.textContent = username;
     }
     
-    // Store reference
-    this.playerLabels.set(playerId, { div: label });
+    // Add to DOM
+    this.labelContainer.appendChild(div);
+    
+    // Create THREE.js object to position the label in 3D space
+    const labelObject = new THREE.Object3D();
+    labelObject.position.y = 2.8; // Increased position above player head (was 2.5)
+    
+    // Store references for updating
+    this.playerLabels.set(playerId, { div, labelObject });
+    
+    // If we have this player model, add the label object to it
+    const model = this.remotePlayers.get(playerId);
+    if (model && model.group) {
+      model.group.add(labelObject);
+    }
   }
 
   removePlayer(playerId) {
@@ -392,93 +608,167 @@ export class MultiplayerManager {
   }
   
   removePlayerLabel(playerId) {
-    const labelInfo = this.playerLabels.get(playerId);
-    if (labelInfo && labelInfo.div) {
-      if (labelInfo.div.parentNode) {
-        labelInfo.div.parentNode.removeChild(labelInfo.div);
+    const labelData = this.playerLabels.get(playerId);
+    if (labelData) {
+      // Remove the div from DOM
+      if (labelData.div && labelData.div.parentNode) {
+        labelData.div.parentNode.removeChild(labelData.div);
       }
+      
+      // Remove the 3D object from the player model
+      const model = this.remotePlayers.get(playerId);
+      if (model && model.group && labelData.labelObject) {
+        model.group.remove(labelData.labelObject);
+      }
+      
+      // Remove from tracking
       this.playerLabels.delete(playerId);
     }
   }
 
   update(deltaTime) {
-    // Update all player models
-    for (const [playerId, playerModel] of this.remotePlayers.entries()) {
-      playerModel.animateMovement(deltaTime);
-      
-      // Update player label positions
-      this.updateLabelPosition(playerId, playerModel);
+    // Update player models
+    for (const [id, playerModel] of this.remotePlayers.entries()) {
+      if (playerModel) {
+        // Always call animateMovement which handles the snapshot-based animations too
+        if (playerModel.animateMovement) {
+          playerModel.animateMovement(deltaTime);
+        }
+        
+        // Also call the general update method if it exists
+        if (playerModel.update) {
+          // For NPCs/Bots, make sure we're passing the animation state correctly
+          if (playerModel.isBot || playerModel.isNpc) {
+            // Check for cached data that was received in onPlayerUpdate
+            const cachedData = playerModel._cachedNetworkData;
+            if (cachedData) {
+              // Clone the data to avoid permanent modifications to cached data
+              const clonedData = { ...cachedData };
+              
+              // Only include skin data on initial update or when it has actually changed
+              if (!playerModel._initialSkinApplied) {
+                playerModel._initialSkinApplied = true;
+              } else {
+                // Remove skin data from subsequent updates to prevent constant reapplication
+                delete clonedData.skins;
+              }
+              
+              playerModel.update(clonedData);
+            }
+          } else {
+            // DON'T pass deltaTime to update when the player is in a frozen aim pose
+            // This prevents animation mixer from resetting the animation each frame
+            if (playerModel.isAiming && !playerModel.isShooting && !playerModel.isJumping) {
+              // Skip sending deltaTime update which would reset the animation
+            } else {
+              playerModel.update(deltaTime);
+            }
+          }
+        }
+      }
     }
+    
+    // Update player labels
+    this.updatePlayerLabels();
   }
   
-  updateLabelPosition(playerId, playerModel) {
-    const labelInfo = this.playerLabels.get(playerId);
-    if (!labelInfo || !labelInfo.div) return;
+  /**
+   * Control visibility of ALL player nametags
+   * @param {boolean} visible - Whether nametags should be visible
+   */
+  setAllNametagsVisible(visible) {
+    console.log(`[MultiplayerManager] Setting all nametags visible: ${visible}`);
     
-    const label = labelInfo.div;
+    this.playerLabels.forEach((labelData, playerId) => {
+      if (labelData && labelData.div) {
+        labelData.div.style.display = visible ? 'block' : 'none';
+      }
+    });
     
-    // Hide player names if in a quickdraw match
-    if (window.quickDraw && window.quickDraw.inDuel) {
-      label.style.display = 'none';
+    // Store current global visibility setting
+    this._nametagsVisible = visible;
+  }
+  
+  updatePlayerLabels() {
+    const tempVector = new THREE.Vector3();
+    const canvas = document.querySelector('canvas');
+    
+    if (!canvas) return;
+    
+    // Get camera for projection
+    const camera = window.renderer && window.renderer.camera ? 
+                  window.renderer.camera : 
+                  this.scene.getObjectByProperty('type', 'PerspectiveCamera');
+    
+    if (!camera) return;
+    
+    // If nametags are globally hidden, skip the update
+    if (this._nametagsVisible === false) {
       return;
     }
     
-    // Get player position
-    if (playerModel) {
-      // Use model property if available, otherwise fall back to group
-      const modelObj = playerModel.playerModel || playerModel.model || playerModel.group;
+    this.playerLabels.forEach((labelData, playerId) => {
+      const { div, labelObject } = labelData;
+      if (!div) return;
       
-      if (!modelObj) {
-        label.style.display = 'none';
-        return;
+      const model = this.remotePlayers.get(playerId);
+      if (!model || !model.group) return;
+      
+      // Get world position
+      tempVector.setFromMatrixPosition(labelObject.matrixWorld);
+      
+      // Project to 2D screen coordinates
+      tempVector.project(camera);
+      
+      // Convert to CSS coordinates
+      const x = (tempVector.x * 0.5 + 0.5) * canvas.clientWidth;
+      const y = (-(tempVector.y * 0.5) + 0.5) * canvas.clientHeight;
+      
+      // Check if label is in front of the camera
+      if (tempVector.z > 1) {
+        div.style.display = 'none';
+      } else {
+        div.style.display = 'block';
+        div.style.transform = `translate(-50%, -50%)`;
+        div.style.left = `${x}px`;
+        div.style.top = `${y}px`;
       }
-      
-      const playerPos = new window.THREE.Vector3();
-      modelObj.getWorldPosition(playerPos);
-      
-      // Add height offset to position the label above the player's head
-      playerPos.y += 2.2;
-      
-      // Convert 3D position to screen coordinates
-      const camera = window.camera || (window.localPlayer && window.localPlayer.camera);
-      if (!camera) return;
-      
-      // Project position to screen space
-      const widthHalf = window.innerWidth / 2;
-      const heightHalf = window.innerHeight / 2;
-      
-      // Clone position to avoid modifying the original
-      const projectedPos = playerPos.clone();
-      projectedPos.project(camera);
-      
-      // Convert to screen coordinates
-      const x = (projectedPos.x * widthHalf) + widthHalf;
-      const y = -(projectedPos.y * heightHalf) + heightHalf;
-      
-      // Check if player is behind camera
-      if (projectedPos.z > 1) {
-        label.style.display = 'none';
-        return;
-      }
-      
-      // Update label position
-      label.style.display = 'block';
-      label.style.left = `${x}px`;
-      label.style.top = `${y}px`;
-      
-      // Distance fading (fade out when too far)
-      const distance = playerPos.distanceTo(camera.position);
-      const maxDistance = 30;
-      const opacity = 1 - Math.min(Math.max(0, (distance - 15) / maxDistance), 0.9);
-      label.style.opacity = opacity.toString();
-    } else {
-      label.style.display = 'none';
-    }
+    });
   }
 
   notifyPlayersUpdated() {
     if (typeof this.onRemotePlayersUpdated === 'function') {
       this.onRemotePlayersUpdated(this.remotePlayers);
+    }
+  }
+
+  /**
+   * Removes any existing player models with the same ID as the local player
+   * This prevents the "ghost player" issue where a player sees their own model
+   */
+  removeLocalPlayerDuplicates() {
+    if (!this.localPlayerId) return;
+    
+    // Check if there's a model with our ID in the remote players map
+    if (this.remotePlayers.has(this.localPlayerId)) {
+      console.log(`Removing duplicate local player model with ID: ${this.localPlayerId}`);
+      
+      // Get the model
+      const duplicateModel = this.remotePlayers.get(this.localPlayerId);
+      
+      // Dispose of the model properly
+      if (duplicateModel) {
+        duplicateModel.dispose();
+      }
+      
+      // Remove from the map
+      this.remotePlayers.delete(this.localPlayerId);
+      
+      // Remove username label
+      this.removePlayerLabel(this.localPlayerId);
+      
+      // Notify that remote players have changed
+      this.notifyPlayersUpdated();
     }
   }
 }

@@ -26,6 +26,11 @@ export class FlyingEagle {
     this.group.add(this.lookAhead);
     this.lookAhead.position.set(0, 0, -10); // 10 units ahead of eagle
     
+    // Reusable objects for calculations to avoid creating new objects each frame
+    this._tmpVec3 = new THREE.Vector3();
+    this._lookAtPoint = new THREE.Vector3();
+    this._forwardDir = new THREE.Vector3();
+    
     // Load the eagle model
     this.loadEagleModel();
     
@@ -50,6 +55,31 @@ export class FlyingEagle {
     
     // Flag to indicate if we're in a quickdraw match
     this.inQuickdraw = false;
+
+    // Hitbox and state
+    this.hitbox = new THREE.Sphere(this.group.position.clone(), 2.0); // Generous hitbox radius
+    this.isHit = false;
+    this.hitTime = 0;
+    this.fallSpeed = 0;
+    this.rotationSpeed = 0;
+    this.groundTime = 0;
+    this.sinkTime = 0;
+    this.isSinking = false;
+    this.originalHeight = 0;
+    this.originalRotation = new THREE.Euler();
+    
+    // Add random rotation parameters
+    this.tumbleSpeeds = {
+      x: 0,
+      y: 0,
+      z: 0
+    };
+    this.tumbleAcceleration = {
+      x: 0,
+      y: 0,
+      z: 0
+    };
+    this.lastTumbleUpdate = 0;
   }
 
   /**
@@ -198,18 +228,28 @@ export class FlyingEagle {
     const flightRadius = Math.max(25, distanceBetweenPlayers * 1.2); // Reduced from 40 to 25 minimum and multiplier from 2.5 to 1.2
     const flightHeight = 18; // Reduced from 25 to 18
     
+    // Set a slower flight speed for QuickDraw aerial view
+    this.flightSpeed = 0.15; // Reduced from 0.3 to 0.15 for slower circling
+    
     // Set the circular path around the duel
     this.setCircularFlightPath(duelCenter, flightHeight, flightRadius);
     
-    console.log(`Eagle quickdraw flight path set - radius: ${flightRadius.toFixed(1)}, height: ${flightHeight.toFixed(1)}`);
+    console.log(`Eagle quickdraw flight path set - radius: ${flightRadius.toFixed(1)}, height: ${flightHeight.toFixed(1)}, speed: ${this.flightSpeed}`);
   }
   
   /**
-   * Return to normal patrol mode after quickdraw is over
+   * Return to default flight path (after quickdraw)
    */
   returnToDefaultPath() {
     this.inQuickdraw = false;
+    
+    // Reset to default flight speed
+    this.flightSpeed = 0.3;
+    
+    // Reset to default flight path
     this.setDefaultFlightPath();
+    
+    console.log('Eagle returned to default flight path');
   }
 
   /**
@@ -224,20 +264,20 @@ export class FlyingEagle {
     this.group.position.set(x, this.center.y + this.height, z);
     
     // Calculate forward direction (tangent to circle)
-    const forwardDirection = new THREE.Vector3(
+    this._forwardDir.set(
       -Math.sin(this.currentAngle),
       0,
       Math.cos(this.currentAngle)
     ).normalize();
     
     // Make the eagle always face tangent to the circle (direction of movement)
-    const lookAtPoint = new THREE.Vector3(
-      x + forwardDirection.x * 10,
+    this._lookAtPoint.set(
+      x + this._forwardDir.x * 10,
       this.center.y + this.height,
-      z + forwardDirection.z * 10
+      z + this._forwardDir.z * 10
     );
     
-    this.group.lookAt(lookAtPoint);
+    this.group.lookAt(this._lookAtPoint);
     
     // Apply a slight bank toward the center of the circle
     const bankAngle = 0.2; // Radians - a slight bank
@@ -301,21 +341,204 @@ export class FlyingEagle {
   }
 
   /**
+   * Handles collision with a bullet
+   * @returns {boolean} True if hit was successful
+   */
+  hit() {
+    if (!this.isLoaded || this.isHit) return false;
+    
+    this.isHit = true;
+    this.hitTime = performance.now() / 1000.0;
+    this.fallSpeed = 0;
+    
+    // Use a single random call and derive values (more efficient)
+    const randomValues = [
+      Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5,
+      Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5
+    ];
+    
+    // Initialize random tumble speeds with higher values for more dramatic effect
+    this.tumbleSpeeds = {
+      x: randomValues[0] * 8, 
+      y: randomValues[1] * 8,
+      z: randomValues[2] * 8
+    };
+    
+    // Initialize random tumble accelerations with higher values
+    this.tumbleAcceleration = {
+      x: randomValues[3] * 4,
+      y: randomValues[4] * 4,
+      z: randomValues[5] * 4
+    };
+    
+    this.lastTumbleUpdate = this.hitTime;
+    this.originalHeight = this.group.position.y;
+    this.originalRotation.copy(this.group.rotation);
+    
+    // Stop the fly animation if it exists
+    if (this.animations['flycycle']) {
+      this.animations['flycycle'].stop();
+    }
+    
+    // Play eagle hit sound
+    if (window.soundManager) {
+      // Play eagle death sound only
+      window.soundManager.playSound('eagledeath', 0, 1.0);
+    } else if (window.localPlayer && window.localPlayer.soundManager) {
+      // Play eagle death sound only
+      window.localPlayer.soundManager.playSound(
+        'eagledeath',
+        0,
+        0.8 + Math.random() * 0.4,
+        false
+      );
+    }
+    
+    return true;
+  }
+
+  /**
    * Updates the eagle's position and animations
    * @param {number} deltaTime - Time elapsed since last frame in seconds
    */
   update(deltaTime) {
     if (!this.isLoaded) return;
     
-    // Always update position - eagle always flies regardless of camera state
-    this.currentAngle += this.flightSpeed * deltaTime;
+    // Update hitbox position
+    this.hitbox.center.copy(this.group.position);
     
-    // Update position on the circle
-    this.updateCircularPosition();
-    
-    // Update animations
-    if (this.animationMixer) {
-      this.animationMixer.update(deltaTime);
+    // Handle normal eagle logic when not hit
+    if (!this.isHit) {
+      // Always update position - eagle always flies regardless of camera state
+      this.currentAngle += this.flightSpeed * deltaTime;
+      
+      // Update position on the circle
+      this.updateCircularPosition();
+      
+      // Update animations with adjusted speed for quickdraw mode
+      if (this.animationMixer) {
+        // Use half animation speed when in quickdraw mode to match the flight speed
+        const animationTimeScale = this.inQuickdraw ? 0.5 : 1.0;
+        
+        // Set the time scale for each animation
+        if (this.animations['flycycle']) {
+          this.animations['flycycle'].setEffectiveTimeScale(animationTimeScale);
+        }
+        
+        this.animationMixer.update(deltaTime);
+      }
+    } else {
+      // Handle falling animation
+      const currentTime = performance.now() / 1000.0;
+      const timeSinceHit = currentTime - this.hitTime;
+      
+      if (!this.isSinking) {
+        // Apply gravity and rotation during fall
+        this.fallSpeed += 9.8 * deltaTime; // Gravity
+        this.group.position.y -= this.fallSpeed * deltaTime;
+        
+        // Update tumble speeds less frequently to improve performance
+        if (currentTime - this.lastTumbleUpdate > 0.1) {
+          // Pre-calculate random values in a batch (more efficient)
+          const randomX = (Math.random() - 0.5) * 4;
+          const randomY = (Math.random() - 0.5) * 4;
+          const randomZ = (Math.random() - 0.5) * 4;
+          
+          this.tumbleAcceleration.x = randomX;
+          this.tumbleAcceleration.y = randomY;
+          this.tumbleAcceleration.z = randomZ;
+          
+          this.lastTumbleUpdate = currentTime;
+        }
+        
+        // Calculate rotation factors once to avoid redundant calculations
+        const rotationFactor = deltaTime * 2;
+        const dampingFactor = 0.99;
+        
+        // Apply tumble accelerations with higher impact
+        this.tumbleSpeeds.x = (this.tumbleSpeeds.x + this.tumbleAcceleration.x * deltaTime * 2) * dampingFactor;
+        this.tumbleSpeeds.y = (this.tumbleSpeeds.y + this.tumbleAcceleration.y * deltaTime * 2) * dampingFactor;
+        this.tumbleSpeeds.z = (this.tumbleSpeeds.z + this.tumbleAcceleration.z * deltaTime * 2) * dampingFactor;
+        
+        // Apply rotations with higher magnitude
+        this.group.rotation.x += this.tumbleSpeeds.x * rotationFactor;
+        this.group.rotation.y += this.tumbleSpeeds.y * rotationFactor;
+        this.group.rotation.z += this.tumbleSpeeds.z * rotationFactor;
+        
+        // Add more pronounced forward tilt based on fall speed
+        const forwardTilt = Math.min(this.fallSpeed * 0.1, 1.0);
+        this.group.rotation.x += forwardTilt * deltaTime;
+        
+        // Add some side-to-side sway based on fall speed (pre-calculated)
+        const sineValue = Math.sin(timeSinceHit * 2);
+        const swayAmount = Math.min(this.fallSpeed * 0.05, 0.3) * deltaTime;
+        this.group.rotation.z += sineValue * swayAmount;
+        
+        // Check if we've hit the ground
+        if (this.group.position.y <= 0.1) {
+          this.group.position.y = 0.1;
+          this.groundTime = currentTime;
+          this.isSinking = true;
+          
+          // Stop all rotations
+          this.tumbleSpeeds.x = 0;
+          this.tumbleSpeeds.y = 0;
+          this.tumbleSpeeds.z = 0;
+          this.tumbleAcceleration.x = 0;
+          this.tumbleAcceleration.y = 0;
+          this.tumbleAcceleration.z = 0;
+        }
+      } else {
+        // Handle sinking into ground
+        const timeSinceGround = currentTime - this.groundTime;
+        
+        if (timeSinceGround >= 3.0) { // Wait 3 seconds before sinking
+          if (!this.sinkTime) {
+            this.sinkTime = currentTime;
+          }
+          
+          const sinkProgress = (currentTime - this.sinkTime) / 2.0; // 2 second sink animation
+          if (sinkProgress >= 1.0) {
+            // Reset eagle
+            this.reset();
+            return;
+          }
+          
+          // Calculate rotation adjustment once
+          const rotFactor = (1 - sinkProgress * 0.1);
+          
+          // Sink into ground
+          this.group.position.y = -sinkProgress * 0.5;
+          this.group.rotation.z *= rotFactor;
+          this.group.rotation.x *= rotFactor;
+        }
+      }
     }
+  }
+
+  /**
+   * Resets the eagle after being hit
+   */
+  reset() {
+    this.isHit = false;
+    this.hitTime = 0;
+    this.fallSpeed = 0;
+    this.rotationSpeed = 0;
+    this.groundTime = 0;
+    this.sinkTime = 0;
+    this.isSinking = false;
+    
+    // Reset position and rotation
+    this.group.position.y = this.originalHeight;
+    this.group.rotation.copy(this.originalRotation);
+    
+    // Restart fly animation
+    if (this.animations['flycycle']) {
+      this.animations['flycycle'].reset();
+      this.animations['flycycle'].play();
+    }
+    
+    // Reset to default flight path
+    this.setDefaultFlightPath();
   }
 } 

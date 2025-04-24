@@ -7,7 +7,7 @@ import { MultiplayerManager } from './multiplayerManager.js';
 import { Bullet } from './bullet.js';
 import { ThirdPersonModel } from './playerModel.js';
 import { PhysicsSystem } from './physics.js';
-import { createMuzzleFlash, createSmokeEffect, createImpactEffect, preloadMuzzleFlash, preloadSmokeEffect, SmokeRingEffect } from './effects.js';
+import { createMuzzleFlash, createSmokeEffect, createImpactEffect, preloadMuzzleFlash, preloadSmokeEffect, SmokeRingEffect, DrunkennessEffect } from './effects.js';
 import { QuickDraw } from './quickDraw.js';
 import { updateAmmoUI, updateHealthUI } from './ui.js';
 import { Viewmodel } from './viewmodel.js';
@@ -15,8 +15,9 @@ import { initPlayerIdentity, verifyIdentityWithServer } from './playerIdentity.j
 import logger from './logger.js';
 import { FlyingEagle } from './flyingEagle.js';
 import { initChat, handleChatMessage, addSystemMessage } from './chat.js';
+import { initNpcManager, npcManager } from './npcManager.js';
+console.log("NPC Manager module loaded");
 import './viewmodel-config.js';
-import './bullet-trajectory-config.js';
 
 // Check if device is mobile
 function isMobileDevice() {
@@ -65,21 +66,7 @@ window.renderer = {
 // Initialize the application
 async function init() {
   try {
-    // Initialize player identity before anything else
-    const playerIdentity = await initPlayerIdentity();
-    console.log(`Welcome back, ${playerIdentity.username}! Player ID: ${playerIdentity.id}`);
-    
-    // Check if this was a first-time user to determine when to show instructions
-    const isFirstTimeUser = playerIdentity.lastLogin === playerIdentity.createdAt;
-    
-    // Verify identity with server (will be used in future server-side validation)
-    const verificationResult = await verifyIdentityWithServer(playerIdentity);
-    if (!verificationResult.verified) {
-      console.warn('Identity verification failed, using local identity only');
-    }
-    
-    // Expose player identity to window for easy access from other modules
-    window.playerIdentity = playerIdentity;
+    // Start the init process without waiting for player identity
     
     // Set debug mode flag
     window.debugMode = false; // Disabled for production
@@ -93,10 +80,19 @@ async function init() {
     // Detect if we're on a mobile device
     window.isMobile = isMobileDevice();
     
-    // Setup scene - use the scene from initScene instead of creating a new one
+    // Setup viewport detection and handling
+    setupViewportHandling();
+    
+    // Initialize scene - use the scene from initScene instead of creating a new one
     const sceneSetup = initScene();
     camera = sceneSetup.camera;
     renderer = sceneSetup.renderer;
+    
+    // Initialize NPC manager with the scene
+    const npcManagerInstance = initNpcManager(scene);
+    
+    // Make NPC manager globally accessible
+    window.npcManager = npcManager;
     
     // Set up global renderer access for camera switching
     window.renderer.instance = renderer;
@@ -108,10 +104,10 @@ async function init() {
 
     const soundManager = new SoundManager();
     
-    // Load all sounds for everyone
+    // Start loading sounds while the user is entering their name
     // Load shot sounds
     soundManager.loadSound("shot", "sounds/shot.mp3");
-    soundManager.loadSound("aimclick", "sounds/aimclick.mp3");
+    soundManager.loadSound("revolverdraw", "sounds/revolverdraw.mp3");
     // replacing shellejection with the combined reloading sound
     soundManager.loadSound("reloading", "sounds/reloading.mp3");
     // Load the bell start sound for Quick Draw start signal
@@ -123,25 +119,68 @@ async function init() {
     // Load footstep and jump sounds
     soundManager.loadSound("leftstep", "sounds/leftstep.mp3");
     soundManager.loadSound("rightstep", "sounds/rightstep.mp3");
-    soundManager.loadSound("jump", "sounds/jump.mp3");
+    soundManager.loadSound("jumpup", "sounds/jumpup.mp3");
+    soundManager.loadSound("jumpland", "sounds/jumpland.mp3");
+    soundManager.loadSound("recoiljump", "sounds/recoiljump.mp3");
     
     // Load headshot marker sound
     soundManager.loadSound("headshotmarker", "sounds/headshotmarker.mp3");
     
+    // Load hitmarker sound
+    soundManager.loadSound("hitmarker", "sounds/hitmarker.mp3");
+    
     // Load new sound effects
     soundManager.loadSound("dramatic", "sounds/dramatic.mp3");
     soundManager.loadSound("eaglescream", "sounds/eaglescream.mp3");
+    soundManager.loadSound("eagledeath", "sounds/eagledeath.mp3");
     soundManager.loadSound("quickdrawending", "sounds/quickdrawending.mp3");
     soundManager.loadSound("playerfall", "sounds/playerfall.mp3");
-    soundManager.loadSound("gunholster", "sounds/gunholster.mp3");
     soundManager.loadSound("ambience", "sounds/ambience.mp3");
+    
+    // Load gun sounds
+    soundManager.loadSound("shot", "sounds/shot.mp3");
+    soundManager.loadSound("revolverdraw", "sounds/revolverdraw.mp3");
+    soundManager.loadSound("reloading", "sounds/reloading.mp3");
+    soundManager.loadSound("shotgunempty", "sounds/shotgunempty.mp3");
+    soundManager.loadSound("revolverholstering", "sounds/revolverholstering.mp3");
+    
+    // Load shotgun sounds
+    soundManager.loadSound("shotgundraw", "sounds/shotgundraw.mp3");
+    soundManager.loadSound("shotgunshot", "sounds/shotgunshot.mp3");
+    soundManager.loadSound("shotgunreloading", "sounds/shotgunreloading.mp3");
+    soundManager.loadSound("shotgunholstering", "sounds/shotgunholstering.mp3");
+    
+    // Load impact sounds
+    soundManager.loadSound("woodimpact", "sounds/woodimpact.mp3");
     
     // Start background ambient music loop
     setTimeout(() => {
       soundManager.playSound("ambience", 0, 0.4, true); // Play at lower volume in a loop
     }, 1000); // Slight delay to ensure the sound is loaded
     
-    // Preload all visual effects to prevent FPS drops on first use - for all players now
+    // In parallel, initialize player identity
+    // This will show the name prompt for first-time users if needed
+    // but won't block the rest of the initialization
+    const playerIdentityPromise = initPlayerIdentity().then(playerIdentity => {
+      console.log(`Welcome back, ${playerIdentity.username}! Player ID: ${playerIdentity.id}`);
+      
+      // Check if this was a first-time user to determine when to show instructions
+      const isFirstTimeUser = playerIdentity.lastLogin === playerIdentity.createdAt;
+      
+      // Verify identity with server (will be used in future server-side validation)
+      return verifyIdentityWithServer(playerIdentity).then(verificationResult => {
+        if (!verificationResult.verified) {
+          console.warn('Identity verification failed, using local identity only');
+        }
+        
+        // Expose player identity to window for easy access from other modules
+        window.playerIdentity = playerIdentity;
+        
+        return playerIdentity;
+      });
+    });
+
+    // Preload all visual effects to prevent FPS drops on first use
     if (!window.isMobile) {
       console.log("Preloading visual effects...");
       // Preload muzzle flash effect
@@ -181,25 +220,60 @@ async function init() {
         scene.remove(dummyBullet.mesh);
       }, 100);
     }
-    
-    // Initialize multiplayer manager
+
+    // Set up multiplayer manager to handle other players
     multiplayerManager = new MultiplayerManager(scene, soundManager, remotePlayers);
+    
+    // Wait for player identity to be resolved before continuing with network/player setup
+    const playerIdentity = await playerIdentityPromise;
+    
+    // Initialize the phantom wallet adapter with network manager for NFT verification
+    if (typeof phantomWalletAdapter !== 'undefined') {
+      console.log('Initializing Phantom wallet adapter');
+      phantomWalletAdapter.init(networkManager);
+      
+      // Listen for wallet connection events to apply skins
+      document.addEventListener('walletConnected', (e) => {
+        console.log('Wallet connected event received in main.js');
+      });
+    } else {
+      console.warn('Phantom wallet adapter not available');
+    }
+    
+    // Make multiplayerManager globally accessible
+    window.multiplayerManager = multiplayerManager;
+
+    // Create flying eagle that follows the camera
+    window.flyingEagle = new FlyingEagle({
+      scene: scene,
+      camera: camera
+    });
+    
+    // Set the default town center for the eagle to fly around
+    const townCenter = new THREE.Vector3(0, 0, 0); // Center of the town
+    window.flyingEagle.townCenter = townCenter;
+    window.flyingEagle.setDefaultFlightPath();
 
     // Initialize the local player
     localPlayer = new Player({
-      scene,
-      camera,
-      soundManager,
+      scene: scene,
+      camera: camera,
+      soundManager: soundManager,
       onShoot: handleLocalPlayerShoot  // callback for local shooting
     });
     // Make localPlayer globally accessible for hit updates.
     window.localPlayer = localPlayer;
 
-    // Initialize input and store mobile controls interface
+    // Initialize UI elements - desktop weapon indicators
+    createDesktopWeaponIndicators();
+    
+    // Initialize first-person controls
     const mobileControls = initInput(renderer, localPlayer, soundManager);
     
-    // Make mobile controls globally accessible if on mobile
-    window.mobileControls = mobileControls;
+    // Make mobile controls globally accessible
+    if (isMobileDevice()) {
+      window.mobileControls = mobileControls;
+    }
     
     // Make scene globally accessible for physics visualization
     window.scene = scene;
@@ -232,6 +306,10 @@ async function init() {
 
     // Initialize Quick Draw game mode after the local player is created
     quickDraw = new QuickDraw(scene, localPlayer, networkManager, soundManager);
+    
+    // Initialize drunkenness effect - pass both player and camera arguments
+    const drunkennessEffect = new DrunkennessEffect(localPlayer, camera);
+    console.log('Drunkenness effect initialized');
     
     // Initialize the QuickDraw game mode
     quickDraw.init();
@@ -294,6 +372,23 @@ async function init() {
       }
     };
     
+    // Train synchronization: Handle initial train state
+    networkManager.onTrainInit = (data) => {
+      // Import the train functions from scene.js
+      import('./scene.js').then(sceneModule => {
+        sceneModule.setTrainInitialState(data);
+      });
+    };
+    
+    // Train synchronization: Handle ongoing train state updates
+    // We only process the first trainState message if we haven't received trainInit yet
+    networkManager.onTrainState = (data) => {
+      // Import the train functions from scene.js
+      import('./scene.js').then(sceneModule => {
+        sceneModule.updateTrainState(data);
+      });
+    };
+    
     // Anti-cheat: Listen for server-initiated respawn
     networkManager.onRespawn = (position, health, bullets) => {
       if (localPlayer) {
@@ -315,6 +410,141 @@ async function init() {
         updateHealthUI(localPlayer);
         updateAmmoUI(localPlayer);
       }
+    };
+
+    // Handle local player death
+    networkManager.onDeath = (killerId) => {
+      console.log(`You were killed by player ${killerId}`);
+      
+      // Skip death message if in QuickDraw duel (defeat message is shown instead)
+      if (window.quickDraw && window.quickDraw.inDuel) {
+        console.log('In QuickDraw duel, skipping automatic death message');
+        return;
+      }
+      
+      // Show death message
+      const deathMessage = document.createElement('div');
+      deathMessage.innerText = 'YOU DIED';
+      deathMessage.style.position = 'fixed';
+      deathMessage.style.top = '50%';
+      deathMessage.style.left = '50%';
+      deathMessage.style.transform = 'translate(-50%, -50%)';
+      deathMessage.style.color = '#FF0000';
+      deathMessage.style.fontSize = '36px';
+      deathMessage.style.fontWeight = 'bold';
+      deathMessage.style.zIndex = '1000';
+      document.getElementById('game-container').appendChild(deathMessage);
+      
+      // Create a red overlay effect
+      const deathOverlay = document.createElement('div');
+      deathOverlay.style.position = 'fixed';
+      deathOverlay.style.top = '0';
+      deathOverlay.style.left = '0';
+      deathOverlay.style.width = '100%';
+      deathOverlay.style.height = '100%';
+      deathOverlay.style.backgroundColor = 'rgba(255, 0, 0, 0.3)';
+      deathOverlay.style.zIndex = '999';
+      document.getElementById('game-container').appendChild(deathOverlay);
+      
+      // Store original mouse handler for later restoration
+      const origMouseMove = document.onmousemove;
+      
+      // Disable player controls during death animation
+      if (localPlayer) {
+        localPlayer.canMove = false;
+        localPlayer.canAim = false;
+        
+        // Save original camera rotation
+        const originalRotation = localPlayer.camera.rotation.clone();
+        
+        // Apply death camera rotation - rotate camera to look down at the ground
+        // Start a smooth rotation animation from current position to looking down
+        const deathCameraDuration = 1000; // 1 second for the rotation animation
+        const startTime = Date.now();
+        const targetRotationX = Math.PI / 2; // Looking down at the ground (90 degrees) instead of up
+        
+        // Create an animation function that rotates the camera over time
+        const rotateCameraUp = () => {
+          const elapsed = Date.now() - startTime;
+          const progress = Math.min(elapsed / deathCameraDuration, 1);
+          
+          // Use an easing function (ease-out) for smoother animation
+          const easeOut = 1 - Math.pow(1 - progress, 2);
+          
+          // Interpolate between original and target rotation
+          localPlayer.camera.rotation.x = originalRotation.x * (1 - easeOut) + targetRotationX * easeOut;
+          
+          // Continue the animation until complete
+          if (progress < 1) {
+            requestAnimationFrame(rotateCameraUp);
+          }
+        };
+        
+        // Start the camera rotation animation
+        rotateCameraUp();
+        
+        // Disable mouse look temporarily to prevent camera movement
+        document.onmousemove = (e) => {
+          // Block mouse movement during death animation
+          e.stopPropagation();
+          return false;
+        };
+        
+        // Play death animation on local player model if it exists
+        if (localPlayer.model && typeof localPlayer.model.playDeathAnimation === 'function') {
+          localPlayer.model.playDeathAnimation();
+        }
+        
+        // Play death sound
+        if (localPlayer.soundManager) {
+          localPlayer.soundManager.playSound("playerfall", 0, 0.8);
+        }
+      }
+      
+      // Remove message and overlay after animation
+      // Also restore mouse control
+      setTimeout(() => {
+        if (deathMessage.parentNode) {
+          deathMessage.parentNode.removeChild(deathMessage);
+        }
+        if (deathOverlay.parentNode) {
+          deathOverlay.parentNode.removeChild(deathOverlay);
+        }
+        
+        // Restore mouse movement control
+        document.onmousemove = origMouseMove;
+      }, 2000); // Match the server respawn delay
+    };
+    
+    // Handle when the local player kills someone
+    networkManager.onKill = (targetId) => {
+      console.log(`You killed player ${targetId}`);
+      
+      // Skip kill message if in QuickDraw duel (victory message is shown instead)
+      if (window.quickDraw && window.quickDraw.inDuel) {
+        console.log('In QuickDraw duel, skipping kill message');
+        return;
+      }
+      
+      // Show kill message
+      const killMessage = document.createElement('div');
+      killMessage.innerText = 'KILL!';
+      killMessage.style.position = 'fixed';
+      killMessage.style.top = '50%';
+      killMessage.style.left = '50%';
+      killMessage.style.transform = 'translate(-50%, -50%)';
+      killMessage.style.color = '#00FF00';
+      killMessage.style.fontSize = '36px';
+      killMessage.style.fontWeight = 'bold';
+      killMessage.style.zIndex = '1000';
+      document.getElementById('game-container').appendChild(killMessage);
+      
+      // Remove message after a short time
+      setTimeout(() => {
+        if (killMessage.parentNode) {
+          killMessage.parentNode.removeChild(killMessage);
+        }
+      }, 1500);
     };
 
     // Listen for updates to the remotePlayers map so we can refresh the master map
@@ -385,6 +615,16 @@ async function init() {
           }, 50);
         }
       }
+      
+      // Reload weapon with the R key
+      if (event.code === 'KeyR' && !quickDraw.inDuel) {
+        localPlayer.startReload();
+      }
+      
+      // No longer spawn bots with the B key as NPCs are now server-controlled
+      if (event.code === 'KeyB' && !event.ctrlKey && !event.shiftKey) {
+        console.log("NPCs are now server-controlled and cannot be spawned from the client");
+      }
     });
 
     // Make Bullet constructor globally available for hit zone debug creation
@@ -411,18 +651,6 @@ async function init() {
       }
     };
     
-    // Create flying eagle that follows the camera
-    window.flyingEagle = new FlyingEagle({
-      scene: scene,
-      camera: camera
-    });
-    
-    // Set the default town center for the eagle to fly around
-    // This ensures the eagle is always flying overhead in the town
-    const townCenter = new THREE.Vector3(0, 0, 0); // Center of the town
-    window.flyingEagle.townCenter = townCenter;
-    window.flyingEagle.setDefaultFlightPath();
-    
     // Initialize chat system
     initChat(networkManager);
     
@@ -435,16 +663,138 @@ async function init() {
       handleChatMessage({ username, message });
     };
 
+    // Listen for skin permission updates
+    networkManager.handleMessage = (originalHandleMessage => {
+      return function(message) {
+        // Call the original handler first
+        originalHandleMessage.call(this, message);
+        
+        // Handle skin permission updates
+        if (message.type === 'skinPermissionUpdate') {
+          // Store the skin permission update in a global cache to prevent duplicate processing
+          if (!window.skinPermissionCache) {
+            window.skinPermissionCache = new Map();
+          }
+          
+          // Create a cache key for this update
+          const updateKey = JSON.stringify(message.skins);
+          
+          // Check if we've already processed this exact update
+          if (window.skinPermissionCache.has(updateKey)) {
+            console.log('Skipping duplicate skin permission update');
+            return;
+          }
+          
+          // Store this update in the cache
+          window.skinPermissionCache.set(updateKey, true);
+          
+          console.log('Received skin permission update:', message);
+          
+          // Update local player's skin permissions
+          if (localPlayer && localPlayer.model) {
+            console.log('Updating skin permissions for local player model');
+            localPlayer.model.updateSkinPermissions(message.skins);
+            
+            // Apply banana skin if permission granted
+            if (message.skins.bananaSkin) {
+              console.log('Local player has bananaSkin permission, applying skin to model');
+              localPlayer.model.updateSkin('bananaSkin');
+            }
+          } else {
+            console.warn('Could not update local player model - model not available');
+          }
+          
+          // Update viewmodel skin to match
+          if (localPlayer && localPlayer.viewmodel) {
+            console.log('Updating skin permissions for viewmodel');
+            localPlayer.viewmodel.updateSkinPermissions(message.skins);
+            
+            // Apply banana skin if permission granted
+            if (message.skins.bananaSkin) {
+              console.log('Local player has bananaSkin permission, applying skin to viewmodel');
+              localPlayer.viewmodel.updateSkin('bananaSkin');
+            }
+          } else {
+            console.warn('Could not update viewmodel - viewmodel not available');
+          }
+        }
+      };
+    })(networkManager.handleMessage);
+    
+    // Set up separate handler for skin updates
+    networkManager.onPlayerSkinUpdate = (message) => {
+      // Create a cache key for this update
+      const playerUpdateKey = `${message.playerId}_${JSON.stringify(message.skins)}`;
+      
+      // Check if we've already processed this exact update
+      if (window.skinPermissionCache && window.skinPermissionCache.has(playerUpdateKey)) {
+        console.log(`Skipping duplicate skin update for player ${message.playerId}`);
+        return;
+      }
+      
+      // Store this update in the cache
+      if (!window.skinPermissionCache) {
+        window.skinPermissionCache = new Map();
+      }
+      window.skinPermissionCache.set(playerUpdateKey, true);
+      
+      console.log('Received player skin update:', message);
+      
+      const remotePlayer = remotePlayers.get(message.playerId);
+      if (remotePlayer) {
+        console.log(`Updating skin permissions for remote player ${message.playerId}`);
+        
+        // First, update the permissions in the player model
+        remotePlayer.updateSkinPermissions(message.skins);
+        
+        // Apply banana skin if permission granted
+        if (message.skins.bananaSkin) {
+          console.log(`Remote player ${message.playerId} has bananaSkin permission, applying skin`);
+          
+          // Force the skinPermission to be set directly as well (to avoid race condition)
+          remotePlayer.skinPermissions.bananaSkin = true;
+          
+          // Apply the skin
+          if (remotePlayer.activeSkin !== 'bananaSkin') {
+            remotePlayer.updateSkin('bananaSkin');
+          } else {
+            console.log(`Skin already applied to player ${message.playerId}`);
+          }
+          
+          // Store skin state to prevent redundant updates in the player model
+          if (!remotePlayer._cachedNetworkData) {
+            remotePlayer._cachedNetworkData = {};
+          }
+          remotePlayer._cachedNetworkData.skins = message.skins;
+          remotePlayer._initialSkinApplied = true;
+          remotePlayer._lastSkinUpdate = JSON.stringify(message.skins);
+        }
+      } else {
+        console.warn(`Could not update remote player ${message.playerId} - player not found in remotePlayers map`);
+      }
+    };
+
     // Start the animation loop
     animate(0);
     
     // Show game instructions for all users, first-time users will see it after name entry
     showGameInstructions();
     
+    // Done loading, hide the loading screen
+    setTimeout(() => {
+      const loadingScreen = document.getElementById('loading-screen');
+      if (loadingScreen) {
+        loadingScreen.style.display = 'none';
+      }
+    }, 500);
+    
   } catch (error) {
     console.error('Error during initialization:', error);
-    // Handle initialization errors gracefully
-    alert('There was an error starting the game. Please refresh the page to try again.');
+    // Show a user-friendly error message
+    const errorElement = document.createElement('div');
+    errorElement.className = 'error-message';
+    errorElement.textContent = 'Failed to initialize the game. Please try refreshing the page.';
+    document.body.appendChild(errorElement);
   }
 }
 
@@ -463,7 +813,12 @@ function animate(time) {
 
   // Update local player
   localPlayer.update(deltaTime);
-
+  
+  // Update nearby NPCs for interaction
+  if (npcManager && npcManager.instance) {
+    npcManager.instance.updateNearbyNpcs(localPlayer);
+  }
+  
   // Update remote players (animations, movement interpolation, etc.)
   multiplayerManager.update(deltaTime);
   
@@ -529,8 +884,12 @@ function animate(time) {
 
   // Update flying eagle if it exists
   if (window.flyingEagle) {
-    // Always update eagle's flight path
     window.flyingEagle.update(deltaTime);
+  }
+
+  // Update NPCs through npc manager
+  if (window.npcManager) {
+    // NPC manager handles its own internal updates
   }
 
   // CAMERA SELECTION LOGIC:
@@ -565,6 +924,21 @@ function animate(time) {
 function handleLocalPlayerShoot(bulletStart, shootDir) {
   // Spawn bullet in our local game (client-side prediction)
   const bullet = spawnBullet(localPlayer.id, bulletStart, shootDir);
+  
+  // Create an array to track local bullet IDs if it doesn't exist
+  if (!window.localPlayer.lastFiredBulletIds) {
+    window.localPlayer.lastFiredBulletIds = [];
+  }
+  
+  // Add this bullet's ID to our tracking array (if it has one)
+  if (bullet && bullet.bulletId) {
+    window.localPlayer.lastFiredBulletIds.push(bullet.bulletId);
+    
+    // Keep the array size manageable (only store last 20 bullet IDs)
+    if (window.localPlayer.lastFiredBulletIds.length > 20) {
+      window.localPlayer.lastFiredBulletIds.shift();
+    }
+  }
 
   // Send bullet data over network
   networkManager.sendShoot({
@@ -606,12 +980,27 @@ function handleLocalPlayerShoot(bulletStart, shootDir) {
  * @param {string|number} bulletId - Server-assigned bullet ID
  */
 function handleRemotePlayerShoot(playerId, bulletData, bulletId) {
+  // Check if this is a shotgun pellet from the metadata
+  const isShotgunPellet = bulletData.isShotgunPellet || false;
+  
   // Skip effect creation if this is our own shot coming back from the server
   if (playerId === localPlayer.id) {
     // Just create the bullet with the server's ID without spawning effects again
     const startPos = new THREE.Vector3(bulletData.position.x, bulletData.position.y, bulletData.position.z);
     const dir = new THREE.Vector3(bulletData.direction.x, bulletData.direction.y, bulletData.direction.z);
-    const bullet = new Bullet(startPos, dir, bulletId);
+    
+    const bullet = new Bullet(startPos, dir, bulletId, isShotgunPellet);
+    
+    // Track this bullet ID so we can identify it when impact comes back
+    if (!window.localPlayer.lastFiredBulletIds) {
+      window.localPlayer.lastFiredBulletIds = [];
+    }
+    window.localPlayer.lastFiredBulletIds.push(bulletId);
+    
+    // Keep the array size manageable
+    if (window.localPlayer.lastFiredBulletIds.length > 20) {
+      window.localPlayer.lastFiredBulletIds.shift();
+    }
     
     // Add to bullets array but skip the sound and effects
     bullet.isLocalBullet = true;
@@ -626,7 +1015,7 @@ function handleRemotePlayerShoot(playerId, bulletData, bulletId) {
   const startPos = new THREE.Vector3(bulletData.position.x, bulletData.position.y, bulletData.position.z);
   const dir = new THREE.Vector3(bulletData.direction.x, bulletData.direction.y, bulletData.direction.z);
   
-  spawnBullet(playerId, startPos, dir, bulletId);
+  spawnBullet(playerId, startPos, dir, bulletId, isShotgunPellet);
 }
 
 /**
@@ -677,8 +1066,13 @@ function handleBulletImpact(bulletId, hitType, targetId, position, hitZone) {
       const defaultDir = new THREE.Vector3(0, 1, 0);
       createImpactEffect(impactPosition, defaultDir, scene, hitType);
       
-      // Play headshot sound if it was a headshot
-      if (hitZone === 'head' && localPlayer && localPlayer.soundManager) {
+      // Only play headshot sound if it was a headshot from another player (not local)
+      // Prevents double hitmarker sounds when a bullet is not found for a local hit
+      const isFromLocalPlayer = (window.localPlayer && 
+                              window.localPlayer.lastFiredBulletIds && 
+                              window.localPlayer.lastFiredBulletIds.includes(bulletId));
+      
+      if (hitZone === 'head' && localPlayer && localPlayer.soundManager && !isFromLocalPlayer) {
         // For headshots, play both a spatialized and a direct sound for better feedback
         // Direct non-spatialized sound for clear feedback
         localPlayer.soundManager.playSound("headshotmarker", 100, 0.8);
@@ -695,11 +1089,24 @@ function handleBulletImpact(bulletId, hitType, targetId, position, hitZone) {
  * @param {THREE.Vector3} position 
  * @param {THREE.Vector3} direction 
  * @param {string|number} bulletId - Optional server-assigned ID (for remote bullets)
+ * @param {boolean} isShotgunPellet - Whether this bullet is a shotgun pellet
  * @returns {Bullet} The created bullet object
  */
-function spawnBullet(sourcePlayerId, position, direction, bulletId = null) {
-  const bullet = new Bullet(position, direction, bulletId);
+function spawnBullet(sourcePlayerId, position, direction, bulletId = null, isShotgunPellet = false) {
+  // For local player, determine if this is a shotgun pellet based on their weapon
+  const isLocalShotgunPellet = sourcePlayerId === localPlayer.id && localPlayer.activeWeapon === 'shotgun';
+  
+  // Use the provided flag or infer from local player weapon
+  const isPellet = isShotgunPellet || isLocalShotgunPellet;
+  
+  const bullet = new Bullet(position, direction, bulletId, isPellet);
   bullet.setSourcePlayer(sourcePlayerId);
+  
+  // Make shotgun pellets smaller
+  if (isPellet) {
+    bullet.mesh.scale.set(0.5, 0.5, 0.5);
+  }
+  
   bullets.push(bullet);
   scene.add(bullet.mesh);
   
@@ -722,53 +1129,80 @@ function spawnBullet(sourcePlayerId, position, direction, bulletId = null) {
     }
   }
 
-  // Visual effects
-  createMuzzleFlash(position, direction, scene, muzzleFlashOptions);
-  createSmokeEffect(position, direction, scene);
+  // For shotgun pellets after the first one, skip visual effects to avoid overwhelming 
+  // the system with too many effects at once
+  const showEffects = !isPellet || (isPellet && bullets.length % 3 === 0);
   
-  // Add smoke ring effect (now enabled for mobile too)
-  let smokeRing = null;
-  
-  // Try to reuse an inactive smoke ring first
-  for (let i = 0; i < smokeRings.length; i++) {
-    if (!smokeRings[i].active) {
-      smokeRing = smokeRings[i];
-      break;
-    }
-  }
-  
-  // If no inactive smoke ring found, create a new one if under the limit
-  if (!smokeRing && smokeRings.length < maxSmokeRings) {
-    smokeRing = new SmokeRingEffect(scene);
-    smokeRings.push(smokeRing);
-  }
-  
-  // Activate the smoke ring
-  if (smokeRing) {
-    smokeRing.create(position, direction, smokeEffectOptions);
-  }
-
-  // Sound: play the single shot sound
-  if (localPlayer.soundManager) {
-    if (sourcePlayerId === localPlayer.id) {
-      // Special handling for mobile to prevent audio duplication/sync issues
-      if (window.isMobile) {
-        // On mobile, use immediate playback with no delay and higher volume
-        // This ensures only one clean sound plays
-        localPlayer.soundManager.playSound("shot", 0, 1.0);
-      } else {
-        // On desktop, play a non-spatialized gunshot for the local player
-        localPlayer.soundManager.playSound("shot", 50, 1.0);
+  // Visual effects - only for non-pellets or occasionally for pellets
+  if (showEffects) {
+    createMuzzleFlash(position, direction, scene, muzzleFlashOptions);
+    createSmokeEffect(position, direction, scene);
+    
+    // Add smoke ring effect
+    let smokeRing = null;
+    
+    // Try to reuse an inactive smoke ring first
+    for (let i = 0; i < smokeRings.length; i++) {
+      if (!smokeRings[i].active) {
+        smokeRing = smokeRings[i];
+        break;
       }
-    } else if (!window.isMobile) {
-      // For remote players on desktop, use full spatialized audio
-      localPlayer.soundManager.playSoundAt("shot", position, 50, 0.8);
-    } else {
-      // For remote players on mobile, use non-spatialized audio to prevent issues
-      localPlayer.soundManager.playSound("shot", 0, 0.8);
+    }
+    
+    // If no inactive smoke ring found, create a new one if under the limit
+    if (!smokeRing && smokeRings.length < maxSmokeRings) {
+      smokeRing = new SmokeRingEffect(scene);
+      smokeRings.push(smokeRing);
+    }
+    
+    // Activate the smoke ring
+    if (smokeRing) {
+      smokeRing.create(position, direction, smokeEffectOptions);
+    }
+    
+    // Sound effects - only play for non-pellets or the first pellet
+    if (!isPellet || (isPellet && bullets.length <= 1)) {
+      if (localPlayer.soundManager) {
+        // Determine weapon type - try to get from source player or fallback to local player
+        let weaponType = 'revolver'; // Default fallback
+        
+        // If it's the local player, use their active weapon
+        if (sourcePlayerId === localPlayer.id) {
+          weaponType = localPlayer.activeWeapon;
+        } 
+        // If it's a remote player, try to get their weapon type from the remote players map
+        else if (remotePlayers && remotePlayers.has(sourcePlayerId)) {
+          const remotePlayer = remotePlayers.get(sourcePlayerId);
+          if (remotePlayer && remotePlayer.activeWeapon) {
+            weaponType = remotePlayer.activeWeapon;
+          }
+        }
+        
+        // Use appropriate sound based on weapon type
+        const soundName = weaponType === 'shotgun' ? "shotgunshot" : "shot";
+        
+        if (sourcePlayerId === localPlayer.id) {
+          // Special handling for mobile to prevent audio duplication/sync issues
+          if (window.isMobile) {
+            // On mobile, use immediate playback with no delay and higher volume
+            // This ensures only one clean sound plays
+            localPlayer.soundManager.playSound(soundName, 0, 1.0);
+          } else {
+            // On desktop, play a non-spatialized gunshot for the local player
+            localPlayer.soundManager.playSound(soundName, 50, 1.0);
+          }
+        } else if (!window.isMobile) {
+          // For remote players on desktop, use full spatialized audio
+          localPlayer.soundManager.playSoundAt(soundName, position, 50, 0.8);
+        } else {
+          // For remote players on mobile, use non-spatialized audio to prevent issues
+          localPlayer.soundManager.playSound(soundName, 0, 0.8);
+        }
+      }
     }
   }
-
+  
+  // Return the bullet
   return bullet;
 }
 
@@ -789,7 +1223,7 @@ function showGameInstructions() {
   const isMobile = window.isMobile || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   
   // Set dimensions based on device type
-  const bannerWidth = isMobile ? '250px' : '500px';
+  const bannerWidth = isMobile ? '250px' : '1000px'; // Wider for desktop to accommodate two images
   const bannerHeight = isMobile ? '250px' : '500px';
   const startPosition = isMobile ? '-250px' : '-500px';
   
@@ -804,16 +1238,35 @@ function showGameInstructions() {
   instructionBanner.style.zIndex = '2000';
   instructionBanner.style.transition = 'bottom 0.5s ease-out';
   instructionBanner.style.bottom = startPosition; // Start completely off-screen
+  instructionBanner.style.display = 'flex'; // Use flex for side-by-side layout
+  instructionBanner.style.justifyContent = 'center'; // Center the images
   
-  // Create the image element
-  const instructionImage = document.createElement('img');
-  instructionImage.src = isMobile ? 'models/mobilemanual.png' : 'models/desktopmanual.png';
-  instructionImage.style.width = '100%';
-  instructionImage.style.height = '100%';
-  instructionImage.style.objectFit = 'contain';
-  
-  // Add image to banner
-  instructionBanner.appendChild(instructionImage);
+  if (isMobile) {
+    // For mobile, just add the single mobile manual image
+    const instructionImage = document.createElement('img');
+    instructionImage.src = 'models/mobilemanual.png';
+    instructionImage.style.width = '100%';
+    instructionImage.style.height = '100%';
+    instructionImage.style.objectFit = 'contain';
+    instructionBanner.appendChild(instructionImage);
+  } else {
+    // For desktop, add both images side by side
+    const desktopManualImage = document.createElement('img');
+    desktopManualImage.src = 'models/desktopmanual.png';
+    desktopManualImage.style.width = '50%';
+    desktopManualImage.style.height = '100%';
+    desktopManualImage.style.objectFit = 'contain';
+    
+    const trackpadManualImage = document.createElement('img');
+    trackpadManualImage.src = 'models/trackpadmanual.png';
+    trackpadManualImage.style.width = '50%';
+    trackpadManualImage.style.height = '100%';
+    trackpadManualImage.style.objectFit = 'contain';
+    
+    // Add both images to banner
+    instructionBanner.appendChild(desktopManualImage);
+    instructionBanner.appendChild(trackpadManualImage);
+  }
   
   // Add banner to game container
   document.getElementById('game-container').appendChild(instructionBanner);
@@ -996,6 +1449,222 @@ function initImprovedHitboxSystem() {
 
   console.log("✅ Improved hitbox system successfully installed");
   return true;
+}
+
+/**
+ * Setup viewport detection and handling, especially for iOS devices
+ * where fullscreen is not available by default
+ */
+function setupViewportHandling() {
+  // Store initial viewport dimensions
+  updateViewportDimensions();
+  
+  // Listen for orientation changes and resize events
+  window.addEventListener('orientationchange', () => {
+    // Small delay to allow browser to complete orientation change
+    setTimeout(updateViewportDimensions, 300);
+  });
+  
+  window.addEventListener('resize', () => {
+    updateViewportDimensions();
+  });
+  
+  // Initial call to apply any needed viewport adjustments
+  applyViewportAdjustments();
+  
+  // Add keyboard shortcut for toggling debug mode (Alt+D)
+  window.addEventListener('keydown', (e) => {
+    if (e.altKey && e.key === 'd') {
+      window.debugMode = !window.debugMode;
+      console.log(`Debug mode ${window.debugMode ? 'enabled' : 'disabled'}`);
+      
+      // When debug mode is enabled, show a small indicator
+      let debugIndicator = document.getElementById('debug-indicator');
+      if (window.debugMode) {
+        if (!debugIndicator) {
+          debugIndicator = document.createElement('div');
+          debugIndicator.id = 'debug-indicator';
+          debugIndicator.style.position = 'fixed';
+          debugIndicator.style.top = '10px';
+          debugIndicator.style.right = '10px';
+          debugIndicator.style.backgroundColor = 'rgba(255, 0, 0, 0.5)';
+          debugIndicator.style.color = 'white';
+          debugIndicator.style.padding = '5px';
+          debugIndicator.style.borderRadius = '3px';
+          debugIndicator.style.fontSize = '12px';
+          debugIndicator.style.zIndex = '1000';
+          document.body.appendChild(debugIndicator);
+        }
+        debugIndicator.textContent = 'DEBUG MODE';
+        debugIndicator.style.display = 'block';
+      } else if (debugIndicator) {
+        debugIndicator.style.display = 'none';
+      }
+    }
+  });
+}
+
+/**
+ * Update the viewport dimensions when orientation or size changes
+ */
+function updateViewportDimensions() {
+  // Get current viewport and device dimensions
+  const visualWidth = window.innerWidth;
+  const visualHeight = window.innerHeight;
+  const deviceWidth = window.screen.width;
+  const deviceHeight = window.screen.height;
+  
+  // Store these values globally for access by other modules
+  window.viewportInfo = {
+    visualWidth,
+    visualHeight,
+    deviceWidth,
+    deviceHeight,
+    isLandscape: visualWidth > visualHeight,
+    // Calculate ratio of visual height to full device height
+    viewportRatio: visualHeight / deviceHeight
+  };
+  
+  // Log information for iOS devices
+  if (/iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream) {
+    console.log(`Viewport updated - Visual: ${visualWidth}x${visualHeight}, Device: ${deviceWidth}x${deviceHeight}`);
+    
+    if (window.viewportInfo.viewportRatio < 1) {
+      console.log(`Unused screen space detected. Viewport ratio: ${window.viewportInfo.viewportRatio.toFixed(2)}`);
+    }
+  }
+  
+  // Apply adjustments based on new dimensions
+  applyViewportAdjustments();
+}
+
+/**
+ * Apply necessary adjustments based on viewport dimensions
+ */
+function applyViewportAdjustments() {
+  // If we have a renderer, update the camera aspect ratio
+  if (window.renderer && window.renderer.camera) {
+    window.renderer.camera.aspect = window.innerWidth / window.innerHeight;
+    window.renderer.camera.updateProjectionMatrix();
+  }
+  
+  // Resize renderer if available
+  if (window.renderer && window.renderer.instance) {
+    window.renderer.instance.setSize(window.innerWidth, window.innerHeight);
+  }
+}
+
+/**
+ * Creates weapon indicator UI for desktop
+ */
+function createDesktopWeaponIndicators() {
+  if (isMobileDevice()) return; // Mobile has its own indicators
+  
+  // Add styles for weapon indicators
+  const style = document.createElement('style');
+  style.textContent = `
+    .desktop-weapon-indicator {
+      position: fixed;
+      left: 20px;
+      width: 40px;
+      height: 40px;
+      background-color: rgba(0, 0, 0, 0.6);
+      border: 2px solid rgba(255, 255, 255, 0.5);
+      border-radius: 5px;
+      margin-bottom: 5px;
+      opacity: 0.7;
+      transition: opacity 0.3s, border-color 0.3s, box-shadow 0.3s;
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .desktop-weapon-indicator:hover {
+      opacity: 1;
+    }
+    .desktop-weapon-indicator.active {
+      border-color: #ffcc00 !important;
+      box-shadow: 0 0 10px #ffcc00;
+      opacity: 1;
+    }
+    #revolver-indicator-desktop {
+      bottom: 150px;
+    }
+    #shotgun-indicator-desktop {
+      bottom: 120px;
+    }
+    .weapon-number {
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      background-color: rgba(0, 0, 0, 0.7);
+      color: white;
+      font-size: 12px;
+      padding: 2px 5px;
+      border-radius: 10px;
+      font-family: 'Courier New', monospace;
+    }
+  `;
+  document.head.appendChild(style);
+  
+  // Create container for both indicators
+  const container = document.createElement('div');
+  container.id = 'desktop-weapon-indicators';
+  
+  // Create revolver indicator
+  const revolverIndicator = document.createElement('div');
+  revolverIndicator.id = 'revolver-indicator-desktop';
+  revolverIndicator.className = 'desktop-weapon-indicator active';
+  
+  // Add revolver icon (same as mobile)
+  const revolverImg = document.createElement('img');
+  revolverImg.src = 'models/revolverindicator.png';
+  revolverImg.style.width = '80%';
+  revolverImg.style.height = '80%';
+  revolverImg.style.objectFit = 'contain';
+  revolverIndicator.appendChild(revolverImg);
+  
+  // Add number indicator
+  const revolverNum = document.createElement('div');
+  revolverNum.className = 'weapon-number';
+  revolverNum.textContent = '1';
+  revolverIndicator.appendChild(revolverNum);
+  
+  // Create shotgun indicator
+  const shotgunIndicator = document.createElement('div');
+  shotgunIndicator.id = 'shotgun-indicator-desktop';
+  shotgunIndicator.className = 'desktop-weapon-indicator';
+  
+  // Add shotgun icon (same as mobile)
+  const shotgunImg = document.createElement('img');
+  shotgunImg.src = 'models/shotgunindicator.png';
+  shotgunImg.style.width = '80%';
+  shotgunImg.style.height = '80%';
+  shotgunImg.style.objectFit = 'contain';
+  shotgunIndicator.appendChild(shotgunImg);
+  
+  // Add number indicator
+  const shotgunNum = document.createElement('div');
+  shotgunNum.className = 'weapon-number';
+  shotgunNum.textContent = '2';
+  shotgunIndicator.appendChild(shotgunNum);
+  
+  // Add click handlers
+  revolverIndicator.addEventListener('click', () => {
+    if (window.localPlayer) {
+      window.localPlayer.switchWeapon('revolver');
+    }
+  });
+  
+  shotgunIndicator.addEventListener('click', () => {
+    if (window.localPlayer) {
+      window.localPlayer.switchWeapon('shotgun');
+    }
+  });
+  
+  // Add to DOM
+  document.body.appendChild(revolverIndicator);
+  document.body.appendChild(shotgunIndicator);
 }
 
 // Call init() to start the application

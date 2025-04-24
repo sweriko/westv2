@@ -1,5 +1,9 @@
 import { createImpactEffect } from './effects.js';
-import { adjustBulletTrajectory, createBulletPathVisualizer } from './bullet-trajectory-config.js';
+
+// Reusable objects for collision detection to avoid creating new ones every frame
+const raycaster = new THREE.Raycaster();
+const tmpVec3 = new THREE.Vector3();
+const reusableBox = new THREE.Box3();
 
 /**
  * A bullet class with client-side prediction and server validation.
@@ -10,10 +14,11 @@ export class Bullet {
    * @param {THREE.Vector3} position - Starting position
    * @param {THREE.Vector3} direction - Normalized direction vector
    * @param {string|number} bulletId - Optional server-assigned bullet ID (for remote bullets)
+   * @param {boolean} isShotgunPellet - Whether this bullet is a pellet from a shotgun
    */
-  constructor(position, direction, bulletId = null) {
-    // Apply trajectory adjustment if needed
-    const adjustedDirection = adjustBulletTrajectory(direction);
+  constructor(position, direction, bulletId = null, isShotgunPellet = false) {
+    // Dynamic bullet trajectory adjustment based on viewport
+    this.adjustTrajectoryForViewport(direction);
     
     this.mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.02, 8, 8),
@@ -21,7 +26,7 @@ export class Bullet {
     );
     this.mesh.position.copy(position);
 
-    this.direction = adjustedDirection.clone();
+    this.direction = direction.clone();
     this.speed = 80; // speed units/second
     this.distanceTraveled = 0;
     this.maxDistance = 100;
@@ -39,11 +44,103 @@ export class Bullet {
     // Anti-cheat: Track whether this bullet is local (created by local player)
     this.isLocalBullet = true;
     
-    // Add collision detection raycaster
-    this.raycaster = new THREE.Raycaster(position.clone(), adjustedDirection.clone(), 0, 0.1);
+    // Set up the bullet's ray for continuous collision detection
+    this.rayOrigin = position.clone();
+    this.rayDirection = direction.clone();
     
-    // Path visualizer has been removed
-    this.pathVisualizer = null;
+    // Flag to identify if this bullet is a shotgun pellet
+    this.isShotgunPellet = isShotgunPellet;
+    
+    // Create a visual path for trajectory debugging
+    if (window.debugMode) {
+      this.createTrajectoryVisualization(position, direction);
+    }
+  }
+
+  /**
+   * Adjusts bullet trajectory based on actual viewport dimensions.
+   * Especially useful for iOS where fullscreen mode isn't available by default.
+   * @param {THREE.Vector3} direction - The original direction vector to modify
+   */
+  adjustTrajectoryForViewport(direction) {
+    // Skip if not iOS or not needed
+    if (!this.isIOS() || !this.needsAdjustment()) {
+      return;
+    }
+
+    // Get viewport info
+    const viewportInfo = this.getViewportInfo();
+    
+    // Only adjust if there's unused space
+    if (viewportInfo.hasUnusedSpace) {
+      // Calculate adjustment based on the ratio of unused space
+      // This is the percentage of the screen that's not being used
+      const visualToDeviceRatio = viewportInfo.visualHeight / viewportInfo.deviceHeight;
+      
+      // Apply a much smaller adjustment - just enough to align with crosshair
+      // Start with a very subtle adjustment factor
+      const offsetY = (1 - visualToDeviceRatio) * 0.2; // Reduced from 0.7 to 0.2
+      
+      // Apply vertical adjustment to direction
+      direction.y += offsetY;
+      
+      // No horizontal adjustment needed - this was causing misalignment
+      
+      // Renormalize the direction vector
+      direction.normalize();
+      
+      // Debug logs
+      if (window.debugMode) {
+        console.log(`Bullet trajectory adjusted: Y+${offsetY.toFixed(4)}, ratio: ${visualToDeviceRatio.toFixed(2)}`);
+      }
+    }
+  }
+
+  /**
+   * Detects if the device is running iOS
+   * @returns {boolean} True if device is iOS
+   */
+  isIOS() {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  }
+
+  /**
+   * Checks if trajectory adjustment is needed
+   * @returns {boolean} True if adjustment is needed
+   */
+  needsAdjustment() {
+    // Only adjust for horizontal orientation on iOS
+    return this.isIOS() && window.innerWidth > window.innerHeight;
+  }
+
+  /**
+   * Gets information about the viewport dimensions
+   * @returns {Object} Viewport information
+   */
+  getViewportInfo() {
+    // Get the actual visible viewport sizes
+    const visualWidth = window.innerWidth;
+    const visualHeight = window.innerHeight;
+    
+    // Get full device screen dimensions
+    const deviceWidth = window.screen.width;
+    const deviceHeight = window.screen.height;
+    
+    // Check if we're in landscape mode
+    const isLandscape = visualWidth > visualHeight;
+    
+    // Determine if there's unused space (especially for iOS)
+    // In landscape, unused space would be at the top/bottom
+    const hasUnusedSpace = isLandscape && (visualHeight < deviceHeight);
+    
+    return {
+      visualWidth,
+      visualHeight,
+      deviceWidth,
+      deviceHeight,
+      isLandscape,
+      hasUnusedSpace
+    };
   }
 
   /**
@@ -72,20 +169,6 @@ export class Bullet {
     // Previous position for boundary crossing detection
     this.lastPosition = this.mesh.position.clone();
     
-    // FIRST CHECK: Before moving, check if bullet is already within arena but from an unauthorized player
-    if (window.quickDraw && window.quickDraw.isPointInArena(this.mesh.position)) {
-      const isLocalPlayerBullet = Number(this.sourcePlayerId) === Number(window.localPlayer.id);
-      const isPlayerInDuel = window.quickDraw && window.quickDraw.inDuel;
-      const isOpponentBullet = window.quickDraw && 
-                               window.quickDraw.duelOpponentId === Number(this.sourcePlayerId);
-      
-      // If bullet is inside arena but not from a duel player, destroy it immediately
-      if (!(isPlayerInDuel && isLocalPlayerBullet) && !isOpponentBullet) {
-        createImpactEffect(this.mesh.position, this.direction, scene, 'ground');
-        return { active: false, hit: { type: 'arena', position: this.mesh.position } };
-      }
-    }
-    
     // If we're still active, update bullet position and check for player hits
     this.lastPosition.copy(this.mesh.position);
     
@@ -110,6 +193,8 @@ export class Bullet {
       
       // If the bullet is crossing the boundary
       if (bulletCrossingBoundary) {
+        // Removed boundary crossing restrictions to allow free shooting across boundaries
+        /*
         const playerInDuel = window.quickDraw.inDuel;
         const isLocalPlayerBullet = Number(this.sourcePlayerId) === Number(window.localPlayer.id);
         
@@ -132,6 +217,58 @@ export class Bullet {
         if (!playerInDuel && !isLocalPlayerBullet && bulletInArena) {
           return { active: false, hit: { type: 'arena', position: endPos } };
         }
+        */
+      }
+    }
+
+    // Check for tumbleweed hits if tumbleweedManager exists
+    if (window.tumbleweedManager) {
+      // Update the raycaster with the bullet's movement path
+      raycaster.set(this.lastPosition, this.direction);
+      
+      // Check for intersection with tumbleweeds
+      const tumbleweedHit = window.tumbleweedManager.checkRayIntersection(raycaster);
+      
+      if (tumbleweedHit) {
+        // Create a small impact effect
+        createImpactEffect(tumbleweedHit.point, this.direction, scene, 'ground');
+        
+        // Return hit info
+        return { 
+          active: false, 
+          hit: { 
+            type: 'tumbleweed', 
+            position: tumbleweedHit.point,
+            distance: tumbleweedHit.distance
+          } 
+        };
+      }
+    }
+
+    // Check for eagle hits if flyingEagle exists
+    if (window.flyingEagle) {
+      // Update the raycaster with the bullet's movement path
+      raycaster.set(this.lastPosition, this.direction);
+      
+      // Check for intersection with eagle's hitbox
+      const eagleIntersection = raycaster.ray.intersectSphere(window.flyingEagle.hitbox, new THREE.Vector3());
+      
+      if (eagleIntersection) {
+        // Create a small impact effect
+        createImpactEffect(eagleIntersection, this.direction, scene, 'eagle');
+        
+        // Hit the eagle
+        window.flyingEagle.hit();
+        
+        // Return hit info
+        return { 
+          active: false, 
+          hit: { 
+            type: 'eagle', 
+            position: eagleIntersection,
+            distance: eagleIntersection.distanceTo(raycaster.ray.origin)
+          } 
+        };
       }
     }
 
@@ -169,12 +306,13 @@ export class Bullet {
                                    window.quickDraw.duelOpponentId === targetPlayerId;
         
         // Make sure players are in the same game mode to allow hits
-        const bothInDuel = bulletPlayerInDuel && targetPlayerInDuel;
-        const bothInRegularTown = !bulletPlayerInDuel && !targetPlayerInDuel;
+        // Remove restriction to allow free shooting
+        // const bothInDuel = bulletPlayerInDuel && targetPlayerInDuel;
+        // const bothInRegularTown = !bulletPlayerInDuel && !targetPlayerInDuel;
         
-        if (!(bothInDuel || bothInRegularTown)) {
-          continue; // Skip collision check if players are in different areas/modes
-        }
+        // if (!(bothInDuel || bothInRegularTown)) {
+        //   continue; // Skip collision check if players are in different areas/modes
+        // }
         
         // Detect which hit zone was hit (head, body, limbs)
         const hitResult = this.checkPlayerHitZones(playerObj, endPos);
@@ -188,9 +326,23 @@ export class Bullet {
             // Create the impact effect
             createImpactEffect(endPos, this.direction, scene, 'player');
             
-            // Play headshot sound if it was a headshot
-            if (hitResult.zone === 'head' && window.localPlayer && window.localPlayer.soundManager) {
-              window.localPlayer.soundManager.playSound("headshotmarker", 100);
+            // Only play sounds and show hitmarker if this is the local player's bullet
+            if (this.isLocalBullet && window.localPlayer && window.localPlayer.soundManager) {
+              // Show hitmarker image for 100ms
+              this.showHitMarker(endPos);
+              
+              // Play sound with 300ms delay
+              if (hitResult.zone === 'head') {
+                // For headshots, only play headshotmarker (not both sounds)
+                setTimeout(() => {
+                  window.localPlayer.soundManager.playSound("headshotmarker", 100);
+                }, 300);
+              } else {
+                // For body/limb hits, play regular hitmarker sound
+                setTimeout(() => {
+                  window.localPlayer.soundManager.playSound("hitmarker", 100);
+                }, 300);
+              }
             }
           } else {
             console.log("Prevented impact effect on local player's own model");
@@ -207,8 +359,10 @@ export class Bullet {
             const hitKey = `${playerId}_${hitResult.zone}_${Math.round(endPos.x)}_${Math.round(endPos.y)}_${Math.round(endPos.z)}`;
             const now = performance.now();
             const lastHitTime = window.hitDebounce.get(hitKey) || 0;
-            const debounceTime = 500; // 500ms debounce time
-
+            
+            // Use a shorter debounce time for shotgun pellets to allow multiple pellets to register hits
+            const debounceTime = this.isShotgunPellet ? 50 : 500; // 50ms for shotgun, 500ms for regular bullets
+            
             if (now - lastHitTime < debounceTime) {
               // Use logger for debug logs
               if (window.logger) {
@@ -234,7 +388,8 @@ export class Bullet {
               position: { x: endPos.x, y: endPos.y, z: endPos.z },
               sourcePlayerId: this.sourcePlayerId,
               hitZone: hitResult.zone, // Send the hit zone to the server
-              damage: hitResult.damage // Send the damage amount to the server
+              damage: hitResult.damage, // Send the damage amount to the server
+              isShotgunPellet: this.isShotgunPellet // Send information about shotgun pellets
             }, this.bulletId);
             
             // Quick Draw duels with better logging
@@ -293,12 +448,22 @@ export class Bullet {
   
   /**
    * Checks which part of the player model was hit and returns damage amount.
-   * Implements hit zones for head, body, and limbs.
+   * Uses ray casting against actual player meshes for more precise hit detection.
    * @param {object} playerObj - The player object to check
    * @param {THREE.Vector3} bulletPos - The bullet position
    * @returns {object} - Contains hit (boolean), zone (string), and damage (number)
    */
   checkPlayerHitZones(playerObj, bulletPos) {
+    // If the player has a ThirdPersonModel, use its dedicated mesh-based hit detection
+    if (playerObj.playerModel && playerObj.playerModel.checkBulletHit) {
+      const hitResult = playerObj.playerModel.checkBulletHit(bulletPos, this.isShotgunPellet);
+      
+      // If this is a shotgun pellet, adjust the damage (should be handled by the model now)
+      return hitResult;
+    }
+    
+    // Fallback to box-based hit detection for local player or models without mesh hit detection
+    
     // Get player's base position for collision box
     // For local players (first-person), group.position is at eye-level so subtract 1.6
     // Remote players (third-person) have group.position at the base
@@ -338,121 +503,148 @@ export class Bullet {
       }
     }
     
+    // Reuse the global THREE.Box3 object for better performance
+    
     // First do a quick test with the overall player bounding box
-    const overallMin = new THREE.Vector3(
+    reusableBox.min.set(
       playerPos.x - bodyWidth,
       baseY + 0.2, // Adjusted to match new bottom height
       playerPos.z - bodyWidth
     );
-    const overallMax = new THREE.Vector3(
+    reusableBox.max.set(
       playerPos.x + bodyWidth,
       baseY + 1.8, // Adjusted to match new top height
       playerPos.z + bodyWidth
     );
-    const overallBox = new THREE.Box3(overallMin, overallMax);
+    
+    const overallBox = reusableBox;
     
     if (!overallBox.containsPoint(bulletPos)) {
       return { hit: false, zone: null, damage: 0 };
     }
     
+    // Setup ray casting from the bullet's previous position to current position
+    // This gives us more accurate hit detection along the bullet's path
+    raycaster.set(this.lastPosition, this.direction);
+    
+    // Define ray length (distance the bullet traveled this frame)
+    const rayLength = this.lastPosition.distanceTo(bulletPos);
+    raycaster.far = rayLength * 1.1; // Add a small margin
+    
     // Check head zone (highest damage)
-    const headMin = new THREE.Vector3(
+    reusableBox.min.set(
       playerPos.x - headSize/2,
       headBottom,
       playerPos.z - headSize/2
     );
-    const headMax = new THREE.Vector3(
+    reusableBox.max.set(
       playerPos.x + headSize/2,
       headTop,
       playerPos.z + headSize/2
     );
-    const headBox = new THREE.Box3(headMin, headMax);
     
-    if (headBox.containsPoint(bulletPos)) {
-      return { hit: true, zone: 'head', damage: 100 };
+    if (reusableBox.containsPoint(bulletPos)) {
+      // Apply different damage based on whether this is a shotgun pellet
+      const damage = this.isShotgunPellet ? 10 : 100;
+      return { hit: true, zone: 'head', damage: damage };
     }
     
     // Check body zone (medium damage)
-    const bodyMin = new THREE.Vector3(
+    reusableBox.min.set(
       playerPos.x - bodyWidth/2,
       bodyBottom,
       playerPos.z - bodyWidth/2
     );
-    const bodyMax = new THREE.Vector3(
+    reusableBox.max.set(
       playerPos.x + bodyWidth/2,
       bodyTop,
       playerPos.z + bodyWidth/2
     );
-    const bodyBox = new THREE.Box3(bodyMin, bodyMax);
     
-    if (bodyBox.containsPoint(bulletPos)) {
-      return { hit: true, zone: 'body', damage: 40 };
+    if (reusableBox.containsPoint(bulletPos)) {
+      // Apply different damage based on whether this is a shotgun pellet
+      const damage = this.isShotgunPellet ? 5 : 40;
+      return { hit: true, zone: 'body', damage: damage };
     }
     
     // Check arms (low damage, simplified to two boxes on sides)
     // Left arm
-    const leftArmMin = new THREE.Vector3(
+    reusableBox.min.set(
       playerPos.x - bodyWidth/2 - limbWidth,
       armBottom,
       playerPos.z - limbWidth/2
     );
-    const leftArmMax = new THREE.Vector3(
+    reusableBox.max.set(
       playerPos.x - bodyWidth/2,
       armTop,
       playerPos.z + limbWidth/2
     );
-    const leftArmBox = new THREE.Box3(leftArmMin, leftArmMax);
+    
+    if (reusableBox.containsPoint(bulletPos)) {
+      // Apply different damage based on whether this is a shotgun pellet
+      const damage = this.isShotgunPellet ? 5 : 20;
+      return { hit: true, zone: 'limbs', damage: damage };
+    }
     
     // Right arm
-    const rightArmMin = new THREE.Vector3(
+    reusableBox.min.set(
       playerPos.x + bodyWidth/2,
       armBottom,
       playerPos.z - limbWidth/2
     );
-    const rightArmMax = new THREE.Vector3(
+    reusableBox.max.set(
       playerPos.x + bodyWidth/2 + limbWidth,
       armTop,
       playerPos.z + limbWidth/2
     );
-    const rightArmBox = new THREE.Box3(rightArmMin, rightArmMax);
     
-    if (leftArmBox.containsPoint(bulletPos) || rightArmBox.containsPoint(bulletPos)) {
-      return { hit: true, zone: 'limbs', damage: 20 };
+    if (reusableBox.containsPoint(bulletPos)) {
+      // Apply different damage based on whether this is a shotgun pellet
+      const damage = this.isShotgunPellet ? 5 : 20;
+      return { hit: true, zone: 'limbs', damage: damage };
     }
     
     // Check legs (low damage)
     // Left leg
-    const leftLegMin = new THREE.Vector3(
+    reusableBox.min.set(
       playerPos.x - bodyWidth/4 - limbWidth/2,
       legBottom,
       playerPos.z - limbWidth/2
     );
-    const leftLegMax = new THREE.Vector3(
+    reusableBox.max.set(
       playerPos.x - bodyWidth/4 + limbWidth/2,
       legTop,
       playerPos.z + limbWidth/2
     );
-    const leftLegBox = new THREE.Box3(leftLegMin, leftLegMax);
+    
+    if (reusableBox.containsPoint(bulletPos)) {
+      // Apply different damage based on whether this is a shotgun pellet
+      const damage = this.isShotgunPellet ? 5 : 20;
+      return { hit: true, zone: 'limbs', damage: damage };
+    }
     
     // Right leg
-    const rightLegMin = new THREE.Vector3(
+    reusableBox.min.set(
       playerPos.x + bodyWidth/4 - limbWidth/2,
       legBottom,
       playerPos.z - limbWidth/2
     );
-    const rightLegMax = new THREE.Vector3(
+    reusableBox.max.set(
       playerPos.x + bodyWidth/4 + limbWidth/2,
       legTop,
       playerPos.z + limbWidth/2
     );
-    const rightLegBox = new THREE.Box3(rightLegMin, rightLegMax);
     
-    if (leftLegBox.containsPoint(bulletPos) || rightLegBox.containsPoint(bulletPos)) {
-      return { hit: true, zone: 'limbs', damage: 20 };
+    if (reusableBox.containsPoint(bulletPos)) {
+      // Apply different damage based on whether this is a shotgun pellet
+      const damage = this.isShotgunPellet ? 5 : 20;
+      return { hit: true, zone: 'limbs', damage: damage };
     }
     
-    // If we reach here but hit the overall box, it's a glancing hit to the body
-    return { hit: true, zone: 'body', damage: 40 };
+    // If we reach here but hit the overall box, it's a grazing hit to the body
+    // Instead of no damage, register it as a body hit with reduced damage
+    const damage = this.isShotgunPellet ? 5 : 30;
+    return { hit: true, zone: 'body', damage: damage };
   }
   
   /**
@@ -670,8 +862,15 @@ export class Bullet {
         if (hitType === 'player') {
           impactSound = "fleshimpact";
           
+          // If this is a local player's bullet, we don't need to show hitmarker again
+          // because we already showed it in the update method when client detected the hit
+          if (this.isLocalBullet) {
+            // Don't show hitmarker or play hitmarker sound again (already done client-side)
+            // This prevents double hit markers on production servers
+          }
+          
           // Play headshot sound if the server reports it was a headshot
-          if (this.lastHitZone === 'head') {
+          else if (this.lastHitZone === 'head') {
             // For mobile devices, simplify audio to prevent layering
             if (window.isMobile) {
               // Just play one non-spatialized sound to avoid sync/double sound issues on mobile
@@ -723,5 +922,132 @@ export class Bullet {
    */
   setLastHitZone(zone) {
     this.lastHitZone = zone;
+  }
+  
+  /**
+   * Shows a hitmarker on the screen when a bullet hits a target
+   * @param {THREE.Vector3} position - The 3D world position of the hit
+   */
+  showHitMarker(position) {
+    // Create a new hit marker element for each hit rather than reusing one
+    const hitMarker = document.createElement('div');
+    hitMarker.style.position = 'absolute';
+    hitMarker.style.transform = 'translate(-50%, -50%)';
+    hitMarker.style.width = '40px';
+    hitMarker.style.height = '40px';
+    hitMarker.style.backgroundImage = 'url("models/hitmarker.png")';
+    hitMarker.style.backgroundSize = 'contain';
+    hitMarker.style.backgroundRepeat = 'no-repeat';
+    hitMarker.style.pointerEvents = 'none';
+    hitMarker.style.zIndex = '1000';
+    hitMarker.style.opacity = '1';
+    hitMarker.style.transition = 'opacity 0.1s ease-in-out';
+    
+    document.body.appendChild(hitMarker);
+    
+    // Convert 3D world position to 2D screen position
+    if (position && window.localPlayer && window.localPlayer.camera) {
+      // Clone the position to avoid modifying the original
+      const screenPos = this.worldToScreen(position);
+      
+      // Only show if the hit is in front of the camera
+      if (screenPos) {
+        // Position the hit marker at the calculated screen position
+        hitMarker.style.left = screenPos.x + 'px';
+        hitMarker.style.top = screenPos.y + 'px';
+      } else {
+        // Fallback to center of screen if behind camera
+        hitMarker.style.left = '50%';
+        hitMarker.style.top = '50%';
+      }
+    } else {
+      // Fallback to center of screen if no position provided or cannot convert
+      hitMarker.style.left = '50%';
+      hitMarker.style.top = '50%';
+    }
+    
+    // Hide and remove after 100ms
+    setTimeout(() => {
+      hitMarker.style.opacity = '0';
+      // Remove from DOM after fade out completes
+      setTimeout(() => {
+        if (hitMarker.parentNode) {
+          hitMarker.parentNode.removeChild(hitMarker);
+        }
+      }, 100);
+    }, 100);
+  }
+  
+  /**
+   * Converts a 3D world position to 2D screen coordinates
+   * @param {THREE.Vector3} worldPos - The 3D world position to convert
+   * @returns {Object|null} - The 2D screen position {x, y} or null if behind camera
+   */
+  worldToScreen(worldPos) {
+    if (!window.localPlayer || !window.localPlayer.camera) return null;
+    
+    // Get the camera
+    const camera = window.localPlayer.camera;
+    
+    // Clone position to avoid modifying the original
+    const pos = worldPos.clone();
+    
+    // Project the 3D position to 2D clip space
+    pos.project(camera);
+    
+    // If the point is behind the camera, don't show the hitmarker
+    if (pos.z > 1) return null;
+    
+    // Convert from normalized device coordinates (-1 to +1) to window coordinates
+    const widthHalf = window.innerWidth / 2;
+    const heightHalf = window.innerHeight / 2;
+    
+    const x = (pos.x * widthHalf) + widthHalf;
+    const y = -(pos.y * heightHalf) + heightHalf;
+    
+    return { x, y };
+  }
+
+  /**
+   * Creates a visual path showing the bullet's trajectory for debugging
+   * @param {THREE.Vector3} startPos - Start position
+   * @param {THREE.Vector3} direction - Direction vector 
+   */
+  createTrajectoryVisualization(startPos, direction) {
+    // Only create visualization if we're in debug mode and in the scene
+    if (!window.debugMode || !window.scene) return;
+    
+    // Create line showing the projected path
+    const lineMaterial = new THREE.LineBasicMaterial({ 
+      color: 0xff0000,
+      transparent: true,
+      opacity: 0.7
+    });
+    
+    // Create points along trajectory
+    const points = [];
+    points.push(startPos.clone());
+    
+    // Add a point 10 units away to show direction
+    const endPoint = startPos.clone().add(direction.clone().multiplyScalar(10));
+    points.push(endPoint);
+    
+    // Create the line geometry
+    const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
+    const line = new THREE.Line(lineGeometry, lineMaterial);
+    
+    // Add to scene
+    window.scene.add(line);
+    
+    // Store reference to remove later
+    this.trajectoryLine = line;
+    
+    // Remove line after 2 seconds
+    setTimeout(() => {
+      if (this.trajectoryLine && window.scene) {
+        window.scene.remove(this.trajectoryLine);
+        this.trajectoryLine = null;
+      }
+    }, 2000);
   }
 }

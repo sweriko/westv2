@@ -7,6 +7,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Wild Western FPS" />
   <meta name="mobile-web-app-capable" content="yes" />
+  <!-- Additional iOS specific meta tags for better fullscreen handling -->
+  <meta name="format-detection" content="telephone=no" />
+  <meta name="HandheldFriendly" content="true" />
   <title>Wild Western FPS – Multiplayer</title>
   <link rel="stylesheet" href="css/style.css">
   <style>
@@ -31,6 +34,17 @@
       bottom: 0;
     }
     
+    /* Improved iOS safe area handling for status bar and notches */
+    #game-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      /* Apply safe area insets for notched devices */
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+    
     canvas {
       display: block;
       width: 100%;
@@ -44,6 +58,55 @@
       margin: 0;
       padding: 0;
     }
+    
+    #admin-controls {
+      position: absolute;
+      bottom: 200px;
+      right: 20px;
+      background-color: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 999;
+      user-select: none;
+    }
+    
+    .admin-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    
+    .admin-buttons button {
+      background-color: #4a2519;
+      color: white;
+      border: none;
+      padding: 5px 10px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    
+    .admin-buttons button:hover {
+      background-color: #6c392b;
+    }
+    
+    .hidden {
+      display: none;
+    }
+    
+    .error-message {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background-color: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 20px;
+      border-radius: 5px;
+      z-index: 9999;
+      text-align: center;
+      font-family: Arial, sans-serif;
+    }
   </style>
 </head>
 <body>
@@ -54,7 +117,7 @@
     <div id="reload-progress-container">
       <div id="reload-progress-bar"></div>
     </div>
-    <div id="crosshair">
+    <div id="crosshair" style="transform: translate(calc(-50% + 2px), calc(-50% - 1px)) !important;">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
         <!-- Top corner group -->
         <g id="top-corner" class="corner-group">
@@ -88,17 +151,23 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
   <!-- Solana Web3.js -->
   <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
-  <!-- Main JS as ES6 module -->
-  <script type="module" src="js/main.js"></script>
+  
   <!-- Phantom Wallet integration -->
   <script type="module">
     import phantomWalletAdapter from './js/phantom-wallet.js';
     
+    // Make the wallet adapter globally available
+    window.phantomWalletAdapter = phantomWalletAdapter;
+    
     // Initialize the Phantom wallet adapter when the page loads
+    // (Network Manager will be connected later in main.js)
     document.addEventListener('DOMContentLoaded', () => {
-      phantomWalletAdapter.init();
+      console.log('Phantom wallet adapter made globally available');
     });
   </script>
+  
+  <!-- Main JS as ES6 module -->
+  <script type="module" src="js/main.js"></script>
   
   <!-- Letterbox effect for cinematic eagle camera view -->
   <div class="letterbox-top"></div>
@@ -106,5 +175,24 @@
   
   <!-- Vibe Jam 2025 entrant badge -->
   <a target="_blank" href="https://jam.pieter.com" style="font-family: 'system-ui', sans-serif; position: fixed; bottom: -1px; right: -1px; padding: 7px; font-size: 14px; font-weight: bold; background: #fff; color: #000; text-decoration: none; z-index: 10; border-top-left-radius: 12px; z-index: 10000; border: 1px solid #fff;">🕹️ Vibe Jam 2025</a>
+
+  <!-- Admin controls for developers -->
+  <div id="admin-controls" class="hidden">
+    <div class="admin-panel">
+      <h3>Admin Controls</h3>
+      <p>NPCs are now server-controlled. Bot controls have been removed.</p>
+    </div>
+  </div>
+
+  <!-- Add script for admin controls -->
+  <script>
+    // Show admin controls with key combo Ctrl+Shift+B
+    document.addEventListener('keydown', function(e) {
+      if (e.ctrlKey && e.shiftKey && e.key === 'B') {
+        const adminControls = document.getElementById('admin-controls');
+        adminControls.classList.toggle('hidden');
+      }
+    });
+  </script>
 </body>
 </html>

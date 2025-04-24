@@ -22,6 +22,10 @@ export class NetworkManager {
     this.onError = null;
     this.onChatMessage = null;       // When a chat message is received
 
+    // Train system callbacks
+    this.onTrainInit = null;         // When initial train state is received
+    this.onTrainState = null;        // When train state updates are received
+
     // Anti-cheat callbacks
     this.onPositionCorrection = null;// When server corrects client position
     this.onBulletImpact = null;      // When a bullet hits something
@@ -191,8 +195,14 @@ export class NetworkManager {
           this.onInit(message);
         }
 
-        // Add known players
+        // Add known players - exclude any with our own ID
         message.players.forEach(player => {
+          // Skip if this is somehow our own ID
+          if (player.id === this.playerId) {
+            console.log(`Skipping duplicate player with our ID: ${player.id}`);
+            return;
+          }
+          
           if (this.onPlayerJoined) {
             this.onPlayerJoined(player);
           }
@@ -202,7 +212,14 @@ export class NetworkManager {
 
       // Another player joined
       case 'playerJoined':
-        console.log(`Player ${message.id} joined`);
+        console.log(`Player ${message.id} joined${message.isNpc ? ' (NPC)' : (message.isBot ? ' (BOT)' : '')}`);
+        
+        // Skip if this is our own ID
+        if (message.id === this.playerId) {
+          console.log(`Skipping player join for own player ID: ${message.id}`);
+          break;
+        }
+        
         if (this.onPlayerJoined) {
           this.onPlayerJoined(message);
         }
@@ -213,7 +230,11 @@ export class NetworkManager {
           isAiming: false,
           isShooting: false,
           isReloading: false,
-          quickDrawLobbyIndex: message.quickDrawLobbyIndex || -1
+          quickDrawLobbyIndex: message.quickDrawLobbyIndex || -1,
+          isBot: message.isBot || false, // Legacy bot flag
+          isNpc: message.isNpc || false, // New NPC flag
+          username: message.username || `Player_${message.id}`,
+          skins: message.skins || { bananaSkin: false } // Include skin information
         });
         break;
 
@@ -229,6 +250,12 @@ export class NetworkManager {
       // General player update (pos/rot/aiming/etc.)
       case 'playerUpdate':
         {
+          // Skip if this is our own ID
+          if (message.id === this.playerId) {
+            console.log(`Skipping update for own player ID: ${message.id}`);
+            break;
+          }
+
           const existing = this.otherPlayers.get(message.id);
           if (existing) {
             existing.position = message.position || existing.position;
@@ -245,9 +272,47 @@ export class NetworkManager {
               message.health !== undefined ? message.health : existing.health;
             existing.isDying =
               message.isDying !== undefined ? message.isDying : existing.isDying;
+            existing.isBot =
+              message.isBot !== undefined ? message.isBot : existing.isBot;
+            existing.isNpc =
+              message.isNpc !== undefined ? message.isNpc : existing.isNpc;
+            existing.isWalking =
+              message.isWalking !== undefined ? message.isWalking : existing.isWalking;
+            
+            // Always maintain skin state for syncing to new clients
+            if (message.skins) {
+              existing.skins = message.skins;
+            }
+          } else {
+            // If this is a new player we hadn't seen before - skip if it's our own ID
+            if (message.id !== this.playerId) {
+              this.otherPlayers.set(message.id, {
+                id: message.id,
+                position: message.position || { x: 0, y: 0, z: 0 },
+                rotation: message.rotation || { y: 0 },
+                isAiming: message.isAiming || false,
+                isShooting: message.isShooting || false,
+                isReloading: message.isReloading || false, 
+                quickDrawLobbyIndex: message.quickDrawLobbyIndex || -1,
+                health: message.health || 100,
+                isDying: message.isDying || false,
+                isBot: message.isBot || false,
+                isNpc: message.isNpc || false,
+                isWalking: message.isWalking || false,
+                username: message.username || `Player_${message.id}`,
+                skins: message.skins || { bananaSkin: false } // Include skin information
+              });
+              
+              // Notify about this newly discovered player
+              if (this.onPlayerJoined) {
+                this.onPlayerJoined(this.otherPlayers.get(message.id));
+              }
+            }
           }
-          if (this.onPlayerUpdate) {
-            this.onPlayerUpdate(message.id, existing);
+          
+          // Call onPlayerUpdate with the updated or new player data
+          if (this.onPlayerUpdate && message.id !== this.playerId) {
+            this.onPlayerUpdate(message.id, existing || this.otherPlayers.get(message.id));
           }
         }
         break;
@@ -276,6 +341,28 @@ export class NetworkManager {
         
         if (!isQuickDrawDuel && this.onPlayerHit) {
           // Only handle non-QuickDraw hits here
+          
+          // Add damage to hitData if it's missing (for NPC hits)
+          let damage = 40; // Default body shot damage
+          if (message.hitZone === 'head') {
+            damage = 100;
+          } else if (message.hitZone === 'limbs') {
+            damage = 20;
+          }
+          
+          // If hitData is missing (from NPC), create it
+          if (!message.hitData) {
+            message.hitData = {
+              damage: damage,
+              hitZone: message.hitZone || 'body'
+            };
+          }
+          
+          // Ensure damage property exists in hitData
+          if (message.hitData && !message.hitData.damage) {
+            message.hitData.damage = damage;
+          }
+          
           this.onPlayerHit(message.sourceId, message.hitData, message.health, message.hitZone);
         } else if (isQuickDrawDuel) {
           console.log(`[Network] Deferring hit handling to QuickDraw system`);
@@ -316,7 +403,37 @@ export class NetworkManager {
       case 'respawn':
         console.log(`Respawning at:`, message.position);
         if (this.onRespawn) {
-          this.onRespawn(message.position, message.health, message.bullets);
+          this.onRespawn(
+            message.position, 
+            message.health, 
+            message.bullets, 
+            message.maxBullets, 
+            message.activeWeapon
+          );
+        }
+        break;
+
+      // Player death notification - when this player is killed
+      case 'death':
+        console.log(`You were killed by player ${message.killerId}`);
+        if (this.onDeath) {
+          this.onDeath(message.killerId);
+        }
+        break;
+        
+      // Kill notification - when this player kills another player
+      case 'kill':
+        console.log(`You killed player ${message.targetId}`);
+        if (this.onKill) {
+          this.onKill(message.targetId);
+        }
+        break;
+        
+      // Player death notification - for other players in the game
+      case 'playerDeath':
+        console.log(`Player ${message.id} was killed by player ${message.killedById}`);
+        if (this.onPlayerDeath) {
+          this.onPlayerDeath(message.id, message.killedById);
         }
         break;
 
@@ -333,6 +450,34 @@ export class NetworkManager {
       case 'chatMessage':
         if (this.onChatMessage) {
           this.onChatMessage(message.senderId, message.username, message.message);
+        }
+        break;
+
+      // Player skin update
+      case 'playerSkinUpdate':
+        // Update the stored player data for skins
+        const playerToUpdate = this.otherPlayers.get(message.playerId);
+        if (playerToUpdate) {
+          playerToUpdate.skins = message.skins;
+        }
+        
+        // Call the skin update handler in main.js
+        if (this.onPlayerSkinUpdate) {
+          this.onPlayerSkinUpdate(message);
+        }
+        break;
+
+      // Train system: Initial train state
+      case 'trainInit':
+        if (this.onTrainInit) {
+          this.onTrainInit(message);
+        }
+        break;
+
+      // Train system: Ongoing train state updates
+      case 'trainState':
+        if (this.onTrainState) {
+          this.onTrainState(message);
         }
         break;
 
@@ -522,6 +667,20 @@ export class NetworkManager {
         type: 'chat',
         message: message
       }));
+    }
+  }
+
+  /**
+   * Explicitly requests current train state from the server
+   */
+  requestTrainState() {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      console.log("Requesting train state from server");
+      this.socket.send(JSON.stringify({
+        type: 'requestTrainState'
+      }));
+    } else {
+      console.warn("Cannot request train state, not connected to server");
     }
   }
 }

@@ -87,7 +87,7 @@ canvas {
   position: absolute;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%);
+  /* transform is now handled by inline style with !important */
   width: 80px;
   height: 80px;
   display: none; /* Will be controlled by JavaScript */
@@ -632,39 +632,69 @@ canvas {
   user-select: none;
 }
 
+/* Add a CSS comment that shows the configurable constants for reference */
+/* 
+MOBILE CONTROLS CONFIGURATION CONSTANTS:
+-------------------------------------
+JUMP_BUTTON = {
+  BOTTOM: 120,  // Distance from bottom edge
+  RIGHT: 30,   // Distance from right edge
+  SIZE: 60     // Button size
+}
+
+LEFT_JOYSTICK = {
+  BOTTOM: 50,  // Distance from bottom edge
+  LEFT: 50,    // Distance from left edge
+  SIZE: 120    // Joystick size
+}
+
+RIGHT_JOYSTICK = {
+  BOTTOM: 70,  // Distance from bottom edge
+  RIGHT: 130,   // Distance from right edge
+  SIZE: 100    // Joystick size
+}
+
+CAMERA_AREA = {
+  Y_OFFSET: 130,  // Distance above the aim joystick
+  HEIGHT: 150,    // Height of the camera area
+  WIDTH: 120      // Width of the camera area
+}
+
+MOVE_THRESHOLD: 10
+MOVE_SENSITIVITY: 0.15
+LOOK_SENSITIVITY: 0.4
+CAMERA_ROTATION_SENSITIVITY: 0.5
+*/
+
+/* Mobile buttons */
 .mobile-button {
   position: fixed;
-  width: 90px;  /* Increased size */
-  height: 90px;  /* Increased size */
-  background-color: rgba(0, 0, 0, 0.6);  /* Slightly more opaque */
-  border: 3px solid rgba(255, 255, 255, 0.7);  /* More visible border */
+  width: 80px;  /* Adjustable through JUMP_BUTTON.SIZE */
+  height: 80px;  /* Adjustable through JUMP_BUTTON.SIZE */
+  background-color: rgba(0, 0, 0, 0.6);
+  border: 3px solid rgba(255, 255, 255, 0.7);
   border-radius: 50%;
   display: flex;
   justify-content: center;
   align-items: center;
   color: white;
-  font-size: 36px;  /* Larger font */
+  font-size: 36px;
   z-index: 1000;
   touch-action: none;
   display: none;
   pointer-events: auto !important;
 }
 
-#shoot-button {
-  bottom: 160px;
-  left: 100px;  /* Moved further right as requested */
-}
-
 #jump-button {
-  bottom: 160px;
-  right: 100px;  /* Moved further left as requested */
+  bottom: 50px;  /* Adjustable through JUMP_BUTTON.BOTTOM */
+  right: 50px;   /* Adjustable through JUMP_BUTTON.RIGHT */
 }
 
 /* Simulate visible joystick areas */
 .control-hint {
   position: fixed;
-  width: 150px; /* Increased from 120px */
-  height: 150px; /* Increased from 120px */
+  width: 150px; /* Adjustable through joystick SIZE */
+  height: 150px; /* Adjustable through joystick SIZE */
   border-radius: 50%;
   border: 2px dashed rgba(255, 255, 255, 0.3);
   z-index: 999;
@@ -674,29 +704,27 @@ canvas {
 }
 
 #left-control-hint {
-  bottom: 30px;
-  left: 30px;
+  bottom: 50px;  /* Adjustable through LEFT_JOYSTICK.BOTTOM */
+  left: 50px;    /* Adjustable through LEFT_JOYSTICK.LEFT */
 }
 
 #right-control-hint {
-  bottom: 30px;
-  right: 30px;
+  bottom: 90px; /* Adjustable through RIGHT_JOYSTICK.BOTTOM */
+  right: 80px;   /* Adjustable through RIGHT_JOYSTICK.RIGHT */
 }
 
-#orientation-message {
+/* Camera control hint - covers the whole screen but invisible */
+#camera-control-hint {
   position: fixed;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(0, 0, 0, 0.9);
-  color: white;
-  display: none;
-  justify-content: center;
-  align-items: center;
-  font-size: 24px;
-  text-align: center;
-  z-index: 2000;
+  background-color: transparent;
+  border: none;
+  z-index: 900; /* Below other controls but above canvas */
+  pointer-events: none;
+  display: flex;
 }
 
 /* Only show mobile controls on mobile devices */
@@ -747,22 +775,16 @@ canvas {
     border-radius: 3px;
   }
   
-  /* Adjust UI for landscape orientation on mobile */
   @media (orientation: landscape) {
     .mobile-button {
-      height: 80px;  /* Adjusted for landscape */
-      width: 80px;   /* Adjusted for landscape */
-      font-size: 32px;
-    }
-    
-    #shoot-button {
-      bottom: 150px; /* Move upward from 130px */
-      left: 90px;
+      height: 70px;  /* Smaller for landscape */
+      width: 70px;   /* Smaller for landscape */
+      font-size: 28px;
     }
     
     #jump-button {
-      bottom: 150px; /* Move upward from 130px */
-      right: 90px;
+      bottom: 40px; /* Adjusted for landscape */
+      right: 40px;  /* Adjusted for landscape */
     }
     
     /* Control hints (joystick indicators) */
@@ -772,13 +794,20 @@ canvas {
     }
     
     #left-control-hint {
-      bottom: 20px;
-      left: 20px;
+      bottom: 40px;  /* Moved up */
+      left: 40px;    /* Moved right */
     }
     
     #right-control-hint {
-      bottom: 20px;
-      right: 20px;
+      bottom: 80px; /* Adjusted for landscape */
+      right: 80px;   /* Moved more to the left */
+    }
+    
+    /* Remove camera control hint specific styling for landscape */
+    #camera-control-hint {
+      /* Keep it simple - just maintain the full-screen invisible area */
+      border: none;
+      background-color: transparent;
     }
     
     /* Ensure crosshair is visible */
@@ -1050,4 +1079,216 @@ canvas {
 .letterbox-active .letterbox-top,
 .letterbox-active .letterbox-bottom {
   height: 15vh;  /* 15% of viewport height for each bar */
+}
+
+/* Mobile-specific chat styles */
+@media (max-width: 1024px) {
+  #chat-container {
+    background-color: transparent !important; /* Remove background */
+    touch-action: auto !important; /* Override any touch restrictions */
+    -webkit-touch-callout: default !important; /* Allow touch interactions */
+    -webkit-user-select: text !important; /* Allow text selection in chat */
+    user-select: text !important;
+    pointer-events: auto !important; /* Ensure pointer events work */
+    padding: 10px !important; /* Smaller padding */
+    min-height: 30px; /* Ensure there's always something to tap */
+    /* Position from the left edge - no more notch adjustment */
+    left: 0px !important; 
+    top: 10px !important;
+    width: 70% !important;
+    max-width: 70% !important;
+  }
+  
+  /* For iPhone X and later with notch */
+  @supports (padding-top: env(safe-area-inset-top)) {
+    #chat-container {
+      padding-left: calc(env(safe-area-inset-left) + 5px) !important;
+      padding-top: env(safe-area-inset-top) !important;
+    }
+  }
+  
+  /* iOS-compatible chat link styles - invisible but clickable */
+  #chat-mobile-link {
+    /* Reset all visible styles */
+    background-color: transparent !important;
+    border: none !important;
+    color: transparent !important;
+    box-shadow: none !important;
+    opacity: 0 !important;
+    
+    /* Keep functional properties */
+    -webkit-tap-highlight-color: transparent !important;
+    -webkit-touch-callout: none !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    touch-action: manipulation !important;
+    display: block !important;
+    
+    /* Positioning - match chat container exactly */
+    position: fixed !important;
+    top: 10px !important;
+    left: 0px !important;
+    width: 70% !important;
+    height: 30% !important;
+    z-index: 9999 !important;
+    
+    /* Critical for functionality */
+    pointer-events: auto !important;
+  }
+}
+
+/* Mobile-specific enhancements for chat without background */
+@media (max-width: 1024px) {
+  .chat-message {
+    text-shadow: 2px 2px 3px rgba(0, 0, 0, 1), 0 0 8px rgba(0, 0, 0, 1) !important;
+    font-weight: bold !important;
+    color: rgba(255, 255, 255, 0.95) !important;
+  }
+  
+  .system-message {
+    color: rgba(255, 255, 255, 0.9) !important;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 1), 0 0 8px rgba(0, 0, 0, 1) !important;
+  }
+  
+  .username {
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 1), 0 0 8px rgba(0, 0, 0, 1) !important;
+  }
+}
+
+@supports (padding-top: env(safe-area-inset-top)) {
+  #chat-container {
+    padding-left: calc(env(safe-area-inset-left) + 5px) !important;
+    padding-top: env(safe-area-inset-top) !important;
+  }
+}
+
+/* Chat messages specific styles */
+#chat-messages {
+  padding-right: 5px !important;
+}
+
+#chat-input-container {
+  touch-action: auto !important;
+  -webkit-touch-callout: default !important;
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  pointer-events: auto !important;
+}
+
+#chat-input {
+  font-size: 16px; /* iOS Safari requires 16px+ to prevent zoom */
+}
+
+#chat-send-button {
+  min-height: 44px; /* Apple recommends 44px minimum touch target size */
+  min-width: 44px;
+  touch-action: manipulation;
+  -webkit-appearance: none; /* Prevent iOS default styling */
+}
+
+/* iOS-compatible chat link styles - invisible but clickable */
+#chat-mobile-link {
+  /* Reset all visible styles */
+  background-color: transparent !important;
+  border: none !important;
+  color: transparent !important;
+  box-shadow: none !important;
+  opacity: 0 !important;
+  
+  /* Keep functional properties */
+  -webkit-tap-highlight-color: transparent !important;
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  touch-action: manipulation !important;
+  display: block !important;
+  
+  /* Positioning - match chat container exactly */
+  position: fixed !important;
+  top: 10px !important;
+  left: 0px !important;
+  width: 70% !important;
+  height: 30% !important;
+  z-index: 9999 !important;
+  
+  /* Critical for functionality */
+  pointer-events: auto !important;
+}
+
+/* Remove active state visual effects */
+#chat-mobile-link:active {
+  opacity: 0 !important;
+  background-color: transparent !important;
+  transform: none !important;
+}
+
+/* Remove the fire button CSS */
+#fire-button {
+  display: none; /* Hide it completely */
+}
+
+@media (max-width: 1024px), (pointer: coarse) {
+  @media (orientation: landscape) {
+    #fire-button {
+      display: none; /* Hide in landscape mode as well */
+    }
+  }
+}
+
+/* Joystick knob styles */
+.joystick-knob {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  transition: transform 0.05s ease-out;
+  will-change: transform;
+}
+
+#left-joystick-knob {
+  width: 40%;
+  height: 40%;
+  background-color: rgba(255, 255, 255, 0.4);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+}
+
+#right-joystick-knob {
+  width: 40%;
+  height: 40%;
+  background-color: rgba(0, 0, 0, 0.3);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+#right-joystick-knob img {
+  width: 70%;
+  height: 70%;
+  object-fit: contain;
+}
+
+/* Updated control hints */
+.control-hint {
+  position: fixed;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 255, 255, 0.3);
+  z-index: 997;
+  pointer-events: none;
+  display: block;
+  background-color: rgba(0, 0, 0, 0.3);
+}
+
+@media (max-width: 1024px), (pointer: coarse) {
+  @media (orientation: landscape) {
+    .joystick-knob {
+      transition: transform 0.03s ease-out;
+    }
+    
+    #left-joystick-knob, #right-joystick-knob {
+      width: 35%;
+      height: 35%;
+    }
+  }
 }

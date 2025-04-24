@@ -11,8 +11,10 @@
     "@solana/wallet-adapter-phantom": "^0.9.25",
     "@solana/web3.js": "^1.98.0",
     "cannon": "^0.6.2",
+    "dotenv": "^16.4.7",
     "express": "^4.18.2",
     "ngrok": "^4.3.3",
+    "node-telegram-bot-api": "^0.66.0",
     "ws": "^8.13.0"
   }
 }

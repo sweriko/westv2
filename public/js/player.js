@@ -1,5 +1,5 @@
 import { Viewmodel } from './viewmodel.js';
-import { updateAmmoUI, updateHealthUI } from './ui.js';
+import { updateAmmoUI, updateHealthUI, showDamageIndicator } from './ui.js';
 import { applyRecoil } from './effects.js';
 import { networkManager } from './network.js';
 
@@ -15,6 +15,9 @@ export class Player {
    * @param {Function} config.onShoot - A callback function called when the player fires a bullet.
    */
   constructor({ scene, camera, soundManager, onShoot }) {
+    // Enable ammo debugging by default
+    window.debugAmmo = true;
+    
     this.scene = scene;
     this.camera = camera;
     this.soundManager = soundManager;
@@ -32,7 +35,12 @@ export class Player {
     this.id = null; // will be set by networkManager.onInit
     this.velocity = new THREE.Vector3();
     this.canJump = false;
-    this.gravity = 20; // Gravity force for physics
+    this.gravity = 25; // Increased from 15 for much stronger gravity pull
+
+    // Add recoil boost flag to prevent normal velocity dampening
+    this.recoilBoosted = false;
+    this.recoilBoostTime = 0;
+    this.recoilBoostDuration = 0.3; // How long the velocity boost lasts
 
     // Movement flags
     this.moveForward = false;
@@ -47,9 +55,9 @@ export class Player {
     
     // Sprinting flag - new addition
     this.isSprinting = false;
-    this.normalSpeed = 5; // Default movement speed
-    this.sprintSpeed = 12; // Faster sprint speed
-    this.sprintJumpBoost = 1.5; // Jump boost factor when sprinting
+    this.normalSpeed = 3.5; // Reduced from 5 for slower movement
+    this.sprintSpeed = 7; // Reduced from 12 for more realistic running
+    this.sprintJumpBoost = 1.1; // Reduced further for more subtle sprint jumping effect
 
     // Aiming
     this.isAiming = false;
@@ -81,9 +89,38 @@ export class Player {
     this.isReloading = false;
     this.reloadTime = 4000; // Changed from 2000ms to 4000ms (4 seconds)
     this.reloadProgress = 0;
-    this.bullets = 6;
+    
+    // Track bullets for each weapon type separately
+    this.weaponAmmo = {
+      revolver: 6,
+      shotgun: 2
+    };
+    
+    this.bullets = 6; // Current active weapon's bullets
     this.maxBullets = 6;
     this.canShoot = true;
+
+    // Weapon types and switching
+    this.activeWeapon = 'revolver'; // 'revolver' or 'shotgun'
+    this.weaponStats = {
+      revolver: {
+        maxBullets: 6,
+        reloadTime: 4000,
+        bulletCount: 1, // Single bullet per shot
+        bulletSpread: 0.0005 // Default spread
+      },
+      shotgun: {
+        maxBullets: 2,
+        reloadTime: 6000, // Longer reload for shotgun
+        bulletCount: 10, // 10 pellets per shot
+        bulletSpread: 0.08, // Increased spread from 0.03 to 0.08
+        pelletDamage: {
+          head: 10,    // Headshot damage per pellet
+          body: 5,     // Body damage per pellet
+          limbs: 5     // Limb damage per pellet
+        }
+      }
+    };
 
     // Health
     this.health = 100;
@@ -98,6 +135,7 @@ export class Player {
     // Alternative aiming controls
     this.isFAiming = false; // Whether player is aiming using the F key
     this.isFRmbPressed = false; // Whether right mouse button is pressed during F-aiming
+    this.isLmbPressed = false; // Whether left mouse button is being held (for hold-to-shoot)
     
     // Store previous position to detect collision with arena boundary
     this.previousPosition = new THREE.Vector3();
@@ -123,6 +161,10 @@ export class Player {
       body: { damage: 40 },
       limbs: { damage: 20 }
     };
+    
+    // Jump mechanics
+    this.jumpCooldown = 0; // Cooldown timer to prevent jump spamming
+    this.jumpCooldownTime = 0.3; // Time in seconds between allowed jumps
     
     // Initialize network & UI
     this.initNetworking();
@@ -168,6 +210,9 @@ export class Player {
     console.log(`Player spawned at: X=${spawnX.toFixed(2)}, Z=${spawnZ.toFixed(2)}`);
   }
 
+  /**
+   * Initialize networking for the player
+   */
   initNetworking() {
     // Start the WebSocket
     networkManager.connect();
@@ -177,54 +222,69 @@ export class Player {
       console.log(`Local player initialized with ID: ${this.id}`);
     };
     
-    // Anti-cheat: Handle position corrections from server
-    networkManager.onPositionCorrection = (correctedPosition) => {
-      console.log("Received position correction from server");
+    // Handle player hit
+    networkManager.onPlayerHit = (sourceId, hitData, newHealth, hitZone) => {
+      this.health = newHealth;
+      updateHealthUI(this);
       
-      // Instead of constant reconciliation, we'll use a "rubber-banding" approach
-      // Save server position and current client position
-      this.serverPosition = new THREE.Vector3(
-        correctedPosition.x,
-        correctedPosition.y,
-        correctedPosition.z
-      );
-      
-      // Only apply corrections when player is not actively moving
-      // This prevents teleports during active gameplay
-      if (!this.isMoving()) {
-        // Immediate reposition when not moving
-        this.group.position.copy(this.serverPosition);
-        this.previousPosition.copy(this.serverPosition);
-        console.log("Applied immediate position correction (not moving)");
-      } else {
-        // Mark for gradual correction if moving
-        this.isReconciling = true;
-        // Use a very subtle correction that's almost unnoticeable
-        this.reconciliationLerpFactor = 0.05;
-      }
+      // Show hit zone on screen for 100ms
+      showDamageIndicator(hitData.damage, hitZone);
     };
     
     // Anti-cheat: Handle respawn from server
-    networkManager.onRespawn = (position, health, bullets) => {
+    networkManager.onRespawn = (position, health, bullets, maxBullets, activeWeapon) => {
       console.log("Server-initiated respawn");
       
       // Set position
       this.group.position.copy(position);
       this.previousPosition.copy(position);
       
-      // Update health and bullets
+      // Update health
       this.health = health || 100;
-      this.bullets = bullets || this.maxBullets;
+      
+      // Set active weapon if provided by server
+      if (activeWeapon && (activeWeapon === 'revolver' || activeWeapon === 'shotgun')) {
+        // Only switch if different from current
+        if (this.activeWeapon !== activeWeapon) {
+          this.switchWeapon(activeWeapon);
+        }
+      }
+      
+      // Reset all weapon ammo to maximum
+      this.weaponAmmo = {
+        revolver: this.weaponStats.revolver.maxBullets,
+        shotgun: this.weaponStats.shotgun.maxBullets
+      };
+      
+      // Set active weapon's bullets
+      this.bullets = this.weaponAmmo[this.activeWeapon];
+      this.maxBullets = this.weaponStats[this.activeWeapon].maxBullets;
+      
+      // Cancel any ongoing reloading
+      if (this.isReloading) {
+        // Cancel reload animation
+        if (this.viewmodel) {
+          this.viewmodel.cancelReload();
+        }
+        
+        // Hide reload UI elements
+        const reloadProgressContainer = document.getElementById('reload-progress-container');
+        if (reloadProgressContainer) reloadProgressContainer.style.display = 'none';
+      }
       
       // Reset states
       this.isReloading = false;
       this.isAiming = false;
       this.velocity.y = 0;
       this.canAim = true;
+      this.canShoot = true;
       
       // Update UI
       updateHealthUI(this);
       updateAmmoUI(this);
+      
+      console.log(`Respawn complete - Current weapon: ${this.activeWeapon}, Ammo: ${this.bullets}/${this.maxBullets}`);
+      console.log(`Weapon ammo: Revolver: ${this.weaponAmmo.revolver}, Shotgun: ${this.weaponAmmo.shotgun}`);
     };
   }
 
@@ -347,13 +407,29 @@ export class Player {
     if (!this.canMove) return; // Movement lock (e.g. during Quick Draw)
     if (this.chatActive) return; // Don't move when chat is active
 
-    if (this.moveForward) this.velocity.z = -this.getMoveSpeed();
-    else if (this.moveBackward) this.velocity.z = this.getMoveSpeed();
-    else this.velocity.z = 0;
+    // Update jump cooldown if it's active
+    if (this.jumpCooldown > 0) {
+      this.jumpCooldown = Math.max(0, this.jumpCooldown - deltaTime);
+    }
+    
+    // Update recoil boost timer if active
+    if (this.recoilBoosted) {
+      this.recoilBoostTime -= deltaTime;
+      if (this.recoilBoostTime <= 0) {
+        this.recoilBoosted = false;
+      }
+    }
 
-    if (this.moveRight) this.velocity.x = this.getMoveSpeed();
-    else if (this.moveLeft) this.velocity.x = -this.getMoveSpeed();
-    else this.velocity.x = 0;
+    // Only apply movement inputs if not in recoil boost mode
+    if (!this.recoilBoosted) {
+      if (this.moveForward) this.velocity.z = -this.getMoveSpeed();
+      else if (this.moveBackward) this.velocity.z = this.getMoveSpeed();
+      else this.velocity.z = 0;
+
+      if (this.moveRight) this.velocity.x = this.getMoveSpeed();
+      else if (this.moveLeft) this.velocity.x = -this.getMoveSpeed();
+      else this.velocity.x = 0;
+    }
 
     // Store previous position before movement for collision detection
     this.previousPosition.copy(this.group.position);
@@ -362,8 +438,8 @@ export class Player {
     const wasOnGround = this.group.position.y <= 2.72 || this.isOnObject;
     const wasJumping = this.isJumping;
     
-    // Calculate new vertical position with gravity
-    if (!wasOnGround) {
+    // Calculate new vertical position with gravity - always apply gravity unless in recoil boost
+    if (!wasOnGround && (!this.recoilBoosted || this.velocity.y < 0)) {
       this.velocity.y -= this.gravity * deltaTime;
     }
     const newVerticalPos = {
@@ -398,7 +474,7 @@ export class Player {
       if (this.velocity.y < -3 && !wasOnGround) {
         // Play landing sound if falling fast enough
         if (this.soundManager) {
-          this.soundManager.playSound("leftstep", 0, 1.2);
+          this.soundManager.playSound("jumpland", 0, 1.2);
         }
       }
       
@@ -424,17 +500,24 @@ export class Player {
     
     // Apply horizontal movement to a test position (don't actually move yet)
     const movement = new THREE.Vector3();
-    movement.x = this.velocity.x * deltaTime;
-    movement.z = this.velocity.z * deltaTime;
     
-    // Rotate movement to match player's direction
-    movement.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.group.rotation.y);
+    // Special handling for recoil boost - use absolute world direction
+    if (this.recoilBoosted) {
+      // For recoil, we use the velocity directly as world-space movement
+      movement.x = this.velocity.x * deltaTime;
+      movement.z = this.velocity.z * deltaTime;
+    } else {
+      // Normal movement - apply player rotation
+      movement.x = this.velocity.x * deltaTime;
+      movement.z = this.velocity.z * deltaTime;
+      movement.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.group.rotation.y);
+    }
     
     // Calculate desired new position
     const newPosition = this.group.position.clone().add(movement);
     
     // Auto-step detection - check if there's a small step in front of us that we can climb
-    const stepHeight = 0.9; // Increased for higher steps
+    const stepHeight = 0.9;
     const stepPosition = this.checkForStep(newPosition, stepHeight);
     if (stepPosition) {
       // Found a step we can climb - adjust our position to step up onto it
@@ -457,10 +540,7 @@ export class Player {
     this.group.position.x = finalPosition.x;
     this.group.position.z = finalPosition.z;
     
-    // Handle jump sound - only play when we first start jumping (not previously jumping)
-    if (this.isJumping && !wasJumping && this.soundManager) {
-      this.soundManager.playSound("jump", 300); // Play jump sound with 300ms cooldown
-    }
+    // We no longer need to handle jump sound here since it's handled in the jump() method
   }
 
   /**
@@ -787,6 +867,9 @@ export class Player {
     });
   }
 
+  /**
+   * Handle shooting logic
+   */
   shoot() {
     if (this.bullets <= 0 || !this.canShoot || this.isReloading) {
       // No bullets or can't shoot
@@ -794,14 +877,20 @@ export class Player {
         const reloadMessage = document.getElementById('reload-message');
         if (reloadMessage) reloadMessage.style.display = 'block';
         
-        // Play the fakeshoot animation when no ammo
-        if (this.isAiming && this.viewmodel) {
-          this.viewmodel.playFakeShootAnim();
-          
-          // Play empty gun click sound if sound manager exists
-          if (this.soundManager && !window.isMobile) {
-            // Only play empty click on desktop - skip on mobile to avoid sound issues
-            this.soundManager.playSound("empty_click");
+        // If we're already in the empty animation, don't trigger it again
+        if (this.viewmodel && 
+            this.viewmodel.animationState !== `${this.activeWeapon}empty`) {
+          // Play the empty gun animation when no ammo
+          if (this.isAiming && this.viewmodel) {
+            this.viewmodel.playFakeShootAnim();
+            
+            // Play empty gun click sound if sound manager exists
+            if (this.soundManager && !window.isMobile) {
+              // Only play empty click on desktop - skip on mobile to avoid sound issues
+              if (this.activeWeapon === 'shotgun') {
+                this.soundManager.playSound("shotgunempty");
+              }
+            }
           }
         }
       }
@@ -810,39 +899,58 @@ export class Player {
     
     // Actually shoot
     this.bullets--;
+    
+    // Update weapon-specific ammo storage and ensure consistency
+    this._syncWeaponAmmo();
+    
     updateAmmoUI(this);
 
     this.canShoot = false;
     setTimeout(() => { this.canShoot = true; }, 250);
 
-    // Play the shooting animation on the viewmodel
+    // Play the shooting animation on the viewmodel if aiming
     if (this.isAiming) {
       this.viewmodel.playShootAnim();
     }
 
     // Find bullet spawn - use viewmodel instead of revolver
     const bulletStart = this.viewmodel.getBarrelTipWorldPosition();
-    const shootDir = new THREE.Vector3();
-    this.camera.getWorldDirection(shootDir);
-
-    // Slight random spread
-    shootDir.x += (Math.random() - 0.5) * 0.0005;
-    shootDir.y += (Math.random() - 0.5) * 0.0005;
-    shootDir.z += (Math.random() - 0.5) * 0.0005;
-    shootDir.normalize();
-
-    // Recoil effect
-    applyRecoil(this);
-
-    // IMPORTANT: We do NOT play gunshot sounds here!
-    // All sound handling for shooting is done centrally in main.js's spawnBullet function
-    // to avoid duplicate sounds, especially important on mobile devices
     
-    // Call the callback to spawn bullet in main.js
-    if (typeof this.onShootCallback === 'function') {
-      this.onShootCallback(bulletStart, shootDir);
+    // Get weapon stats for spread and bullet count
+    const weaponStats = this.weaponStats[this.activeWeapon];
+    
+    // Play the appropriate gunshot sound
+    if (this.soundManager) {
+      // Set a specific sound name based on weapon type
+      const soundName = this.activeWeapon === 'shotgun' ? "shotgunshot" : "shot";
+      
+      // Play the sound (let the sound manager handle cooldowns internally)
+      this.soundManager.playSound(soundName, 100, 0.8);
+    }
+    
+    // For shotgun, create multiple pellets with spread
+    for (let i = 0; i < weaponStats.bulletCount; i++) {
+      const shootDir = new THREE.Vector3();
+      this.camera.getWorldDirection(shootDir);
+      
+      // Apply spread - more spread for shotgun, less for revolver
+      const spread = weaponStats.bulletSpread;
+      shootDir.x += (Math.random() - 0.5) * spread;
+      shootDir.y += (Math.random() - 0.5) * spread;
+      shootDir.z += (Math.random() - 0.5) * spread;
+      
+      shootDir.normalize();
+      
+      // Call the callback to spawn bullet in main.js
+      if (typeof this.onShootCallback === 'function') {
+        this.onShootCallback(bulletStart, shootDir);
+      }
     }
 
+    // Recoil effect - stronger for shotgun
+    const recoilMultiplier = this.activeWeapon === 'shotgun' ? 2.5 : 1.0;
+    applyRecoil(this, recoilMultiplier);
+    
     // If out of bullets, show reload hint
     if (this.bullets === 0) {
       const reloadMessage = document.getElementById('reload-message');
@@ -932,10 +1040,23 @@ export class Player {
     this.spawnPlayerRandomly();
     
     // Reset weapon state
-    this.bullets = this.maxBullets;
+    // Reset ammo for all weapons to their maximum values
+    this.weaponAmmo = {
+      revolver: this.weaponStats.revolver.maxBullets,
+      shotgun: this.weaponStats.shotgun.maxBullets
+    };
+    
+    // Set active weapon's bullets
+    this.bullets = this.weaponAmmo[this.activeWeapon];
+    this.maxBullets = this.weaponStats[this.activeWeapon].maxBullets;
+    
+    // Reset animation and interaction states
     this.isReloading = false;
-    this.canAim = true;
     this.isAiming = false;
+    this.velocity.y = 0;
+    this.canAim = true;
+    
+    // Make sure UI is updated
     updateAmmoUI(this);
     
     // Reset vertical velocity
@@ -945,50 +1066,90 @@ export class Player {
     this.quickDrawLobbyIndex = -1;
     
     console.log('Player respawned');
+    console.log(`Weapon ammo reset - Revolver: ${this.weaponAmmo.revolver}, Shotgun: ${this.weaponAmmo.shotgun}`);
   }
 
+  /**
+   * Start the reload process
+   */
   startReload() {
     if (this.isReloading || this.bullets >= this.maxBullets) return;
-
+    
     this.isReloading = true;
     this.reloadProgress = 0;
+    
+    // Use the current weapon's reload time
+    const reloadTime = this.weaponStats[this.activeWeapon].reloadTime;
+    
     const reloadMessage = document.getElementById('reload-message');
     const reloadProgressContainer = document.getElementById('reload-progress-container');
     if (reloadMessage) reloadMessage.style.display = 'none';
     if (reloadProgressContainer) reloadProgressContainer.style.display = 'block';
 
-    // Always make sure viewmodel is visible during reload, regardless of aim state
+    // Reset aim state tracking to ensure it's synchronized with reload
+    if (this.updateAiming && typeof this.updateAiming.lastAimingState !== 'undefined') {
+      this.updateAiming.lastAimingState = this.isAiming;
+    }
+    
+    // Always make sure viewmodel is visible during reload
     if (this.viewmodel) {
+      // Special handling: allow reload to interrupt empty animation
+      const emptyAnimName = `${this.activeWeapon}empty`;
+      if (this.viewmodel.animationState === emptyAnimName) {
+        // Reset any blocking flags to ensure reload can play
+        this.viewmodel.blockHolster = false;
+      }
+      
       this.viewmodel.group.visible = true;
       this.viewmodel.playReloadAnim();
     }
-
+    
+    // Play reload sound based on weapon type
     if (this.soundManager) {
-      this.soundManager.playSound("reloading");
+      const soundName = this.activeWeapon === 'shotgun' ? "shotgunreloading" : "reloading";
+      this.soundManager.playSound(soundName);
     }
 
     // Anti-cheat: Notify server about reload start
     networkManager.sendReload();
-
+    
+    // Animate the reload progress
     const startTime = performance.now();
     const updateReload = (currentTime) => {
+      if (!this.isReloading) return;
+      
       const elapsed = currentTime - startTime;
-      this.reloadProgress = Math.min((elapsed / this.reloadTime) * 100, 100);
+      this.reloadProgress = Math.min(100, (elapsed / reloadTime) * 100);
+      
       const reloadProgressBar = document.getElementById('reload-progress-bar');
       if (reloadProgressBar) {
         reloadProgressBar.style.width = this.reloadProgress + '%';
       }
-      if (elapsed < this.reloadTime) {
+      
+      if (elapsed < reloadTime) {
         requestAnimationFrame(updateReload);
       } else {
         this.completeReload();
       }
     };
+    
+    // Start reload progress animation
     requestAnimationFrame(updateReload);
+    
+    // Notify server about reload state
+    this.sendNetworkUpdate();
   }
 
+  /**
+   * Complete the reload process
+   */
   completeReload() {
+    // Update bullets to max
     this.bullets = this.maxBullets;
+    
+    // Sync weapon ammo state
+    this._syncWeaponAmmo();
+    
     updateAmmoUI(this);
 
     const reloadProgressContainer = document.getElementById('reload-progress-container');
@@ -998,16 +1159,24 @@ export class Player {
     
     this.isReloading = false;
 
-    // After reload, hide viewmodel if not aiming
-    if (this.viewmodel && !this.isAiming) {
-      // Play holster animation and then hide
-      this.viewmodel.playHolsterAnim();
+    // After reload finishes, we don't need to do anything with animations
+    // The viewmodel.playReloadAnim's onComplete already handles the transition to idle
+    // Just ensure visibility is properly managed after the animation finishes
+    if (this.viewmodel) {
+      // Update aim state tracking to ensure aim toggle detection will work properly
+      if (this.updateAiming && typeof this.updateAiming.lastAimingState !== 'undefined') {
+        // Force aim state to be correctly tracked
+        this.updateAiming.lastAimingState = this.isAiming;
+      }
       
-      setTimeout(() => {
-        if (!this.isAiming && !this.isReloading) {
-          this.viewmodel.group.visible = false;
-        }
-      }, 800); // Increased from 500ms to 800ms to allow for longer holster animation
+      // Let the animation system handle visibility
+      if (!this.isAiming) {
+        setTimeout(() => {
+          if (!this.isAiming && this.viewmodel && !this.viewmodel.forceVisible) {
+            this.viewmodel.group.visible = false;
+          }
+        }, 500);
+      }
     }
     
     this.sendNetworkUpdate(); // let others know
@@ -1052,23 +1221,58 @@ export class Player {
         // Starting to aim - play draw animation and show model
         this.viewmodel.group.visible = true;
         
-        // Only play the draw animation if we're not already in a shooting animation
-        if (!this.viewmodel.isInShootAnimation()) {
+        // In idle state (possibly after reload), always allow draw animation
+        if (this.viewmodel.animationState === 'idle') {
+          this.viewmodel.blockHolster = false;
+          this.viewmodel.pendingHolster = false;
+        }
+        
+        // Handle case when trying to aim during reload
+        if (this.viewmodel.animationState === 'revolverreload') {
+          // Don't play draw animation now, the reload onComplete will handle it
+          // Just update state tracking
+        } else {
+          // Always play the draw animation when toggling aim for other states
           this.viewmodel.playDrawAim();
         }
       } else {
-        // Only holster if not in a forced-visible state (fakeshoot or reload)
-        if (!this.viewmodel.forceVisible) {
+        // Stopping aim - handle holstering
+        
+        // If we're in draw animation, explicitly set pendingHolster to true to 
+        // ensure the viewmodel knows we want to holster after draw completes
+        if (this.viewmodel.animationState === 'revolverdraw') {
+          this.viewmodel.pendingHolster = true;
+        }
+        
+        // Handle case when toggling aim after reload or other animations
+        // Make sure we can always holster after animations finish
+        if (this.viewmodel.animationState === 'idle' || 
+            this.viewmodel.animationState === 'revolveraim') {
+          this.viewmodel.blockHolster = false;
+          this.viewmodel.pendingHolster = false; // Reset any pending holster flag
+        }
+        
+        // Reset any stuck flags in other states
+        if (this.viewmodel.animationState === 'revolverreload' || 
+            this.viewmodel.animationState === 'revolvershot' ||
+            this.viewmodel.animationState === 'revolverempty') {
+          this.viewmodel.pendingHolster = true;
+        }
+        
+        // Only holster if not in a forced-visible state
+        if (!this.viewmodel.blockHolster) {
           // Stopping aim - play holster animation
           this.viewmodel.playHolsterAnim();
           
-          // When holster animation finishes, hide the model
+          // When holster animation finishes, hide the model if needed
+          const holsterDuration = this.viewmodel.actions.revolverholster._clip.duration * 1000;
+          
           setTimeout(() => {
             if (!this.isAiming && !this.viewmodel.forceVisible) { 
               // Double-check we're still not aiming and not forced visible
               this.viewmodel.group.visible = false;
             }
-          }, 800); // Increased from 500ms to 800ms to allow for longer holster animation
+          }, holsterDuration + 100); // Add a small buffer to ensure animation completes
         }
       }
       
@@ -1076,8 +1280,17 @@ export class Player {
       this.updateAiming.lastAimingState = this.isAiming;
     }
     
-    // Always keep the gun visible if forceVisible is set (fakeshoot, reload, etc.)
-    if (this.viewmodel.forceVisible) {
+    // Special case: in aim state but stuck with blockHolster flag
+    // This helps recover from cases where state gets out of sync after reload
+    if (!this.isAiming && this.viewmodel.animationState === 'revolveraim' && 
+        this.viewmodel.blockHolster) {
+      // Force the blockHolster flag to false so we can holster
+      this.viewmodel.blockHolster = false;
+      this.viewmodel.playHolsterAnim();
+    }
+    
+    // Always keep the gun visible if forceVisible is set
+    if (this.viewmodel && this.viewmodel.forceVisible) {
       this.viewmodel.group.visible = true;
     }
     
@@ -1126,6 +1339,8 @@ export class Player {
           crosshair.classList.add('expanded');
         }, 250); // Match animation duration
       }
+      
+      // IMPORTANT: Don't modify transform - leave the inline style working
     }
   }
 
@@ -1161,9 +1376,7 @@ export class Player {
         
         // Get the world position/rotation of this shape
         const shapePos = new CANNON.Vec3();
-        const shapeQuat = new CANNON.Quaternion();
         body.pointToWorldFrame(body.shapeOffsets[i], shapePos);
-        body.quaternion.mult(body.shapeOrientations[i], shapeQuat);
         
         // Convert to THREE.js objects
         const boxPos = new THREE.Vector3(shapePos.x, shapePos.y, shapePos.z);
@@ -1341,6 +1554,11 @@ export class Player {
    * Make the player jump.
    */
   jump() {
+    // Don't allow jumping if on cooldown
+    if (this.jumpCooldown > 0) {
+      return;
+    }
+    
     // Double check for platforms first - ensures we can always jump on platforms
     if (!this.canJump) {
       const feetPos = new THREE.Vector3(
@@ -1355,14 +1573,16 @@ export class Player {
     }
     
     if (this.canJump && !this.forceLockMovement && this.canMove) {
-      this.velocity.y = this.isSprinting ? 8 * this.sprintJumpBoost : 8;
+      // Much more realistic jump velocity (significantly reduced)
+      this.velocity.y = this.isSprinting ? 5.2 * this.sprintJumpBoost : 5.2;
       this.canJump = false;
       this.isJumping = true;
+      this.jumpCooldown = this.jumpCooldownTime; // Apply cooldown
       
-      // Play jump sound with delay to match animation timing
+      // Play jump sound - IMMEDIATELY with full volume
       if (this.soundManager) {
-        // Play jump sound with cooldown
-        this.soundManager.playSound("jump", 50);
+        console.log("Playing jumpup sound from jump method");
+        this.soundManager.playSound("jumpup", 0, 1.5);
       }
       
       // Log for debugging
@@ -1464,5 +1684,178 @@ export class Player {
     
     // Return the highest step found, or false if none
     return highestStep;
+  }
+
+  /**
+   * Syncs the weapon ammo state to ensure consistency
+   * @private
+   */
+  _syncWeaponAmmo() {
+    // Make sure weaponAmmo is initialized for all weapon types
+    if (!this.weaponAmmo) {
+      this.weaponAmmo = {
+        revolver: this.weaponStats.revolver.maxBullets,
+        shotgun: this.weaponStats.shotgun.maxBullets
+      };
+    }
+    
+    // Ensure both weapons have entries in the ammo object
+    if (this.weaponAmmo.revolver === undefined) {
+      this.weaponAmmo.revolver = this.weaponStats.revolver.maxBullets;
+    }
+    
+    if (this.weaponAmmo.shotgun === undefined) {
+      this.weaponAmmo.shotgun = this.weaponStats.shotgun.maxBullets;
+    }
+    
+    // Ensure the current weapon's ammo in weaponAmmo matches bullets
+    this.weaponAmmo[this.activeWeapon] = this.bullets;
+    
+    // Ensure max bullets is consistent with weapon stats
+    this.maxBullets = this.weaponStats[this.activeWeapon].maxBullets;
+    
+    // Log ammo state for debugging
+    if (window.debugAmmo) {
+      console.log(`[AMMO] ${this.activeWeapon}: ${this.bullets}/${this.maxBullets} (Revolver: ${this.weaponAmmo.revolver}, Shotgun: ${this.weaponAmmo.shotgun})`);
+    }
+  }
+
+  /**
+   * Switch to a different weapon
+   * @param {string} weaponType - The weapon type to switch to ('revolver' or 'shotgun')
+   */
+  switchWeapon(weaponType) {
+    if (this.activeWeapon === weaponType || this.isReloading) {
+      return; // Already using this weapon or currently reloading
+    }
+    
+    // Force sync current weapon ammo to ensure it's saved correctly
+    this._syncWeaponAmmo();
+    
+    // Remember previous weapon for animation transitions
+    const prevWeapon = this.activeWeapon;
+    
+    // Log the current ammo state before switching
+    if (window.debugAmmo) {
+      console.log(`[SWITCH] FROM ${prevWeapon}(${this.bullets}) TO ${weaponType}(${this.weaponAmmo[weaponType]})`);
+    }
+    
+    // Check if we're in a special animation state that might cause issues
+    const currentAnimState = this.viewmodel ? this.viewmodel.animationState : 'idle';
+    const isInBlockingAnimation = currentAnimState === `${prevWeapon}empty` || 
+                                  currentAnimState === `${prevWeapon}shot` ||
+                                  this.viewmodel.blockHolster;
+    
+    // Save current weapon's ammo state
+    this.weaponAmmo[prevWeapon] = this.bullets;
+    
+    // Update weapon type
+    this.activeWeapon = weaponType;
+    
+    // Update bullet count and max bullets based on new weapon
+    this.maxBullets = this.weaponStats[weaponType].maxBullets;
+    this.reloadTime = this.weaponStats[weaponType].reloadTime;
+    
+    // Restore the new weapon's ammo state
+    this.bullets = this.weaponAmmo[weaponType];
+    
+    // Log the new ammo state after switching
+    if (window.debugAmmo) {
+      console.log(`[SWITCH] COMPLETE - Now ${this.activeWeapon} with ${this.bullets} bullets`);
+    }
+    
+    // Update UI
+    updateAmmoUI(this);
+    
+    // Update weapon indicators in UI
+    this.updateWeaponIndicators();
+    
+    // Reset viewmodel animation flags if switching from a blocking animation state
+    if (isInBlockingAnimation && this.viewmodel) {
+      console.log(`Resetting viewmodel flags when switching from ${currentAnimState}`);
+      this.viewmodel.blockHolster = false;
+      this.viewmodel.pendingHolster = false;
+      this.viewmodel.forceVisible = false;
+      
+      // Force animation state to idle to ensure clean transition
+      this.viewmodel._transitionTo('idle', {
+        resetTimeOnPlay: true,
+        onComplete: () => {
+          // After forcing idle, setup for the next animation
+          if (this.isAiming) {
+            // Small delay to ensure state is stable
+            setTimeout(() => {
+              if (this.isAiming) {
+                this.viewmodel.playDrawAim();
+              }
+            }, 50);
+          }
+        }
+      });
+      
+      // If not aiming, return early to avoid additional animation calls
+      if (!this.isAiming) {
+        console.log(`Switched to ${weaponType} (not aiming)`);
+        return;
+      }
+    }
+    
+    // If currently aiming, transition to the new weapon's aim animation
+    if (this.isAiming && this.viewmodel) {
+      // If we just reset to idle, let the callback handle it
+      if (isInBlockingAnimation) return;
+      
+      // For clean transition, first holster current weapon
+      this.viewmodel.animationState = `${prevWeapon}aim`; // Force the correct state for holstering
+      this.viewmodel.playHolsterAnim();
+      
+      // After holstering, draw new weapon
+      setTimeout(() => {
+        // Force viewmodel to be visible (might have been hidden during holster)
+        this.viewmodel.group.visible = true;
+        
+        // Reset any animation state flags to ensure clean transition
+        this.viewmodel.pendingHolster = false;
+        this.viewmodel.blockHolster = false;
+        
+        // Play draw animation for new weapon
+        this.viewmodel.playDrawAim();
+      }, 400); // Allow slightly more time for holster animation to complete
+    }
+    
+    console.log(`Switched to ${weaponType}`);
+  }
+  
+  /**
+   * Update the weapon indicators in the UI to match the current weapon
+   */
+  updateWeaponIndicators() {
+    // Handle mobile UI weapon indicators
+    const revolverIndicator = document.getElementById('revolver-indicator');
+    const shotgunIndicator = document.getElementById('shotgun-indicator');
+    
+    if (revolverIndicator && shotgunIndicator) {
+      if (this.activeWeapon === 'revolver') {
+        revolverIndicator.className = 'weapon-indicator active';
+        shotgunIndicator.className = 'weapon-indicator';
+      } else {
+        shotgunIndicator.className = 'weapon-indicator active';
+        revolverIndicator.className = 'weapon-indicator';
+      }
+    }
+    
+    // Handle desktop UI weapon indicators
+    const revolverDesktopIndicator = document.getElementById('revolver-indicator-desktop');
+    const shotgunDesktopIndicator = document.getElementById('shotgun-indicator-desktop');
+    
+    if (revolverDesktopIndicator && shotgunDesktopIndicator) {
+      if (this.activeWeapon === 'revolver') {
+        revolverDesktopIndicator.className = 'desktop-weapon-indicator active';
+        shotgunDesktopIndicator.className = 'desktop-weapon-indicator';
+      } else {
+        shotgunDesktopIndicator.className = 'desktop-weapon-indicator active';
+        revolverDesktopIndicator.className = 'desktop-weapon-indicator';
+      }
+    }
   }
 }
