@@ -69,11 +69,6 @@ console.log("Player tracking variables initialized");
 const botPlayers = new Map(); // botId -> { position, rotation, health, ... }
 console.log("Bot player tracking initialized");
 
-// NPC system - Server-controlled NPCs
-const npcs = new Map(); // npcId -> { id, position, rotation, health, isWalking, path, etc. }
-let nextNpcId = 1;
-console.log("Server-controlled NPC system initialized");
-
 // New: Track persistent player identities
 const playerIdentities = new Map(); // clientId -> { username, playerId, token, lastSeen }
 console.log("Player identity tracking initialized");
@@ -796,29 +791,16 @@ function handlePlayerReload(playerId, data) {
 
 // Anti-cheat: Handle player hit validation
 function handlePlayerHit(playerId, targetId, hitData, bulletId) {
-  console.log(`Player ${playerId} claims hit on player/npc ${targetId}`);
+  console.log(`Player ${playerId} claims hit on player ${targetId}`);
   
   // Basic validation
-  const isPlayerTarget = players.has(targetId);
-  const isNpcTarget = npcs.has(targetId);
-  
-  if (!players.has(playerId) || (!isPlayerTarget && !isNpcTarget)) {
+  if (!players.has(playerId) || !players.has(targetId)) {
     console.log(`Hit claim invalid - player ${playerId} or target ${targetId} not found`);
     return;
   }
   
   const player = players.get(playerId);
-  
-  // Get target (player or NPC)
-  let target;
-  let isNpc = false;
-  
-  if (isPlayerTarget) {
-    target = players.get(targetId);
-  } else if (isNpcTarget) {
-    target = npcs.get(targetId);
-    isNpc = true;
-  }
+  const target = players.get(targetId);
   
   // Check if bullet ID is valid, if provided
   if (bulletId && !activeBullets.has(bulletId)) {
@@ -886,13 +868,8 @@ function handlePlayerHit(playerId, targetId, hitData, bulletId) {
   // Apply damage to target
   target.health = Math.max(0, target.health - damage);
   
-  // If NPC was hit and survived, make them fight back
-  if (isNpc && target.health > 0) {
-    handleNpcAttacked(targetId, playerId);
-  }
-  
   // Notify both target and shooter
-  if (!isNpc && target.ws && target.ws.readyState === WebSocket.OPEN) {
+  if (target.ws && target.ws.readyState === WebSocket.OPEN) {
     target.ws.send(JSON.stringify({
       type: 'hit',
       sourceId: playerId,
@@ -910,30 +887,24 @@ function handlePlayerHit(playerId, targetId, hitData, bulletId) {
       hitPosition: hitData.position,
       health: target.health,
       hitZone: hitData.hitZone,
-      damage: damage,
-      isNpc: isNpc
+      damage: damage
     }));
   }
   
   // Broadcast hit to other players for visual effects
-  broadcastToOthers([playerId, isNpc ? null : targetId], {
+  broadcastToOthers([playerId, targetId], {
     type: 'playerHit',
     targetId: targetId,
     sourceId: playerId,
     hitPosition: hitData.position,
     health: target.health,
     hitZone: hitData.hitZone,
-    damage: damage,
-    isNpc: isNpc
+    damage: damage
   });
   
   // Check if target has been defeated
   if (target.health <= 0) {
-    if (isNpc) {
-      handleNpcDeath(targetId, playerId);
-    } else {
-      handlePlayerDeath(targetId, playerId);
-    }
+    handlePlayerDeath(targetId, playerId);
   }
 }
 
@@ -1251,298 +1222,85 @@ function handleChatMessage(playerId, message) {
 
 // Handle bot player updates
 function handleBotUpdate(data) {
-  // This function is deprecated as NPCs are now server-controlled
-  console.log("Warning: Client attempted to update bot state. Ignoring as NPCs are now server-controlled.");
+  // This function is still used by client-controlled bots
+  // Update the bot player with the provided data
+  if (!data.id || !botPlayers.has(data.id)) {
+    // If bot doesn't exist yet, create it
+    const botId = data.id || `bot_${Date.now()}`;
+    
+    botPlayers.set(botId, {
+      id: botId,
+      position: data.position || { x: 0, y: 1.6, z: 0 },
+      rotation: data.rotation || { y: 0 },
+      isAiming: data.isAiming || false,
+      isShooting: data.isShooting || false,
+      isReloading: data.isReloading || false,
+      health: data.health || 100,
+      username: sanitizeText(data.username || 'Bot')
+    });
+    
+    // Broadcast to all players that a new bot has joined
+    broadcastToAll({
+      type: 'playerJoined',
+      id: botId,
+      position: botPlayers.get(botId).position,
+      rotation: botPlayers.get(botId).rotation,
+      health: botPlayers.get(botId).health,
+      username: botPlayers.get(botId).username,
+      isBot: true
+    });
+    
+    console.log(`Added bot player: ${botId} (${botPlayers.get(botId).username})`);
+    return;
+  }
+  
+  // Update existing bot
+  const bot = botPlayers.get(data.id);
+  
+  // Update bot properties
+  if (data.position) bot.position = data.position;
+  if (data.rotation) bot.rotation = data.rotation;
+  if (data.isAiming !== undefined) bot.isAiming = data.isAiming;
+  if (data.isShooting !== undefined) bot.isShooting = data.isShooting;
+  if (data.isReloading !== undefined) bot.isReloading = data.isReloading;
+  if (data.health !== undefined) bot.health = data.health;
+  
+  // Broadcast updated bot state
+  broadcastToAll({
+    type: 'playerUpdate',
+    id: data.id,
+    position: bot.position,
+    rotation: bot.rotation,
+    isAiming: bot.isAiming,
+    isShooting: bot.isShooting,
+    isReloading: bot.isReloading,
+    health: bot.health,
+    username: bot.username,
+    isBot: true
+  });
 }
 
 // Handle bot player removal
 function handleBotRemove(data) {
-  // This function is deprecated as NPCs are now server-controlled
-  console.log("Warning: Client attempted to remove bot. Ignoring as NPCs are now server-controlled.");
-}
-
-/**
- * Creates a new NPC with the given properties
- * @param {Object} npcData - NPC configuration data
- * @returns {string} The ID of the created NPC
- */
-function createNpc(npcData = {}) {
-  const id = `npc_${nextNpcId++}`;
-  const defaultPosition = { x: 0, y: 2.72, z: 0 };
+  if (!data.id || !botPlayers.has(data.id)) {
+    console.log(`Cannot remove non-existent bot: ${data.id}`);
+    return;
+  }
   
-  // Create NPC data structure
-  const npc = {
-    id: id,
-    username: sanitizeText(npcData.name || 'Town NPC'),
-    position: npcData.position ? {...npcData.position} : {...defaultPosition},
-    // Always store a deep copy of the spawn position
-    originalSpawnPosition: npcData.originalSpawnPosition ? 
-      {...npcData.originalSpawnPosition} : 
-      (npcData.position ? {...npcData.position} : {...defaultPosition}),
-    rotation: npcData.rotation || { y: 0 },
-    health: npcData.health || 100,
-    isWalking: false,
-    isAiming: false,
-    isShooting: false,
-    isIdle: true,
-    walkSpeed: npcData.walkSpeed || 1.5,
-    lastUpdateTime: Date.now(),
-    lastBroadcastTime: 0,
-    
-    // Path configuration
-    path: npcData.path || {
-      points: [
-        { x: -5, y: 2.72, z: 0 },
-        { x: 5, y: 2.72, z: 0 }
-      ],
-      currentTarget: 0,
-      pauseTime: npcData.pauseTime || 2000,
-      lastPauseTime: 0,
-      isPaused: false,
-      pauseTimer: 0
-    }
-  };
+  const botId = data.id;
+  const bot = botPlayers.get(botId);
   
-  // Log spawn position for debugging
-  console.log(`Creating NPC ${id} at position (${npc.position.x}, ${npc.position.y}, ${npc.position.z})`);
-  console.log(`Original spawn position set to (${npc.originalSpawnPosition.x}, ${npc.originalSpawnPosition.y}, ${npc.originalSpawnPosition.z})`);
+  // Remove the bot
+  botPlayers.delete(botId);
   
-  // Store NPC in the collection
-  npcs.set(id, npc);
-  
-  // Broadcast to all clients that a new NPC has joined
-  broadcastToAll({
-    type: 'playerJoined',
-    id: id,
-    username: npc.username,
-    position: npc.position,
-    rotation: npc.rotation,
-    health: npc.health,
-    isWalking: npc.isWalking,
-    isAiming: npc.isAiming,
-    isShooting: npc.isShooting,
-    isNpc: true  // Mark as NPC for clients
-  });
-  
-  console.log(`Created server-controlled NPC: ${id} (${npc.username})`);
-  return id;
-}
-
-/**
- * Update an existing NPC's state
- * @param {string} npcId - The ID of the NPC to update
- * @param {Object} updateData - The data to update
- */
-function updateNpc(npcId, updateData) {
-  const npc = npcs.get(npcId);
-  if (!npc) return;
-  
-  // Update NPC properties
-  Object.keys(updateData).forEach(key => {
-    npc[key] = updateData[key];
-  });
-  
-  // Broadcast the update to all clients
-  broadcastNpcState(npcId);
-}
-
-/**
- * Remove an NPC from the game
- * @param {string} npcId - The ID of the NPC to remove
- */
-function removeNpc(npcId) {
-  if (!npcs.has(npcId)) return;
-  
-  // Remove the NPC from our collection
-  npcs.delete(npcId);
-  
-  // Broadcast to all clients that the NPC has left
+  // Broadcast that the bot has left
   broadcastToAll({
     type: 'playerLeft',
-    id: npcId
+    id: botId
   });
   
-  console.log(`Removed server-controlled NPC: ${npcId}`);
+  console.log(`Removed bot player: ${botId} (${bot.username})`);
 }
-
-/**
- * Broadcast an NPC's current state to all clients
- * @param {string} npcId - The ID of the NPC to broadcast
- */
-function broadcastNpcState(npcId) {
-  const npc = npcs.get(npcId);
-  if (!npc) return;
-  
-  // Only broadcast at a reasonable rate to reduce network traffic
-  const currentTime = Date.now();
-  if (currentTime - npc.lastBroadcastTime < 100) return;
-  npc.lastBroadcastTime = currentTime;
-  
-  // Create the update data packet
-  const updateData = {
-    type: 'playerUpdate',
-    id: npc.id,
-    username: npc.username,
-    position: npc.position,
-    rotation: npc.rotation,
-    health: npc.health,
-    isWalking: npc.isWalking,
-    isAiming: npc.isAiming,
-    isShooting: npc.isShooting,
-    isNpc: true  // Mark as NPC
-  };
-  
-  // Broadcast to all clients
-  broadcastToAll(updateData);
-}
-
-/**
- * Update the walking behavior for an NPC
- * @param {string} npcId - The ID of the NPC to update
- */
-function updateNpcWalkingBehavior(npcId) {
-  const npc = npcs.get(npcId);
-  if (!npc) return;
-  
-  const currentTime = Date.now();
-  const deltaTime = (currentTime - npc.lastUpdateTime) / 1000;
-  npc.lastUpdateTime = currentTime;
-  
-  // Handle paused state
-  if (npc.path.isPaused) {
-    npc.path.pauseTimer += deltaTime * 1000;
-    
-    // Resume walking after pause time
-    if (npc.path.pauseTimer >= npc.path.pauseTime) {
-      npc.path.isPaused = false;
-      npc.path.pauseTimer = 0;
-      npc.isWalking = true;
-      npc.isIdle = false;
-    } else {
-      // Stay in idle state while paused
-      if (!npc.isIdle) {
-        npc.isIdle = true;
-        npc.isWalking = false;
-      }
-      return; // Exit early for paused NPCs - preserves initial rotation
-    }
-  }
-  
-  // Get current target and position
-  const pathPoints = npc.path.points;
-  const currentTargetIndex = npc.path.currentTarget;
-  const targetPoint = pathPoints[currentTargetIndex];
-  
-  // Calculate direction and distance to target
-  const directionX = targetPoint.x - npc.position.x;
-  const directionZ = targetPoint.z - npc.position.z;
-  const distanceSquared = directionX * directionX + directionZ * directionZ;
-  
-  // Check if we've reached the target (within 0.1 units)
-  if (distanceSquared < 0.1) {
-    // We've reached the target point, move to next one
-    npc.path.currentTarget = (currentTargetIndex + 1) % pathPoints.length;
-    
-    // Pause at the target point before moving to next one
-    npc.path.isPaused = true;
-    npc.path.pauseTimer = 0;
-    npc.path.lastPauseTime = currentTime;
-    
-    // Update animation state
-    npc.isWalking = false;
-    npc.isIdle = true;
-  } else {
-    // Normalize direction
-    const distance = Math.sqrt(distanceSquared);
-    const normalizedDirX = directionX / distance;
-    const normalizedDirZ = directionZ / distance;
-    
-    // Move towards the target
-    const moveSpeed = npc.walkSpeed * deltaTime;
-    
-    // Calculate new position
-    npc.position.x += normalizedDirX * moveSpeed;
-    npc.position.z += normalizedDirZ * moveSpeed;
-    
-    // Calculate rotation to face direction of movement (add Math.PI to face forward)
-    npc.rotation.y = Math.atan2(normalizedDirX, normalizedDirZ) + Math.PI;
-    
-    // Ensure walking animation is playing
-    if (!npc.isWalking) {
-      npc.isWalking = true;
-      npc.isIdle = false;
-    }
-  }
-}
-
-/**
- * Spawn a town NPC with a predefined path
- * @param {string} name - NPC name
- * @returns {string} - The created NPC's ID
- */
-function spawnTownNpc(name = "Town Resident") {
-  // Create a realistic path around town
-  const townPath = [
-    { x: -5, y: 2.72, z: -2 },
-    { x: -3, y: 2.72, z: -10 },
-    { x: 3, y: 2.72, z: -10 },
-    { x: 5, y: 2.72, z: -2 },
-    { x: 5, y: 2.72, z: 5 },
-    { x: 0, y: 2.72, z: 8 },
-    { x: -5, y: 2.72, z: 5 }
-  ];
-  
-  // Randomize the starting position along the path
-  const randomStart = Math.floor(Math.random() * townPath.length);
-  const position = {
-    x: townPath[randomStart].x,
-    y: townPath[randomStart].y,
-    z: townPath[randomStart].z
-  };
-  
-  // Create the path configuration
-  const path = {
-    points: townPath,
-    currentTarget: (randomStart + 1) % townPath.length,
-    pauseTime: 2000,
-    isPaused: false,
-    pauseTimer: 0,
-    lastPauseTime: 0
-  };
-  
-  // Create the NPC with slightly randomized walk speed
-  const walkSpeed = 1.2 + (Math.random() * 0.6); // 1.2 to 1.8
-  
-  return createNpc({
-    name: name,
-    position: position,
-    originalSpawnPosition: {...position}, // Explicitly store original spawn position
-    walkSpeed: walkSpeed,
-    path: path
-  });
-}
-
-// Setup NPC update interval
-const NPC_UPDATE_INTERVAL = 16; // ms (approximately 60 fps)
-setInterval(() => {
-  // Update all NPCs
-  npcs.forEach((npc, npcId) => {
-    // If NPC is following a target, update movement to follow the player
-    if (npc.isFollowingTarget && npc.targetPlayer && players.has(npc.targetPlayer)) {
-      updateNpcFollowBehavior(npcId);
-    } 
-    // If NPC is returning to spawn
-    else if (npc.isReturningToSpawn) {
-      updateNpcReturnBehavior(npcId);
-    }
-    // Normal path following
-    else {
-      updateNpcWalkingBehavior(npcId);
-    }
-    
-    broadcastNpcState(npcId);
-  });
-}, NPC_UPDATE_INTERVAL);
 
 /**
  * Convert degrees to radians
@@ -1551,600 +1309,6 @@ setInterval(() => {
  */
 function degToRad(degrees) {
   return degrees * (Math.PI / 180);
-}
-
-/**
- * Update the behavior for an NPC that is following and attacking a player
- * @param {string} npcId - The ID of the NPC to update
- */
-function updateNpcFollowBehavior(npcId) {
-  const npc = npcs.get(npcId);
-  if (!npc || !npc.targetPlayer || !players.has(npc.targetPlayer)) return;
-  
-  const currentTime = Date.now();
-  const deltaTime = (currentTime - npc.lastUpdateTime) / 1000;
-  npc.lastUpdateTime = currentTime;
-  
-  // Get target player
-  const targetPlayer = players.get(npc.targetPlayer);
-  
-  // Calculate direction and distance to player
-  const directionX = targetPlayer.position.x - npc.position.x;
-  const directionZ = targetPlayer.position.z - npc.position.z;
-  const distanceSquared = directionX * directionX + directionZ * directionZ;
-  
-  // Only move if we're not too close to the player (keep some distance for shooting)
-  const optimalDistance = 8; // Keep 8 units away for shooting
-  
-  if (distanceSquared > optimalDistance * optimalDistance) {
-    // We're too far, move closer
-    // Normalize direction
-    const distance = Math.sqrt(distanceSquared);
-    const normalizedDirX = directionX / distance;
-    const normalizedDirZ = directionZ / distance;
-    
-    // Move towards the player at increased speed
-    const moveSpeed = (npc.walkSpeed * 3.5) * deltaTime;
-    
-    // Calculate new position
-    npc.position.x += normalizedDirX * moveSpeed;
-    npc.position.z += normalizedDirZ * moveSpeed;
-    
-    // Set walking animation
-    if (!npc.isWalking) {
-      npc.isWalking = true;
-      npc.isIdle = false;
-    }
-  } else if (distanceSquared < (optimalDistance * 0.7) * (optimalDistance * 0.7)) {
-    // We're too close, back up a bit
-    // Normalize direction (away from player)
-    const distance = Math.sqrt(distanceSquared);
-    const normalizedDirX = -directionX / distance;
-    const normalizedDirZ = -directionZ / distance;
-    
-    // Back away from the player at increased speed
-    const moveSpeed = (npc.walkSpeed * 1.2) * deltaTime;
-    
-    // Calculate new position
-    npc.position.x += normalizedDirX * moveSpeed;
-    npc.position.z += normalizedDirZ * moveSpeed;
-    
-    // Set walking animation
-    if (!npc.isWalking) {
-      npc.isWalking = true;
-      npc.isIdle = false;
-    }
-  } else {
-    // We're at a good distance, just stop moving
-    npc.isWalking = false;
-    npc.isIdle = true;
-  }
-  
-  // Always face the player
-  npc.rotation.y = Math.atan2(directionX, directionZ) + Math.PI;
-}
-
-/**
- * Update the behavior for an NPC that is returning to its spawn position
- * @param {string} npcId - The ID of the NPC to update
- */
-function updateNpcReturnBehavior(npcId) {
-  const npc = npcs.get(npcId);
-  if (!npc) return;
-  
-  const currentTime = Date.now();
-  const deltaTime = (currentTime - npc.lastUpdateTime) / 1000;
-  npc.lastUpdateTime = currentTime;
-  
-  // Get spawn position (either stored value or first point in path)
-  const spawnPosition = npc.originalSpawnPosition || 
-    (npc.path && npc.path.points && npc.path.points.length > 0 ? npc.path.points[0] : npc.position);
-  
-  // Calculate direction and distance to spawn
-  const directionX = spawnPosition.x - npc.position.x;
-  const directionZ = spawnPosition.z - npc.position.z;
-  const distanceSquared = directionX * directionX + directionZ * directionZ;
-  
-  // Check if we've reached the spawn point (within 0.5 units)
-  if (distanceSquared < 0.5) {
-    // We've reached the spawn, resume normal path behavior
-    npc.isReturningToSpawn = false;
-    npc.isWalking = false;
-    npc.isIdle = true;
-    
-    // Reset to the first point in the path
-    if (npc.path && npc.path.points && npc.path.points.length > 0) {
-      npc.path.currentTarget = 0;
-      npc.path.isPaused = true;
-      npc.path.pauseTimer = 0;
-    }
-    
-    // Restore original rotation if available
-    if (npc.originalRotation) {
-      npc.rotation = {...npc.originalRotation};
-      console.log(`NPC ${npcId} restored original rotation: y=${npc.rotation.y}`);
-      npc.originalRotation = null;
-    }
-    
-    console.log(`NPC ${npcId} (${npc.username}) reached spawn position`);
-  } else {
-    // Still need to move towards spawn
-    // Normalize direction
-    const distance = Math.sqrt(distanceSquared);
-    const normalizedDirX = directionX / distance;
-    const normalizedDirZ = directionZ / distance;
-    
-    // Move towards the spawn at increased speed
-    const moveSpeed = (npc.walkSpeed * 1.5) * deltaTime;
-    
-    // Calculate new position
-    npc.position.x += normalizedDirX * moveSpeed;
-    npc.position.z += normalizedDirZ * moveSpeed;
-    
-    // Calculate rotation to face direction of movement
-    npc.rotation.y = Math.atan2(normalizedDirX, normalizedDirZ) + Math.PI;
-    
-    // Set walking animation
-    if (!npc.isWalking) {
-      npc.isWalking = true;
-      npc.isIdle = false;
-    }
-  }
-}
-
-/**
- * Handle NPC fighting back when attacked
- * @param {string} npcId - The ID of the NPC that was attacked
- * @param {string} attackerId - The ID of the player who attacked the NPC
- */
-function handleNpcAttacked(npcId, attackerId) {
-  const npc = npcs.get(npcId);
-  const attacker = players.get(attackerId);
-  
-  if (!npc || !attacker) return;
-  
-  // Check if NPC is already targeting a different player
-  if (npc.targetPlayer && npc.targetPlayer !== attackerId) {
-    console.log(`NPC ${npcId} (${npc.username}) switching target from ${npc.targetPlayer} to ${attackerId}`);
-    npc.targetPlayer = attackerId;
-  }
-  // Start fighting the attacker if not already fighting
-  else if (!npc.targetPlayer) {
-    console.log(`NPC ${npcId} (${npc.username}) is now fighting player ${attackerId}`);
-    
-    // Set the attacker as target
-    npc.targetPlayer = attackerId;
-    npc.lastShotTime = 0;
-    
-    // Start aiming at player
-    npc.isAiming = true;
-    
-    // Store original path and rotation to restore when combat ends
-    npc.originalPath = JSON.parse(JSON.stringify(npc.path));
-    npc.originalRotation = {...npc.rotation}; // Store original rotation
-    
-    // Set NPC to follow mode instead of path following
-    npc.isFollowingTarget = true;
-    npc.isWalking = true;
-    npc.isIdle = false;
-    
-    // Broadcast NPC state update to show it's now aiming
-    broadcastNpcState(npcId);
-    
-    // Start shooting interval (store it in the NPC object)
-    npc.shootIntervalId = setInterval(() => {
-      // Check if NPC still exists and is targeting someone
-      if (!npcs.has(npcId) || !npc.targetPlayer) {
-        if (npc.shootIntervalId) {
-          clearInterval(npc.shootIntervalId);
-          npc.shootIntervalId = null;
-        }
-        return;
-      }
-      
-      // Check if target player still exists
-      if (!players.has(npc.targetPlayer)) {
-        // Target player left, stop fighting
-        npc.targetPlayer = null;
-        npc.isAiming = false;
-        npc.isShooting = false;
-        npc.isFollowingTarget = false;
-        
-        // Restore original path
-        if (npc.originalPath) {
-          npc.path = npc.originalPath;
-          npc.originalPath = null;
-        }
-        
-        // Make NPC return to spawn position with original rotation
-        makeNpcReturnToSpawn(npcId);
-        
-        if (npc.shootIntervalId) {
-          clearInterval(npc.shootIntervalId);
-          npc.shootIntervalId = null;
-        }
-        return;
-      }
-      
-      // Shoot at player once per second
-      const now = Date.now();
-      if (now - npc.lastShotTime >= 1000) {
-        npcShootAtPlayer(npcId, npc.targetPlayer);
-        npc.lastShotTime = now;
-      }
-    }, 100); // Check interval faster than shooting rate for responsiveness
-  }
-}
-
-/**
- * Make an NPC shoot at a player
- * @param {string} npcId - The ID of the NPC
- * @param {string} targetPlayerId - The ID of the target player
- */
-function npcShootAtPlayer(npcId, targetPlayerId) {
-  const npc = npcs.get(npcId);
-  const targetPlayer = players.get(targetPlayerId);
-  
-  if (!npc || !targetPlayer) return;
-  
-  // Calculate direction from NPC to player
-  const dirX = targetPlayer.position.x - npc.position.x;
-  const dirY = targetPlayer.position.y - npc.position.y + 0.5; // Aim for upper body
-  const dirZ = targetPlayer.position.z - npc.position.z;
-  
-  // Normalize direction
-  const length = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
-  const normalizedDir = {
-    x: dirX / length,
-    y: dirY / length,
-    z: dirZ / length
-  };
-  
-  // Update NPC rotation to face the player
-  npc.rotation.y = Math.atan2(normalizedDir.x, normalizedDir.z) + Math.PI;
-  
-  // Set NPC as shooting for animation
-  npc.isShooting = true;
-  broadcastNpcState(npcId);
-  
-  // Create bullet data for visual effects
-  const bulletPosition = {
-    x: npc.position.x,
-    y: npc.position.y - 1, // Lower gun height
-    z: npc.position.z
-  };
-  
-  // Create a server-side bullet
-  const bulletId = nextBulletId++;
-  const now = Date.now();
-  
-  const bullet = {
-    id: bulletId,
-    sourcePlayerId: npcId,  // Use NPC ID as source
-    position: bulletPosition,
-    direction: normalizedDir,
-    distanceTraveled: 0,
-    maxDistance: GAME_CONSTANTS.MAX_BULLET_DISTANCE,
-    speed: GAME_CONSTANTS.BULLET_SPEED,
-    timeCreated: now,
-    active: true
-  };
-  
-  // Add to active bullets
-  activeBullets.set(bulletId, bullet);
-  
-  // Broadcast gunshot to all clients for visual and audio effects
-  broadcastToAll({
-    type: 'playerShoot', // Match the player shoot event type exactly
-    id: npcId,
-    bulletId: bulletId,
-    bulletData: {
-      position: bulletPosition,
-      direction: normalizedDir
-    },
-    isNpc: true
-  });
-  
-  // Wait for animation to play, then reset
-  setTimeout(() => {
-    if (npcs.has(npcId)) {
-      npc.isShooting = false;
-      broadcastNpcState(npcId);
-    }
-  }, 300);
-  
-  // Determine if hit (50% chance for body shot)
-  const hitChance = 0.5;
-  const hit = Math.random() < hitChance;
-  
-  if (hit) {
-    // Create hit data
-    const hitData = {
-      hitZone: 'body',
-      position: { 
-        x: targetPlayer.position.x,
-        y: targetPlayer.position.y,
-        z: targetPlayer.position.z
-      }
-    };
-    
-    // Apply damage to player (40 damage for body shot)
-    targetPlayer.health = Math.max(0, targetPlayer.health - 40);
-    
-    // Notify player of hit
-    if (targetPlayer.ws && targetPlayer.ws.readyState === WebSocket.OPEN) {
-      targetPlayer.ws.send(JSON.stringify({
-        type: 'hit',
-        sourceId: npcId,
-        hitData: {
-          position: hitData.position,
-          hitZone: 'body',
-          damage: 40 // Explicitly include damage value
-        },
-        hitZone: 'body',
-        health: targetPlayer.health,
-        isNpc: true,
-        damage: 40 // Include damage at top level for backwards compatibility
-      }));
-    }
-    
-    // Broadcast hit to all players for visual effects
-    broadcastToAll({
-      type: 'playerHit',
-      targetId: targetPlayerId,
-      sourceId: npcId,
-      hitPosition: hitData.position,
-      health: targetPlayer.health,
-      hitZone: 'body',
-      damage: 40,
-      isNpc: true
-    });
-    
-    // Check if player died
-    if (targetPlayer.health <= 0) {
-      handlePlayerDeath(targetPlayerId, npcId);
-      
-      // NPC no longer has a target
-      npc.targetPlayer = null;
-      npc.isAiming = false;
-      
-      // Set NPC to return to original spawn position
-      makeNpcReturnToSpawn(npcId);
-    }
-  }
-}
-
-/**
- * Make an NPC return to its original spawn position
- * @param {string} npcId - The ID of the NPC
- */
-function makeNpcReturnToSpawn(npcId) {
-  const npc = npcs.get(npcId);
-  if (!npc) return;
-  
-  console.log(`NPC ${npcId} (${npc.username}) returning to spawn position`);
-  
-  // Clear any existing combat state
-  npc.targetPlayer = null;
-  npc.isAiming = false;
-  npc.isShooting = false;
-  
-  // Set flag for returning mode
-  npc.isReturningToSpawn = true;
-  npc.isFollowingTarget = false;
-  npc.isWalking = true;
-  npc.isIdle = false;
-  
-  // Restore original path for when we get back to spawn
-  if (npc.originalPath) {
-    npc.path = JSON.parse(JSON.stringify(npc.originalPath));
-    npc.originalPath = null;
-  }
-  
-  // Broadcast state update
-  broadcastNpcState(npcId);
-}
-
-/**
- * Handle NPC death
- * @param {string} npcId - The ID of the NPC that died
- * @param {string} killedById - The ID of the player who killed the NPC
- */
-function handleNpcDeath(npcId, killedById) {
-  const npc = npcs.get(npcId);
-  if (!npc) return;
-  
-  console.log(`NPC ${npcId} (${npc.username}) was killed by player ${killedById}`);
-  
-  // Clean up any shooting interval
-  if (npc.shootIntervalId) {
-    clearInterval(npc.shootIntervalId);
-    npc.shootIntervalId = null;
-  }
-  
-  // Ensure we have the original spawn position
-  // First check explicitly stored original position
-  let spawnPosition;
-  
-  if (npc.originalSpawnPosition) {
-    spawnPosition = {...npc.originalSpawnPosition};
-    console.log(`Using stored originalSpawnPosition: (${spawnPosition.x}, ${spawnPosition.y}, ${spawnPosition.z})`);
-  } 
-  // If not available, check the first point in the original path
-  else if (npc.originalPath && npc.originalPath.points && npc.originalPath.points.length > 0) {
-    spawnPosition = {...npc.originalPath.points[0]};
-    console.log(`Using first point from originalPath: (${spawnPosition.x}, ${spawnPosition.y}, ${spawnPosition.z})`);
-  } 
-  // As a last resort, use the first point in the current path
-  else if (npc.path && npc.path.points && npc.path.points.length > 0) {
-    spawnPosition = {...npc.path.points[0]};
-    console.log(`Using first point from current path: (${spawnPosition.x}, ${spawnPosition.y}, ${spawnPosition.z})`);
-  } 
-  // If all else fails, use current position (shouldn't happen)
-  else {
-    spawnPosition = {...npc.position};
-    console.log(`FALLBACK: Using current position: (${spawnPosition.x}, ${spawnPosition.y}, ${spawnPosition.z})`);
-  }
-  
-  // Get original rotation
-  let originalRotation;
-  
-  if (npc.originalRotation) {
-    originalRotation = {...npc.originalRotation};
-    console.log(`Using stored originalRotation: y=${originalRotation.y}`);
-  } else {
-    originalRotation = {...npc.rotation};
-    console.log(`Using current rotation: y=${originalRotation.y}`);
-  }
-  
-  // Store NPC data for respawning
-  const npcData = {
-    name: npc.username,
-    // Explicitly set both position and originalSpawnPosition
-    position: spawnPosition,
-    originalSpawnPosition: spawnPosition,
-    rotation: originalRotation,
-    originalRotation: originalRotation,
-    walkSpeed: npc.walkSpeed,
-    // If we have an original path, use that instead of the current path
-    path: npc.originalPath ? JSON.parse(JSON.stringify(npc.originalPath)) : JSON.parse(JSON.stringify(npc.path))
-  };
-  
-  console.log(`NPC will respawn at position: (${spawnPosition.x}, ${spawnPosition.y}, ${spawnPosition.z}) with rotation y=${originalRotation.y}`);
-  
-  // Send death notification to all clients
-  broadcastToAll({
-    type: 'playerDeath',
-    id: npcId,
-    killedById: killedById,
-    isNpc: true
-  });
-  
-  // Send kill notification to the killer
-  const killer = players.get(killedById);
-  if (killer && killer.ws && killer.ws.readyState === WebSocket.OPEN) {
-    killer.ws.send(JSON.stringify({
-      type: 'kill',
-      targetId: npcId,
-      isNpc: true
-    }));
-  }
-  
-  // Remove the NPC temporarily
-  removeNpc(npcId);
-  
-  // Respawn the NPC after a delay
-  setTimeout(() => {
-    const newNpcId = createNpc(npcData);
-    console.log(`NPC ${npcId} respawned as ${newNpcId} at position (${npcData.position.x}, ${npcData.position.y}, ${npcData.position.z}) with rotation y=${npcData.rotation.y}`);
-  }, 5000); // 5 second respawn delay
-}
-
-// Spawn initial NPCs when server starts
-setTimeout(() => {
-  try {
-    // Create the sheriff with static position (standing still)
-    const sheriffPosition = { x: 14, y: 2.73, z: 20 }; // Position sheriff somewhere in town
-    createNpc({
-      name: "Sheriff",
-      position: sheriffPosition,
-      originalSpawnPosition: {...sheriffPosition},
-      rotation: { y: degToRad(90) }, // Facing east (90 degrees)
-      path: {
-        points: [sheriffPosition], // Single point path = standing still
-        currentTarget: 0,
-        pauseTime: 1000000, // Very long pause time to keep idle
-        isPaused: true, // Start in paused mode
-        pauseTimer: 0,
-        lastPauseTime: 0
-      }
-    });
-    
-    // Create the bartender with static position (standing still)
-    const bartenderPosition = { x: -33, y: 2.92, z: 15 }; // Position bartender in middle of town
-    createNpc({
-      name: "Bartender",
-      position: bartenderPosition,
-      originalSpawnPosition: {...bartenderPosition},
-      rotation: { y: degToRad(270) }, // Facing south (180 degrees)
-      path: {
-        points: [bartenderPosition], // Single point path = standing still
-        currentTarget: 0,
-        pauseTime: 1000000, // Very long pause time to keep idle
-        isPaused: true, // Start in paused mode
-        pauseTimer: 0,
-        lastPauseTime: 0
-      }
-    });
-    
-    // Create "notabot" NPC with path along the length of the town (rotated 90°)
-    const fixedX = -15; // Center X position in town
-    const startZ = -40; // North end of town
-    const endZ = 40; // South end of town
-    const notabotY = 2.72; // Standard ground level
-    const notabotStartPosition = { x: fixedX, y: notabotY, z: startZ };
-
-    createNpc({
-      name: "notabot",
-      position: notabotStartPosition,
-      originalSpawnPosition: {...notabotStartPosition},
-      rotation: { y: degToRad(0) }, // Initially facing south (along Z axis)
-      walkSpeed: 1.4, // Moderate walking speed
-      path: {
-        points: [
-          { x: fixedX, y: notabotY, z: startZ },
-          { x: fixedX, y: notabotY, z: endZ },
-          { x: fixedX, y: notabotY, z: startZ } // Loop back to start
-        ],
-        currentTarget: 1, // Start by walking south
-        pauseTime: 500, // Very short pause at endpoints
-        isPaused: false,
-        pauseTimer: 0,
-        lastPauseTime: 0
-      }
-    });
-    
-    // Cowboy has been removed per request
-    
-    console.log("Initial NPCs spawned");
-  } catch (error) {
-    console.error("Failed to spawn initial NPCs:", error);
-  }
-}, 5000); // Wait for server to fully initialize
-
-// Anti-cheat: Bullet physics update
-function updateBullets() {
-  const now = Date.now();
-  
-  // Update each active bullet
-  for (const [bulletId, bullet] of activeBullets.entries()) {
-    if (!bullet.active) continue;
-    
-    // Calculate time since last update
-    const deltaTime = (now - bullet.timeCreated) / 1000;
-    
-    // Calculate new position
-    const distanceThisFrame = bullet.speed * deltaTime;
-    bullet.position.x += bullet.direction.x * distanceThisFrame;
-    bullet.position.y += bullet.direction.y * distanceThisFrame;
-    bullet.position.z += bullet.direction.z * distanceThisFrame;
-    
-    // Update total distance traveled
-    bullet.distanceTraveled += distanceThisFrame;
-    
-    // Check if bullet has traveled too far
-    if (bullet.distanceTraveled >= bullet.maxDistance) {
-      bullet.active = false;
-      continue;
-    }
-  }
-  
-  // Clean up inactive bullets
-  for (const [bulletId, bullet] of activeBullets.entries()) {
-    if (!bullet.active) {
-      activeBullets.delete(bulletId);
-    }
-  }
 }
 
 // =============================================
@@ -2274,6 +1438,41 @@ setInterval(() => {
 
 // Anti-cheat: Run physics update loop
 setInterval(updateBullets, GAME_CONSTANTS.PHYSICS_UPDATE_INTERVAL);
+
+// Anti-cheat: Bullet physics update
+function updateBullets() {
+  const now = Date.now();
+  
+  // Update each active bullet
+  for (const [bulletId, bullet] of activeBullets.entries()) {
+    if (!bullet.active) continue;
+    
+    // Calculate time since last update
+    const deltaTime = (now - bullet.timeCreated) / 1000;
+    
+    // Calculate new position
+    const distanceThisFrame = bullet.speed * deltaTime;
+    bullet.position.x += bullet.direction.x * distanceThisFrame;
+    bullet.position.y += bullet.direction.y * distanceThisFrame;
+    bullet.position.z += bullet.direction.z * distanceThisFrame;
+    
+    // Update total distance traveled
+    bullet.distanceTraveled += distanceThisFrame;
+    
+    // Check if bullet has traveled too far
+    if (bullet.distanceTraveled >= bullet.maxDistance) {
+      bullet.active = false;
+      continue;
+    }
+  }
+  
+  // Clean up inactive bullets
+  for (const [bulletId, bullet] of activeBullets.entries()) {
+    if (!bullet.active) {
+      activeBullets.delete(bulletId);
+    }
+  }
+}
 
 // Start server
 server.listen(PORT, () => {

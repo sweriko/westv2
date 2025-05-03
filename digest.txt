@@ -1,13 +1,7 @@
 <goal>
- 
+I want to fully remove any npc/bot logic, please list me all the filenames that contain related logic so that I know exactly what to cleanup.
 </goal>
 
-<output_requirements>
-- Don't be lazy, provide thorough, high-quality code.
-- Provide complete file contents for any modified or new files.
-- Write clean, well-documented code with appropriate error handling.
-- Never use ellipsis (...) or placeholder comments, as an excuse to omit code for brewity.
-</output_requirements>
 
 <context>
     <codebase>
@@ -7224,12 +7218,6 @@ function createMobileControls(player, soundManager) {
       // Show/hide the invite button based on whether there are nearby players
       fireButton.style.display = nearbyPlayersExist ? 'flex' : 'none';
     },
-    showQuickdrawInvite: function() {},
-    hideQuickdrawInvite: function() {},
-    // Export constants so they can be adjusted externally if needed
-    getConstants: function() {
-      return CONSTANTS;
-    },
     showBartenderButton: function() {},
     hideBartenderButton: function() {}
   };
@@ -9320,16 +9308,6 @@ export class MultiplayerManager {
     // Anti-cheat: Broadcast that some player was hit (server validated)
     networkManager.onPlayerHitBroadcast = (targetId, sourceId, hitPos, newHealth, hitZone) => {
       console.log(`Player ${targetId} was hit by ${sourceId} in the ${hitZone || 'body'}`);
-      
-      // Skip processing if this is a QuickDraw duel hit
-      const isQuickDrawHit = window.quickDraw && window.quickDraw.inDuel && 
-                            (window.quickDraw.duelOpponentId === Number(targetId) || 
-                             window.localPlayer.id === Number(targetId));
-      
-      if (isQuickDrawHit) {
-        console.log(`[MultiplayerManager] Skipping hit broadcast for QuickDraw duel`);
-        return;
-      }
       
       // Convert targetId to integer if it's a string
       const playerId = typeof targetId === 'string' ? parseInt(targetId, 10) : targetId;
@@ -17596,7 +17574,6 @@ export class SoundManager {
       'revolverdraw': 'ui',
       'shotgundraw': 'ui',
       'reloading': 'weapon',
-      'bellstart': 'ui',
       'woodimpact': 'impact',
       'fleshimpact': 'impact',
       'leftstep': 'footstep',
@@ -17607,7 +17584,6 @@ export class SoundManager {
       'headshotmarker': 'ui',
       'dramatic': 'ui',
       'eaglescream': 'ui',
-      'quickdrawending': 'ui',
       'playerfall': 'impact',
       'revolverholstering': 'weapon',  // Add the new sound name
       'shotgunholstering': 'weapon',   // Add the new sound name

@@ -22,7 +22,6 @@ export class SoundManager {
       'revolverdraw': 'ui',
       'shotgundraw': 'ui',
       'reloading': 'weapon',
-      'bellstart': 'ui',
       'woodimpact': 'impact',
       'fleshimpact': 'impact',
       'leftstep': 'footstep',
@@ -33,7 +32,6 @@ export class SoundManager {
       'headshotmarker': 'ui',
       'dramatic': 'ui',
       'eaglescream': 'ui',
-      'quickdrawending': 'ui',
       'playerfall': 'impact',
       'revolverholstering': 'weapon',  // Add the new sound name
       'shotgunholstering': 'weapon',   // Add the new sound name

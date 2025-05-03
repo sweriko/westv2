@@ -14,8 +14,6 @@ import { initPlayerIdentity, verifyIdentityWithServer } from './playerIdentity.j
 import logger from './logger.js';
 // Removed FlyingEagle import
 import { initChat, handleChatMessage, addSystemMessage } from './chat.js';
-import { initNpcManager, npcManager } from './npcManager.js';
-console.log("NPC Manager module loaded");
 import './viewmodel-config.js';
 
 // Check if device is mobile
@@ -85,12 +83,6 @@ async function init() {
     const sceneSetup = initScene();
     camera = sceneSetup.camera;
     renderer = sceneSetup.renderer;
-    
-    // Initialize NPC manager with the scene
-    const npcManagerInstance = initNpcManager(scene);
-    
-    // Make NPC manager globally accessible
-    window.npcManager = npcManager;
     
     // Set up global renderer access for camera switching
     window.renderer.instance = renderer;
@@ -551,11 +543,6 @@ async function init() {
       if (event.code === 'KeyR') {
         localPlayer.startReload();
       }
-      
-      // No longer spawn bots with the B key as NPCs are now server-controlled
-      if (event.code === 'KeyB' && !event.ctrlKey && !event.shiftKey) {
-        console.log("NPCs are now server-controlled and cannot be spawned from the client");
-      }
     });
 
     // Make Bullet constructor globally available for hit zone debug creation
@@ -745,11 +732,6 @@ function animate(time) {
   // Update local player
   localPlayer.update(deltaTime);
   
-  // Update nearby NPCs for interaction
-  if (npcManager && npcManager.instance) {
-    npcManager.instance.updateNearbyNpcs(localPlayer);
-  }
-  
   // Update remote players (animations, movement interpolation, etc.)
   multiplayerManager.update(deltaTime);
   
@@ -792,11 +774,6 @@ function animate(time) {
 
   // Update FPS display
   updateFPS(renderer, camera, deltaTime);
-
-  // Update NPCs through npc manager
-  if (window.npcManager) {
-    // NPC manager handles its own internal updates
-  }
 
   // Use the window.renderer camera
   let renderCamera;

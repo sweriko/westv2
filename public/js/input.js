@@ -1172,12 +1172,6 @@ function createMobileControls(player, soundManager) {
       // Show/hide the invite button based on whether there are nearby players
       fireButton.style.display = nearbyPlayersExist ? 'flex' : 'none';
     },
-    showQuickdrawInvite: function() {},
-    hideQuickdrawInvite: function() {},
-    // Export constants so they can be adjusted externally if needed
-    getConstants: function() {
-      return CONSTANTS;
-    },
     showBartenderButton: function() {},
     hideBartenderButton: function() {}
   };

@@ -253,16 +253,6 @@ export class MultiplayerManager {
     networkManager.onPlayerHitBroadcast = (targetId, sourceId, hitPos, newHealth, hitZone) => {
       console.log(`Player ${targetId} was hit by ${sourceId} in the ${hitZone || 'body'}`);
       
-      // Skip processing if this is a QuickDraw duel hit
-      const isQuickDrawHit = window.quickDraw && window.quickDraw.inDuel && 
-                            (window.quickDraw.duelOpponentId === Number(targetId) || 
-                             window.localPlayer.id === Number(targetId));
-      
-      if (isQuickDrawHit) {
-        console.log(`[MultiplayerManager] Skipping hit broadcast for QuickDraw duel`);
-        return;
-      }
-      
       // Convert targetId to integer if it's a string
       const playerId = typeof targetId === 'string' ? parseInt(targetId, 10) : targetId;
       const tPlayer = this.remotePlayers.get(playerId);
