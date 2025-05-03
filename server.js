@@ -88,13 +88,6 @@ const POSITION_HISTORY_SIZE = 10; // Number of positions to track per player
 const CORRECTION_COOLDOWN = 5000; // Minimum ms between position corrections
 console.log("Position history tracking initialized");
 
-// Track Quick Draw game mode queues and active duels
-// Support for 5 concurrent lobbies
-const MAX_ARENAS = 5;
-const quickDrawQueues = Array(MAX_ARENAS).fill(null).map(() => []);  // Array of queues for each arena
-const quickDrawDuels = new Map(); // Map of duelId -> { player1Id, player2Id, state, arenaIndex, ... }
-console.log("Quick Draw game mode variables initialized");
-
 // Anti-cheat: Game physics constants
 const GAME_CONSTANTS = {
   // Weapon constraints
@@ -110,7 +103,7 @@ const GAME_CONSTANTS = {
   PHYSICS_UPDATE_INTERVAL: 16 // ms (approx 60fps)
 };
 
-// Anti-cheat: Active bullets map
+// Anti-cheat: Track active bullets map
 const activeBullets = new Map(); // bulletId -> {sourcePlayerId, position, direction, timeCreated, etc}
 let nextBulletId = 1;
 
@@ -359,7 +352,7 @@ wss.on('connection', (ws, req) => {
 
 // Extract player initialization to a separate function
 function initializePlayer(ws, playerId, sessionId, clientId, username, token, isDev = false) {
-  // Create initial player data with health and QuickDraw info
+  // Create initial player data with health
   players.set(playerId, {
     ws,
     sessionId,
@@ -373,10 +366,6 @@ function initializePlayer(ws, playerId, sessionId, clientId, username, token, is
     isReloading: false,
     health: 100,
     lastActivity: Date.now(),
-    quickDrawLobbyIndex: -1, // -1 means not in any lobby
-    inQuickDrawQueue: false,
-    inQuickDrawDuel: false,
-    quickDrawDuelId: null,
     // Additional player state
     bullets: 6,
     maxBullets: 6,
@@ -418,7 +407,6 @@ function initializePlayer(ws, playerId, sessionId, clientId, username, token, is
         isReloading: p.isReloading,
         health: p.health,
         username: p.username,
-        quickDrawLobbyIndex: p.quickDrawLobbyIndex,
         skins: p.skins || { bananaSkin: false } // Include skin information for existing players
       }))
   }));
@@ -434,7 +422,6 @@ function initializePlayer(ws, playerId, sessionId, clientId, username, token, is
     rotation: players.get(playerId).rotation,
     health: players.get(playerId).health,
     username: players.get(playerId).username,
-    quickDrawLobbyIndex: players.get(playerId).quickDrawLobbyIndex,
     skins: players.get(playerId).skins // Include skins in the join message
   });
 
@@ -507,43 +494,6 @@ function initializePlayer(ws, playerId, sessionId, clientId, username, token, is
         case 'ping':
           // respond
           ws.send(JSON.stringify({ type: 'pong' }));
-          break;
-          
-        case 'quickDrawJoin':
-          handleQuickDrawJoin(playerId, data.arenaIndex);
-          break;
-          
-        case 'quickDrawLeave':
-          handleQuickDrawLeave(playerId);
-          break;
-          
-        case 'quickDrawReady':
-          handleQuickDrawReady(playerId, data.arenaIndex);
-          break;
-          
-        case 'quickDrawShoot':
-          // Pass the hit zone and damage if provided
-          handleQuickDrawShoot(
-            playerId, 
-            data.opponentId, 
-            data.arenaIndex, 
-            data.hitZone || 'body', 
-            data.damage || 40,
-            data.hitDetected || false
-          );
-          break;
-          
-        // Add new handlers for direct challenge system
-        case 'quickDrawChallenge':
-          handleQuickDrawChallenge(playerId, data.targetPlayerId);
-          break;
-          
-        case 'quickDrawAccept':
-          handleQuickDrawAcceptChallenge(playerId, data.challengerId);
-          break;
-          
-        case 'quickDrawDecline':
-          handleQuickDrawDeclineChallenge(playerId, data.challengerId);
           break;
 
         // Handle chat messages
@@ -637,11 +587,6 @@ function handlePlayerUpdate(playerId, data) {
   player.isAiming = data.isAiming !== undefined ? data.isAiming : player.isAiming;
   player.isReloading = data.isReloading !== undefined ? data.isReloading : player.isReloading;
   
-  // Update QuickDraw lobby index if provided
-  if (data.quickDrawLobbyIndex !== undefined) {
-    player.quickDrawLobbyIndex = data.quickDrawLobbyIndex;
-  }
-  
   if (data.isSprinting !== undefined) {
     player.isSprinting = data.isSprinting;
   }
@@ -656,8 +601,7 @@ function handlePlayerUpdate(playerId, data) {
     isShooting: player.isShooting,
     isReloading: player.isReloading,
     health: player.health,
-    username: player.username,
-    quickDrawLobbyIndex: player.quickDrawLobbyIndex
+    username: player.username
   });
 }
 
@@ -684,14 +628,6 @@ function handlePlayerShoot(playerId, data) {
   if (now - timeouts.lastShot < GAME_CONSTANTS.WEAPON_COOLDOWN) {
     console.log(`Rate limit exceeded: Player ${playerId} attempted to shoot too quickly`);
     return sendErrorToPlayer(playerId, "Shooting too fast", false);
-  }
-  
-  // Quick Draw gun lock validation
-  if (player.inQuickDrawDuel && player.quickDrawDuelId) {
-    const duel = quickDrawDuels.get(player.quickDrawDuelId);
-    if (duel && duel.state !== 'draw') {
-      return sendErrorToPlayer(playerId, "Cannot shoot before draw signal", false);
-    }
   }
   
   // Validate bullet data
@@ -915,30 +851,7 @@ function handlePlayerHit(playerId, targetId, hitData, bulletId) {
   // Update last hit time for this target
   player.recentHits.set(targetId, now);
   
-  // ADDED: Check if this is a quickdraw duel hit
-  // If the players are in a quickdraw duel, handle it using the quickdraw logic
-  if (!isNpc && player.inQuickDrawDuel && target.inQuickDrawDuel && player.quickDrawDuelId === target.quickDrawDuelId) {
-    const duel = quickDrawDuels.get(player.quickDrawDuelId);
-    if (duel && duel.state === 'draw') {
-      console.log(`Handling hit as part of QuickDraw duel ${player.quickDrawDuelId}`);
-      // Calculate damage based on hit zone
-      let finalDamage = 40; // Default body shot
-      
-      if (hitData.hitZone === 'head') {
-        finalDamage = 100; // One-shot kill for headshots
-      } else if (hitData.hitZone === 'limbs') {
-        finalDamage = Math.round(40 * 0.6); // Reduced damage for limb shots
-      } else if (hitData.hitZone === 'body') {
-        finalDamage = 40; // Standard body shot damage
-      }
-      
-      // Use the quickdraw handler with the appropriate damage and hit zone
-      handleQuickDrawShoot(playerId, targetId, undefined, hitData.hitZone, finalDamage, true);
-      return;
-    }
-  }
-  
-  // Rest of original hit handling for non-quickdraw hits
+  // Rest of original hit handling
   // Get bullet data if available
   let bullet = null;
   if (bulletId && activeBullets.has(bulletId)) {
@@ -1062,13 +975,6 @@ function handlePlayerDeath(playerId, killedById) {
   
   console.log(`Player ${playerId} was killed by player ${killedById}`);
   
-  // Skip handling if player is in QuickDraw duel
-  // QuickDraw duels handle their own death/end conditions
-  if (player.inQuickDrawDuel) {
-    console.log(`Player ${playerId} is in a QuickDraw duel - skipping regular death handling`);
-    return;
-  }
-  
   // Send death notification to all clients
   broadcastToAll({
     type: 'playerDeath',
@@ -1140,11 +1046,6 @@ function respawnPlayer(playerId) {
   // Set spawn position
   player.position = { x: spawnX, y: spawnY, z: spawnZ };
   
-  // Reset QuickDraw-related state if not in a duel
-  if (!player.inQuickDrawDuel) {
-    player.quickDrawLobbyIndex = -1;
-  }
-  
   // Notify the player they're respawning
   if (player.ws.readyState === WebSocket.OPEN) {
     player.ws.send(JSON.stringify({
@@ -1175,26 +1076,6 @@ function respawnPlayer(playerId) {
 function isPositionInTown(position) {
   // Modified to always return true, allowing players to leave town
   return true;
-}
-
-// Anti-cheat: Check if position is in arena
-function isPositionInArena(position, arenaIndex) {
-  // Define arena positions and radius
-  const arenaRadius = 15;
-  
-  // Calculate arena center position based on index
-  const spacingX = 50;
-  const baseZ = GAME_CONSTANTS.TOWN_LENGTH + 50;
-  
-  const offsetX = (arenaIndex - 2) * spacingX; // Center on zero, spread outward
-  const arenaCenter = { x: offsetX, y: 0, z: baseZ };
-  
-  // Check if point is inside arena (horizontally)
-  const dx = position.x - arenaCenter.x;
-  const dz = position.z - arenaCenter.z;
-  const horizontalDist = Math.sqrt(dx * dx + dz * dz);
-  
-  return horizontalDist < arenaRadius;
 }
 
 // Anti-cheat: Send position correction to player
@@ -1268,29 +1149,6 @@ function cleanupPlayer(playerId) {
     sessions.delete(player.sessionId);
   }
   
-  // Quick Draw cleanup
-  if (player.inQuickDrawQueue && player.quickDrawLobbyIndex >= 0) {
-    // Remove from the appropriate queue
-    const queueIndex = player.quickDrawLobbyIndex;
-    if (queueIndex >= 0 && queueIndex < MAX_ARENAS) {
-      const queue = quickDrawQueues[queueIndex];
-      const index = queue.indexOf(playerId);
-      if (index !== -1) {
-        queue.splice(index, 1);
-      }
-    }
-  }
-  
-  if (player.inQuickDrawDuel && player.quickDrawDuelId) {
-    // End any active duel
-    const duel = quickDrawDuels.get(player.quickDrawDuelId);
-    if (duel) {
-      // The other player wins by default
-      const winnerId = duel.player1Id === playerId ? duel.player2Id : duel.player1Id;
-      endQuickDrawDuel(player.quickDrawDuelId, winnerId);
-    }
-  }
-  
   players.delete(playerId);
   
   // Anti-cheat: Clean up associated data
@@ -1341,878 +1199,6 @@ function broadcastToAll(data) {
     }
   });
 }
-
-/**
- * Handle a player joining a specific Quick Draw queue.
- * @param {number} playerId - The player's ID
- * @param {number} arenaIndex - The arena index to join (0-4)
- */
-function handleQuickDrawJoin(playerId, arenaIndex) {
-  // Validate arena index
-  if (arenaIndex < 0 || arenaIndex >= MAX_ARENAS) {
-    console.error(`Invalid arena index: ${arenaIndex}`);
-    return;
-  }
-  
-  console.log(`Player ${playerId} joined Quick Draw queue for arena ${arenaIndex + 1}`);
-  const playerData = players.get(playerId);
-  
-  if (!playerData || playerData.inQuickDrawQueue || playerData.inQuickDrawDuel) {
-    return; // Invalid state
-  }
-  
-  // Add to the specific queue
-  quickDrawQueues[arenaIndex].push(playerId);
-  
-  // Update player state
-  playerData.inQuickDrawQueue = true;
-  playerData.quickDrawLobbyIndex = arenaIndex;
-  
-  // Notify the player and everyone else
-  if (playerData.ws.readyState === WebSocket.OPEN) {
-    playerData.ws.send(JSON.stringify({
-      type: 'joinedQuickDrawQueue',
-      arenaIndex: arenaIndex
-    }));
-  }
-  
-  // Broadcast to all players
-  broadcastToAll({
-    type: 'playerUpdate',
-    id: playerId,
-    quickDrawLobbyIndex: arenaIndex
-  });
-  
-  // Check if we can now start a duel
-  checkQuickDrawQueue(arenaIndex);
-}
-
-/**
- * Handle a player leaving the Quick Draw queue.
- * @param {number} playerId - The player's ID
- */
-function handleQuickDrawLeave(playerId) {
-  const playerData = players.get(playerId);
-  
-  if (!playerData || !playerData.inQuickDrawQueue) {
-    return; // Invalid state
-  }
-  
-  // Get the arena index
-  const arenaIndex = playerData.quickDrawLobbyIndex;
-  if (arenaIndex >= 0 && arenaIndex < MAX_ARENAS) {
-    console.log(`Player ${playerId} left Quick Draw queue for arena ${arenaIndex + 1}`);
-    
-    // Remove from appropriate queue
-    const index = quickDrawQueues[arenaIndex].indexOf(playerId);
-    if (index !== -1) {
-      quickDrawQueues[arenaIndex].splice(index, 1);
-    }
-  }
-  
-  // Reset player state
-  playerData.inQuickDrawQueue = false;
-  playerData.quickDrawLobbyIndex = -1;
-}
-
-/**
- * Check if we have enough players in a specific Quick Draw queue to start a match.
- * @param {number} arenaIndex - The arena index to check
- */
-function checkQuickDrawQueue(arenaIndex) {
-  if (arenaIndex < 0 || arenaIndex >= MAX_ARENAS) {
-    return; // Invalid arena index
-  }
-  
-  const queue = quickDrawQueues[arenaIndex];
-  
-  if (queue.length < 2) {
-    return; // Not enough players in this queue
-  }
-  
-  // Get the two players who have been waiting the longest
-  const player1Id = queue.shift();
-  const player2Id = queue.shift();
-  
-  // Make sure both players are still connected
-  const player1 = players.get(player1Id);
-  const player2 = players.get(player2Id);
-  
-  if (!player1 || !player2) {
-    // Put the valid player back in the queue
-    if (player1) queue.push(player1Id);
-    if (player2) queue.push(player2Id);
-    return;
-  }
-  
-  // Create a new duel
-  const duelId = `duel_${arenaIndex}_${player1Id}_${player2Id}`;
-  quickDrawDuels.set(duelId, {
-    id: duelId,
-    arenaIndex: arenaIndex,
-    player1Id,
-    player2Id,
-    state: 'starting',
-    startTime: Date.now()
-  });
-  
-  // Mark players as in a duel
-  player1.inQuickDrawQueue = false;
-  player1.inQuickDrawDuel = true;
-  player1.quickDrawDuelId = duelId;
-  
-  player2.inQuickDrawQueue = false;
-  player2.inQuickDrawDuel = true;
-  player2.quickDrawDuelId = duelId;
-  
-  // Reset player health to full at the start of the duel
-  player1.health = 100;
-  player2.health = 100;
-  
-  // Notify players of the match
-  player1.ws.send(JSON.stringify({
-    type: 'quickDrawMatch',
-    opponentId: player2Id,
-    position: 'left', // Player 1 spawns on the left
-    arenaIndex: arenaIndex
-  }));
-  
-  player2.ws.send(JSON.stringify({
-    type: 'quickDrawMatch',
-    opponentId: player1Id,
-    position: 'right', // Player 2 spawns on the right
-    arenaIndex: arenaIndex
-  }));
-  
-  console.log(`Started Quick Draw duel ${duelId} between players ${player1Id} and ${player2Id} in arena ${arenaIndex + 1}`);
-}
-
-/**
- * Handle a player being ready in a Quick Draw duel.
- * @param {number} playerId - The player's ID
- * @param {number} arenaIndex - The arena index for the duel
- */
-function handleQuickDrawReady(playerId, arenaIndex) {
-  const playerData = players.get(playerId);
-  
-  if (!playerData || !playerData.inQuickDrawDuel) {
-    return; // Invalid state
-  }
-  
-  const duelId = playerData.quickDrawDuelId;
-  const duel = quickDrawDuels.get(duelId);
-  
-  if (!duel) {
-    return; // Invalid duel
-  }
-  
-  // Verify arena index matches
-  if (arenaIndex !== undefined && duel.arenaIndex !== arenaIndex) {
-    console.error(`Arena index mismatch: expected ${duel.arenaIndex}, got ${arenaIndex}`);
-    return;
-  }
-  
-  // Mark this player as ready
-  if (duel.player1Id === playerId) {
-    duel.player1Ready = true;
-  } else if (duel.player2Id === playerId) {
-    duel.player2Ready = true;
-  }
-  
-  // If both players are ready, start the duel sequence
-  if (duel.player1Ready && duel.player2Ready) {
-    startQuickDrawDuel(duelId);
-  }
-}
-
-/**
- * Start the Quick Draw duel sequence.
- * @param {string} duelId - The duel ID
- */
-function startQuickDrawDuel(duelId) {
-  const duel = quickDrawDuels.get(duelId);
-  
-  if (!duel) {
-    return; // Invalid duel
-  }
-  
-  duel.state = 'countdown';
-  
-  const player1 = players.get(duel.player1Id);
-  const player2 = players.get(duel.player2Id);
-  
-  if (!player1 || !player2) {
-    endQuickDrawDuel(duelId, null); // End duel if either player disconnected
-    return;
-  }
-  
-  // Send Telegram notification for Quick Draw duel
-  sendTelegramNotification(`🤠 Quick Draw duel started between ${player1.username} and ${player2.username} in arena ${duel.arenaIndex + 1}`);
-  
-  // Send countdown signal immediately
-  player1.ws.send(JSON.stringify({ type: 'quickDrawCountdown' }));
-  player2.ws.send(JSON.stringify({ type: 'quickDrawCountdown' }));
-  
-  // Set a random time for the draw signal (1-5 seconds)
-  const drawTime = 1000 + Math.floor(Math.random() * 4000);
-  duel.drawTimeout = setTimeout(() => {
-    if (quickDrawDuels.has(duelId)) {
-      sendDrawSignal(duelId);
-    }
-  }, drawTime);
-}
-
-/**
- * Update the game state to "draw" phase without sending a visual message.
- * @param {string} duelId - The duel ID
- */
-function sendDrawSignal(duelId) {
-  const duel = quickDrawDuels.get(duelId);
-  
-  if (!duel) {
-    return; // Invalid duel
-  }
-  
-  duel.state = 'draw';
-  duel.drawTime = Date.now();
-  
-  const player1 = players.get(duel.player1Id);
-  const player2 = players.get(duel.player2Id);
-  
-  if (!player1 || !player2) {
-    endQuickDrawDuel(duelId, null); // End duel if either player disconnected
-    return;
-  }
-  
-  // Send draw signal to both players without visual text
-  player1.ws.send(JSON.stringify({ type: 'quickDrawDraw' }));
-  player2.ws.send(JSON.stringify({ type: 'quickDrawDraw' }));
-  
-  console.log(`Draw signal sent for duel ${duelId}`);
-}
-
-/**
- * Handle a player shooting in a Quick Draw duel.
- * @param {number} playerId - The player's ID
- * @param {number} targetId - The target player's ID
- * @param {number} arenaIndex - The arena index for the duel (optional for direct duels)
- * @param {string} hitZone - The hit zone ('head', 'body', 'limbs')
- * @param {number} damage - The damage amount
- */
-function handleQuickDrawShoot(playerId, targetId, arenaIndex, hitZone = 'body', damage = 40, hitDetected = false) {
-    playerId = Number(playerId);
-    targetId = Number(targetId);
-    
-    console.log(`Quick Draw shoot: Player ${playerId} shot player ${targetId} (${hitZone}, ${damage} damage, hitDetected: ${hitDetected})`);
-    
-    const playerData = players.get(playerId);
-    
-    if (!playerData || !playerData.inQuickDrawDuel) {
-        console.log(`Quick Draw shoot rejected: Player ${playerId} not in a duel`);
-        return; // Invalid state
-    }
-    
-    const duelId = playerData.quickDrawDuelId;
-    const duel = quickDrawDuels.get(duelId);
-    
-    if (!duel) {
-        console.log(`Quick Draw shoot rejected: Duel ${duelId} not found`);
-        return; // Invalid duel
-    }
-    
-    // For direct duels, no arena index check is needed
-    if (!duel.isDirect && arenaIndex !== undefined && duel.arenaIndex !== arenaIndex) {
-        console.error(`Arena index mismatch: expected ${duel.arenaIndex}, got ${arenaIndex}`);
-        return;
-    }
-    
-    // Verify that the target is the opponent in this duel
-    if ((duel.player1Id === playerId && duel.player2Id !== targetId) ||
-        (duel.player2Id === playerId && duel.player1Id !== targetId)) {
-        console.log(`Quick Draw shoot rejected: Target ${targetId} is not the opponent in duel ${duelId}`);
-        return;
-    }
-    
-    // Verify the duel is in the 'draw' state
-    if (duel.state !== 'draw') {
-        console.log(`Quick Draw shoot rejected: Duel ${duelId} not in 'draw' state (${duel.state})`);
-        return;
-    }
-    
-    // If hitDetected is false and it's not a miss, don't apply damage
-    if (!hitDetected && hitZone !== 'miss') {
-        console.log(`Quick Draw shot without proper hit detection from player ${playerId} - ignoring damage`);
-        
-        // Send a debug message to the client
-        if (playerData.ws && playerData.ws.readyState === WebSocket.OPEN) {
-            playerData.ws.send(JSON.stringify({
-                type: 'debug',
-                message: 'Shot ignored - hit detection failed'
-            }));
-        }
-        
-        // Consider this a miss
-        hitZone = 'miss';
-        damage = 0;
-    }
-    
-    // Add hit debouncing to prevent double counting - track the last hit time
-    // Initialize the lastHitTime map on the duel object if it doesn't exist
-    if (!duel.lastHitTime) {
-        duel.lastHitTime = new Map();
-    }
-    
-    const now = Date.now();
-    const lastHitTime = duel.lastHitTime.get(targetId) || 0;
-    const hitDebounceTime = 300; // 300ms minimum time between hits
-    
-    if (now - lastHitTime < hitDebounceTime) {
-        console.log(`Quick Draw shoot debounced: Too soon after last hit (${now - lastHitTime}ms)`);
-        return; // Ignore rapid-fire hit reports that are too close together
-    }
-    
-    // If it's a miss, don't apply damage
-    if (hitZone === 'miss') {
-        console.log(`Player ${playerId} missed - no damage applied`);
-        
-        // Send miss notification to both players
-        const missData = {
-            type: 'quickDrawMiss',
-            playerId: playerId,
-            targetId: targetId
-        };
-        
-        if (playerData.ws && playerData.ws.readyState === WebSocket.OPEN) {
-            playerData.ws.send(JSON.stringify(missData));
-        }
-        
-        const targetPlayer = players.get(targetId);
-        if (targetPlayer && targetPlayer.ws && targetPlayer.ws.readyState === WebSocket.OPEN) {
-            targetPlayer.ws.send(JSON.stringify(missData));
-        }
-        
-        return;
-    }
-    
-    // Update the last hit time for this target
-    duel.lastHitTime.set(targetId, now);
-    
-    // Calculate reaction time
-    const reactionTime = now - duel.drawTime;
-    
-    // Calculate damage based on hit zone
-    let finalDamage = damage;
-    if (hitZone === 'head') {
-        finalDamage = 100; // One-shot kill for headshots
-    } else if (hitZone === 'limbs') {
-        finalDamage = Math.round(damage * 0.6); // Reduced damage for limb shots
-    } else if (hitZone === 'body') {
-        finalDamage = 40; // Standard body shot damage
-    }
-    
-    // Apply damage to target
-    const targetPlayer = players.get(targetId);
-    if (!targetPlayer) {
-        console.log(`Target player ${targetId} not found`);
-        return;
-    }
-    
-    // Get current health before applying damage
-    const currentHealth = targetPlayer.health || 100;
-    
-    // Calculate new health after damage
-    const newHealth = Math.max(0, currentHealth - finalDamage);
-    
-    // Debug info for health calculation
-    console.log(`[DEBUG] Health calculation: ${currentHealth} - ${finalDamage} = ${newHealth}`);
-    
-    // Store the new health
-    targetPlayer.health = newHealth;
-    
-    console.log(`Player ${targetId} hit for ${finalDamage} damage, health now ${targetPlayer.health}`);
-    
-    // Send health update to both players
-    if (targetPlayer.ws && targetPlayer.ws.readyState === WebSocket.OPEN) {
-        console.log(`Sending health update to target: ${targetId} - health: ${newHealth}`);
-        targetPlayer.ws.send(JSON.stringify({
-            type: 'playerHealthUpdate',
-            playerId: targetId,
-            health: newHealth,
-            damage: finalDamage,
-            hitBy: playerId
-        }));
-    }
-    
-    if (playerData.ws && playerData.ws.readyState === WebSocket.OPEN) {
-        console.log(`Sending health update to shooter: ${playerId} - target health: ${newHealth}`);
-        playerData.ws.send(JSON.stringify({
-            type: 'playerHealthUpdate',
-            playerId: targetId, 
-            health: newHealth,
-            damage: finalDamage,
-            hitBy: playerId
-        }));
-    }
-    
-    // Only end the duel if target's health is 0 or less
-    if (newHealth <= 0) {
-        console.log(`Player ${targetId} defeated in duel - health reduced to 0`);
-        
-        // Send death flag to all other players to trigger death animation
-        broadcastToOthers(targetId, {
-            type: 'playerUpdate',
-            id: targetId,
-            position: targetPlayer.position,
-            rotation: targetPlayer.rotation,
-            health: 0,
-            isDying: true // Trigger death animation on client
-        });
-        
-        // End the duel with shooter as winner
-        endQuickDrawDuel(duelId, playerId);
-    } else {
-        console.log(`Player ${targetId} was hit but still has ${newHealth} health - duel continues`);
-    }
-}
-
-/**
- * End a Quick Draw duel and notify players of the result.
- * @param {string} duelId - The duel ID
- * @param {number} winnerId - The winner's player ID (if any)
- */
-function endQuickDrawDuel(duelId, winnerId) {
-  const duel = quickDrawDuels.get(duelId);
-  
-  if (!duel) {
-    return; // Invalid duel
-  }
-  
-  // Get player objects for notification
-  const player1 = players.get(duel.player1Id);
-  const player2 = players.get(duel.player2Id);
-  
-  // Determine the winner username for notification
-  let winnerUsername = 'Unknown';
-  let loserUsername = 'Unknown';
-  
-  if (winnerId) {
-    // If we have a winner, determine usernames
-    if (winnerId === duel.player1Id && player1) {
-      winnerUsername = player1.username;
-      loserUsername = player2 ? player2.username : 'Disconnected player';
-    } else if (winnerId === duel.player2Id && player2) {
-      winnerUsername = player2.username;
-      loserUsername = player1 ? player1.username : 'Disconnected player';
-    }
-    
-    // Send Telegram notification about duel result
-    sendTelegramNotification(`🏆 Quick Draw duel ended: ${winnerUsername} defeated ${loserUsername} in arena ${duel.arenaIndex + 1}`);
-  } else {
-    // No winner (both disconnected or other reason)
-    sendTelegramNotification(`🚫 Quick Draw duel ended with no winner in arena ${duel.arenaIndex + 1}`);
-  }
-  
-  console.log(`Ending Quick Draw duel ${duelId} with winner: ${winnerId || 'none'}`);
-  
-  // Clear any pending timeouts
-  if (duel.drawTimeout) {
-    clearTimeout(duel.drawTimeout);
-  }
-  
-  // First notify players of the duel result
-  if (player1 && player1.ws.readyState === WebSocket.OPEN) {
-    player1.inQuickDrawDuel = false;
-    player1.quickDrawDuelId = null;
-    player1.quickDrawLobbyIndex = -1;
-    
-    // Send standard QuickDraw end notification
-    player1.ws.send(JSON.stringify({
-      type: 'quickDrawEnd',
-      winnerId: winnerId
-    }));
-    
-    // If this player lost, also send death notification
-    if (winnerId && winnerId !== duel.player1Id) {
-      // Set loser's health to 0
-      player1.health = 0;
-      
-      // Send death notification (same as regular deaths)
-      player1.ws.send(JSON.stringify({
-        type: 'death',
-        killerId: winnerId
-      }));
-      
-      // Broadcast death animation to all clients
-      broadcastToAll({
-        type: 'playerDeath',
-        id: duel.player1Id,
-        killedById: winnerId
-      });
-    }
-    
-    // If this player won, send kill notification
-    if (winnerId && winnerId === duel.player1Id) {
-      player1.ws.send(JSON.stringify({
-        type: 'kill',
-        targetId: duel.player2Id
-      }));
-    }
-  }
-  
-  if (player2 && player2.ws.readyState === WebSocket.OPEN) {
-    player2.inQuickDrawDuel = false;
-    player2.quickDrawDuelId = null;
-    player2.quickDrawLobbyIndex = -1;
-    
-    // Send standard QuickDraw end notification
-    player2.ws.send(JSON.stringify({
-      type: 'quickDrawEnd',
-      winnerId: winnerId
-    }));
-    
-    // If this player lost, also send death notification
-    if (winnerId && winnerId !== duel.player2Id) {
-      // Set loser's health to 0
-      player2.health = 0;
-      
-      // Send death notification (same as regular deaths)
-      player2.ws.send(JSON.stringify({
-        type: 'death',
-        killerId: winnerId
-      }));
-      
-      // Broadcast death animation to all clients
-      broadcastToAll({
-        type: 'playerDeath',
-        id: duel.player2Id,
-        killedById: winnerId
-      });
-    }
-    
-    // If this player won, send kill notification
-    if (winnerId && winnerId === duel.player2Id) {
-      player2.ws.send(JSON.stringify({
-        type: 'kill',
-        targetId: duel.player1Id
-      }));
-    }
-  }
-  
-  // Wait for animation to complete before sending respawn
-  setTimeout(() => {
-    // Respawn both players in their new positions
-    if (player1 && players.has(duel.player1Id)) {
-      respawnPlayer(duel.player1Id);
-    }
-    
-    if (player2 && players.has(duel.player2Id)) {
-      respawnPlayer(duel.player2Id);
-    }
-    
-    // Finally, remove the duel from the active duels map
-    quickDrawDuels.delete(duelId);
-    
-    // Update arena status
-    const arenaIndex = duel.arenaIndex;
-    if (arenaIndex !== undefined) {
-      arenaInUse[arenaIndex] = false;
-    }
-    
-  }, 2000); // 2 second delay for death animation, same as regular kills
-}
-
-/**
- * Handle a player challenging another player to a Quick Draw duel.
- * @param {number} playerId - The player's ID
- * @param {number} targetPlayerId - The target player's ID
- */
-function handleQuickDrawChallenge(playerId, targetPlayerId) {
-  const player = players.get(playerId);
-  const targetPlayer = players.get(targetPlayerId);
-  
-  if (!player || !targetPlayer) {
-    return; // Invalid players
-  }
-  
-  if (player.inQuickDrawQueue || player.inQuickDrawDuel) {
-    return; // Challenger can't be in another game mode
-  }
-  
-  if (targetPlayer.inQuickDrawQueue || targetPlayer.inQuickDrawDuel) {
-    return; // Target can't be in another game mode
-  }
-  
-  console.log(`Player ${playerId} challenged player ${targetPlayerId} to a Quick Draw duel`);
-  
-  // Send challenge to target player
-  targetPlayer.ws.send(JSON.stringify({
-    type: 'quickDrawChallengeReceived',
-    challengerId: playerId,
-    challengerPosition: player.position
-  }));
-}
-
-/**
- * Generate random positions on the main street for a Quick Draw duel.
- * This ensures players spawn in the open street and not inside buildings.
- * @returns {Object} An object containing two positions and their facing rotations
- */
-function generateQuickDrawStreetPositions() {
-  // Define the town boundaries
-  const townWidth = GAME_CONSTANTS.TOWN_WIDTH;
-  const townLength = GAME_CONSTANTS.TOWN_LENGTH;
-  
-  // Fixed eye level height
-  const eyeLevel = 2.72;
-  
-  console.log(`[DEBUG] QuickDraw duel - Setting player eye level to ${eyeLevel} (feet should be at ground level)`);
-  
-  // Create 5 parallel lanes with realistic spacing for a line formation
-  const numLanes = 5;
-  const laneSpacing = 3.0; // 3 meters between each lane - realistic spacing for people standing side by side
-  const totalLineWidth = (numLanes - 1) * laneSpacing; // Total width of the line formation
-  const startX = -totalLineWidth / 2; // Center the formation in the town
-  
-  // Choose a random lane (0-4)
-  const laneIndex = Math.floor(Math.random() * numLanes);
-  const laneX = startX + (laneIndex * laneSpacing);
-  
-  console.log(`[DEBUG] Chosen quickdraw lane ${laneIndex + 1} of ${numLanes} at X=${laneX.toFixed(2)}`);
-  
-  // Position at north/south of the chosen lane, maintaining the same Z position for all lanes
-  // This creates a straight line of duelists on each side
-  const position1 = {
-    x: laneX,
-    y: eyeLevel,
-    z: -20 // North line position
-  };
-  
-  const position2 = {
-    x: laneX,
-    y: eyeLevel,
-    z: 20 // South line position
-  };
-  
-  // Calculate vector from player1 to player2
-  const dx = position2.x - position1.x;
-  const dz = position2.z - position1.z;
-  
-  // Calculate angle from positive Z axis (which is the "forward" direction in THREE.js)
-  // Add Math.PI (180 degrees) to make players FACE each other instead of facing away
-  const rotation1 = Math.atan2(dx, dz) + Math.PI;
-  
-  // For player2, we need to calculate the angle from the positive Z axis to the vector pointing to player1
-  // This is the opposite direction, so we use negative dx and dz, plus 180 degrees correction
-  const rotation2 = Math.atan2(-dx, -dz) + Math.PI;
-  
-  // Log positions
-  console.log(`[DEBUG] DUEL POSITIONS (LANE ${laneIndex + 1} SPAWN):`);
-  console.log(`  Player1: (${position1.x.toFixed(2)}, ${position1.y.toFixed(2)}, ${position1.z.toFixed(2)}) facing ${rotation1.toFixed(4)} radians (${(rotation1 * 180 / Math.PI).toFixed(1)}°)`);
-  console.log(`  Player2: (${position2.x.toFixed(2)}, ${position2.y.toFixed(2)}, ${position2.z.toFixed(2)}) facing ${rotation2.toFixed(4)} radians (${(rotation2 * 180 / Math.PI).toFixed(1)}°)`);
-  console.log(`  Lane ${laneIndex + 1} of ${numLanes}, Line Formation Width: ${totalLineWidth.toFixed(2)}m`);
-  console.log(`  Exact distance between players: 40.00 meters, Vector: (${dx.toFixed(2)}, ${dz.toFixed(2)})`);
-  
-  return {
-    position1: position1,
-    position2: position2,
-    rotation1: rotation1,
-    rotation2: rotation2
-  };
-}
-
-/**
- * Handle a player accepting a Quick Draw challenge
- * @param {number} playerId - The accepting player's ID
- * @param {number} challengerId - The challenging player's ID
- */
-function handleQuickDrawAcceptChallenge(playerId, challengerId) {
-  const player = players.get(playerId);
-  const challenger = players.get(challengerId);
-  
-  if (!player || !challenger) {
-    return; // Invalid players
-  }
-  
-  if (player.inQuickDrawQueue || player.inQuickDrawDuel ||
-      challenger.inQuickDrawQueue || challenger.inQuickDrawDuel) {
-    return; // Players can't be in another game mode
-  }
-  
-  console.log(`Player ${playerId} accepted a Quick Draw challenge from player ${challengerId}`);
-  
-  // Notify challenger that the challenge was accepted
-  challenger.ws.send(JSON.stringify({
-    type: 'quickDrawChallengeAccepted',
-    targetId: playerId
-  }));
-  
-  // Generate controlled street positions for the duel
-  const spawnPositions = generateQuickDrawStreetPositions();
-  
-  // Create a new duel
-  const duelId = `duel_direct_${challengerId}_${playerId}`;
-  quickDrawDuels.set(duelId, {
-    id: duelId,
-    player1Id: challengerId,
-    player2Id: playerId,
-    state: 'starting',
-    startTime: Date.now(),
-    isDirect: true
-  });
-  
-  // Mark players as in a duel
-  challenger.inQuickDrawQueue = false;
-  challenger.inQuickDrawDuel = true;
-  challenger.quickDrawDuelId = duelId;
-  
-  player.inQuickDrawQueue = false;
-  player.inQuickDrawDuel = true;
-  player.quickDrawDuelId = duelId;
-  
-  // Reset player health to full at the start of the duel
-  challenger.health = 100;
-  player.health = 100;
-  
-  // Store original positions to return players after the duel
-  challenger.preQuickDrawPosition = { ...challenger.position };
-  player.preQuickDrawPosition = { ...player.position };
-  
-  // Notify players of the match
-  challenger.ws.send(JSON.stringify({
-    type: 'quickDrawMatch',
-    opponentId: playerId,
-    isDirect: true,
-    startPosition: spawnPositions.position1,
-    startRotation: spawnPositions.rotation1,
-    movementLocked: true
-  }));
-  
-  player.ws.send(JSON.stringify({
-    type: 'quickDrawMatch',
-    opponentId: challengerId,
-    isDirect: true,
-    startPosition: spawnPositions.position2,
-    startRotation: spawnPositions.rotation2,
-    movementLocked: true
-  }));
-  
-  // Extra debugging to verify positions are correct in match notification
-  console.log(`[POSITION DEBUG] Match notification positions sent:
-    Challenger(${challengerId}): (${spawnPositions.position1.x}, ${spawnPositions.position1.y}, ${spawnPositions.position1.z})
-    Player(${playerId}): (${spawnPositions.position2.x}, ${spawnPositions.position2.y}, ${spawnPositions.position2.z})
-    Should be distance: ${Math.sqrt(
-      Math.pow(spawnPositions.position1.x - spawnPositions.position2.x, 2) +
-      Math.pow(spawnPositions.position1.z - spawnPositions.position2.z, 2)
-    ).toFixed(2)} meters
-  `);
-  
-  console.log(`Started direct Quick Draw duel ${duelId} between players ${challengerId} and ${playerId}`);
-}
-
-/**
- * Handle a player declining a Quick Draw challenge
- * @param {number} playerId - The declining player's ID
- * @param {number} challengerId - The challenging player's ID
- */
-function handleQuickDrawDeclineChallenge(playerId, challengerId) {
-  const player = players.get(playerId);
-  const challenger = players.get(challengerId);
-  
-  if (!player || !challenger) {
-    return; // Invalid players
-  }
-  
-  console.log(`Player ${playerId} declined a Quick Draw challenge from player ${challengerId}`);
-  
-  // Notify challenger that the challenge was declined
-  challenger.ws.send(JSON.stringify({
-    type: 'quickDrawChallengeDeclined',
-    targetId: playerId
-  }));
-}
-
-// Anti-cheat: Server-side bullet physics update
-function updateBullets() {
-  const now = Date.now();
-  
-  // Update each active bullet
-  for (const [bulletId, bullet] of activeBullets.entries()) {
-    if (!bullet.active) continue;
-    
-    // Calculate time since last update
-    const deltaTime = (now - bullet.timeCreated) / 1000;
-    
-    // Calculate new position
-    const distanceThisFrame = bullet.speed * deltaTime;
-    bullet.position.x += bullet.direction.x * distanceThisFrame;
-    bullet.position.y += bullet.direction.y * distanceThisFrame;
-    bullet.position.z += bullet.direction.z * distanceThisFrame;
-    
-    // Update total distance traveled
-    bullet.distanceTraveled += distanceThisFrame;
-    
-    // Check if bullet has traveled too far
-    if (bullet.distanceTraveled >= bullet.maxDistance) {
-      bullet.active = false;
-      continue;
-    }
-  }
-  
-  // Clean up inactive bullets
-  for (const [bulletId, bullet] of activeBullets.entries()) {
-    if (!bullet.active) {
-      activeBullets.delete(bulletId);
-    }
-  }
-}
-
-// Heartbeat to remove stale connections
-const HEARTBEAT_INTERVAL = 30000; // 30s
-const CONNECTION_TIMEOUT = 60000; // 60s
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [id, player] of players.entries()) {
-    if (now - player.lastActivity > CONNECTION_TIMEOUT) {
-      console.log(`Removing stale connection for player ${id}`);
-      if (player.ws.readyState === WebSocket.OPEN) {
-        player.ws.close(1000, 'Connection timeout');
-      }
-      cleanupPlayer(id);
-    } else if (player.ws.readyState === WebSocket.OPEN) {
-      // keep alive
-      player.ws.send(JSON.stringify({ type: 'ping' }));
-    }
-  }
-}, HEARTBEAT_INTERVAL);
-
-// Anti-cheat: Run physics update loop
-setInterval(updateBullets, GAME_CONSTANTS.PHYSICS_UPDATE_INTERVAL);
-
-// Start server
-server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
-
-// Graceful shutdown
-process.on('SIGINT', () => {
-  console.log('Server shutting down...');
-  
-  // End all Quick Draw duels
-  for (const duelId of quickDrawDuels.keys()) {
-    endQuickDrawDuel(duelId, null);
-  }
-  
-  for (const [id, player] of players.entries()) {
-    if (player.ws.readyState === WebSocket.OPEN) {
-      player.ws.close(1000, 'Server shutting down');
-    }
-  }
-  server.close(() => {
-    console.log('Server shutdown complete.');
-    process.exit(0);
-  });
-});
 
 /**
  * Handle chat messages from players and broadcast them
@@ -3126,6 +2112,41 @@ setTimeout(() => {
   }
 }, 5000); // Wait for server to fully initialize
 
+// Anti-cheat: Bullet physics update
+function updateBullets() {
+  const now = Date.now();
+  
+  // Update each active bullet
+  for (const [bulletId, bullet] of activeBullets.entries()) {
+    if (!bullet.active) continue;
+    
+    // Calculate time since last update
+    const deltaTime = (now - bullet.timeCreated) / 1000;
+    
+    // Calculate new position
+    const distanceThisFrame = bullet.speed * deltaTime;
+    bullet.position.x += bullet.direction.x * distanceThisFrame;
+    bullet.position.y += bullet.direction.y * distanceThisFrame;
+    bullet.position.z += bullet.direction.z * distanceThisFrame;
+    
+    // Update total distance traveled
+    bullet.distanceTraveled += distanceThisFrame;
+    
+    // Check if bullet has traveled too far
+    if (bullet.distanceTraveled >= bullet.maxDistance) {
+      bullet.active = false;
+      continue;
+    }
+  }
+  
+  // Clean up inactive bullets
+  for (const [bulletId, bullet] of activeBullets.entries()) {
+    if (!bullet.active) {
+      activeBullets.delete(bulletId);
+    }
+  }
+}
+
 // =============================================
 // Train System - Server Side Implementation
 // =============================================
@@ -3230,3 +2251,46 @@ function sendInitialTrainState(ws) {
     ws.send(JSON.stringify(trainStateMsg));
   }
 }
+
+// Heartbeat to remove stale connections
+const HEARTBEAT_INTERVAL = 30000; // 30s
+const CONNECTION_TIMEOUT = 60000; // 60s
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, player] of players.entries()) {
+    if (now - player.lastActivity > CONNECTION_TIMEOUT) {
+      console.log(`Removing stale connection for player ${id}`);
+      if (player.ws.readyState === WebSocket.OPEN) {
+        player.ws.close(1000, 'Connection timeout');
+      }
+      cleanupPlayer(id);
+    } else if (player.ws.readyState === WebSocket.OPEN) {
+      // keep alive
+      player.ws.send(JSON.stringify({ type: 'ping' }));
+    }
+  }
+}, HEARTBEAT_INTERVAL);
+
+// Anti-cheat: Run physics update loop
+setInterval(updateBullets, GAME_CONSTANTS.PHYSICS_UPDATE_INTERVAL);
+
+// Start server
+server.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('Server shutting down...');
+  
+  for (const [id, player] of players.entries()) {
+    if (player.ws.readyState === WebSocket.OPEN) {
+      player.ws.close(1000, 'Server shutting down');
+    }
+  }
+  server.close(() => {
+    console.log('Server shutdown complete.');
+    process.exit(0);
+  });
+});

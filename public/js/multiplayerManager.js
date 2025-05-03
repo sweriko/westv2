@@ -199,16 +199,7 @@ export class MultiplayerManager {
     networkManager.onPlayerHit = (sourceId, hitData, newHealth, hitZone) => {
       console.log(`I was hit by player ${sourceId} in the ${hitZone || 'body'}!`);
       
-      // Skip processing if this is a QuickDraw duel hit - QuickDraw will handle it separately
-      const isQuickDrawDuel = window.quickDraw && window.quickDraw.inDuel && 
-                              window.quickDraw.duelOpponentId === Number(sourceId);
-      
-      if (isQuickDrawDuel) {
-        console.log(`[MultiplayerManager] Deferring hit handling to QuickDraw system`);
-        return;
-      }
-      
-      // This is a regular hit, not in QuickDraw mode
+      // This is a regular hit
       this.showHitFeedback();
       
       // Play headshot sound if appropriate

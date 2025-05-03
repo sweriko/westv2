@@ -339,77 +339,6 @@ canvas {
   transition: opacity 1s;
 }
 
-/* Quick Draw game mode styles */
-#quick-draw-message {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: white;
-  font-size: 48px;
-  font-weight: bold;
-  text-align: center;
-  display: none;
-  font-family: 'Western', Arial, sans-serif;
-  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
-  z-index: 1000;
-}
-
-#draw-circle {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%) scale(0);
-  width: 300px;
-  height: 300px;
-  border-radius: 50%;
-  border: 8px solid #FF0000;
-  box-shadow: 0 0 20px #FF0000;
-  opacity: 0;
-  transition: transform 0.3s, opacity 0.3s;
-  pointer-events: none;
-  z-index: 999;
-  display: none;
-}
-
-@keyframes portalPulse {
-  0% { transform: scale(1); opacity: 0.8; }
-  50% { transform: scale(1.1); opacity: 1; }
-  100% { transform: scale(1); opacity: 0.8; }
-}
-
-@keyframes drawCircleAnim {
-  0% { transform: translate(-50%, -50%) scale(0); opacity: 1; }
-  80% { transform: translate(-50%, -50%) scale(3); opacity: 0.8; }
-  100% { transform: translate(-50%, -50%) scale(4); opacity: 0; }
-}
-
-/* Mobile optimized smoke ring effect */
-@keyframes drawCircleAnimMobile {
-  0% { transform: translate(-50%, -50%) scale(0); opacity: 0.7; }
-  80% { transform: translate(-50%, -50%) scale(1.5); opacity: 0.5; }
-  100% { transform: translate(-50%, -50%) scale(2); opacity: 0; }
-}
-
-/* Super lightweight mobile animation - even less GPU intensive */
-@keyframes drawCircleAnimMobileLite {
-  0% { transform: translate(-50%, -50%) scale(0); opacity: 0.6; }
-  50% { transform: translate(-50%, -50%) scale(1); opacity: 0.4; }
-  100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
-}
-
-.portal-animation {
-  animation: portalPulse 2s infinite ease-in-out;
-}
-
-.draw-circle-animation {
-  animation: drawCircleAnim 0.3s ease-out forwards;
-}
-
-.draw-circle-animation-mobile {
-  animation: drawCircleAnimMobileLite 0.2s ease-out forwards;
-}
-
 /* Mobile-specific smoke ring */
 @media (max-width: 1024px), (pointer: coarse) {
   #draw-circle {
@@ -420,119 +349,6 @@ canvas {
   }
 }
 
-/* Styling for Quick Draw countdown */
-#quick-draw-countdown {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: white;
-  font-size: 72px;
-  font-weight: bold;
-  text-align: center;
-  display: none;
-  font-family: 'Western', Arial, sans-serif;
-  text-shadow: 2px 2px 6px rgba(0, 0, 0, 0.7);
-  z-index: 1001;
-}
-
-/* Styling for winner/loser message */
-.quick-draw-winner {
-  color: #4CAF50 !important;
-  text-shadow: 0 0 10px #4CAF50, 2px 2px 6px rgba(0, 0, 0, 0.7) !important;
-}
-
-.quick-draw-loser {
-  color: #F44336 !important;
-  text-shadow: 0 0 10px #F44336, 2px 2px 6px rgba(0, 0, 0, 0.7) !important;
-}
-
-/* Styling for gun locked warning */
-.gun-locked-warning {
-  color: #F44336 !important;
-  font-size: 36px !important;
-  animation: flashWarning 0.5s infinite alternate;
-}
-
-@keyframes flashWarning {
-  0% { opacity: 0.7; }
-  100% { opacity: 1; }
-}
-
-#quick-draw-status {
-  position: absolute;
-  top: 120px;
-  left: 20px;
-  color: white;
-  font-size: 16px;
-  background-color: rgba(0,0,0,0.5);
-  padding: 8px 12px;
-  border-radius: 5px;
-  transition: background-color 0.3s ease;
-  font-family: 'Courier New', Courier, monospace;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-}
-
-#portal-instructions {
-  position: absolute;
-  background-color: rgba(0,0,0,0.8);
-  border: 2px solid #FF6B00;
-  border-radius: 8px;
-  padding: 15px;
-  width: 400px;
-  text-align: center;
-  box-shadow: 0 0 15px rgba(255, 107, 0, 0.6);
-  color: #EEEEEE;
-  font-family: 'Courier New', Courier, monospace;
-  z-index: 100;
-  transition: opacity 0.3s ease;
-}
-
-#portal-instructions h2 {
-  color: #FF6B00;
-  font-family: 'Western', 'Courier New', Courier, monospace;
-  text-shadow: 1px 1px 3px rgba(0,0,0,0.7);
-  margin-bottom: 10px;
-  font-size: 22px;
-}
-
-#portal-instructions p {
-  margin-bottom: 12px;
-  font-size: 14px;
-  line-height: 1.4;
-}
-
-#portal-instructions ul {
-  text-align: left;
-  margin-top: 10px;
-  padding-left: 20px;
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-#portal-instructions li {
-  margin-bottom: 5px;
-  list-style-type: square;
-}
-
-/* Lobby display for showing which arena the player is in */
-#lobby-indicator {
-  position: absolute;
-  top: 150px;
-  left: 20px;
-  color: white;
-  font-size: 16px;
-  background-color: rgba(255, 107, 0, 0.7);
-  padding: 8px 12px;
-  border-radius: 5px;
-  font-family: 'Courier New', Courier, monospace;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-  display: none;
-}
 
 /* Fix font loading */
 @font-face {
@@ -758,9 +574,8 @@ CAMERA_ROTATION_SENSITIVITY: 0.5
   
   /* Hide all info banners and instructions on mobile */
   #fps-counter, #player-count, #connection-status, #network-status, 
-  #quick-draw-status, #lobby-indicator, #portal-instructions,
-  #reload-message, #quick-draw-message, #quick-draw-countdown,
-  #proper-shootout-instructions {
+  #lobby-indicator, #portal-instructions,
+  #reload-message, #proper-shootout-instructions {
     display: none !important;
   }
   

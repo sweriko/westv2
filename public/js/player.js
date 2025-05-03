@@ -129,19 +129,16 @@ export class Player {
     this.lastNetworkUpdate = 0;
     this.networkUpdateInterval = 33; // ~30 fps updates, balanced between responsiveness and bandwidth
 
-    // Quick Draw mode
-    this.canAim = true; // Whether the player is allowed to aim (used by Quick Draw)
-    
     // Alternative aiming controls
     this.isFAiming = false; // Whether player is aiming using the F key
     this.isFRmbPressed = false; // Whether right mouse button is pressed during F-aiming
     this.isLmbPressed = false; // Whether left mouse button is being held (for hold-to-shoot)
     
+    // Flag to control when aiming is allowed (used by various game systems)
+    this.canAim = true;
+    
     // Store previous position to detect collision with arena boundary
     this.previousPosition = new THREE.Vector3();
-
-    // Quick Draw lobby information
-    this.quickDrawLobbyIndex = -1; // -1 means not in a lobby
     
     // Anti-cheat: Server reconciliation
     this.serverPosition = new THREE.Vector3();
@@ -276,15 +273,15 @@ export class Player {
       this.isReloading = false;
       this.isAiming = false;
       this.velocity.y = 0;
-      this.canAim = true;
-      this.canShoot = true;
       
-      // Update UI
-      updateHealthUI(this);
+      // Make sure UI is updated
       updateAmmoUI(this);
       
-      console.log(`Respawn complete - Current weapon: ${this.activeWeapon}, Ammo: ${this.bullets}/${this.maxBullets}`);
-      console.log(`Weapon ammo: Revolver: ${this.weaponAmmo.revolver}, Shotgun: ${this.weaponAmmo.shotgun}`);
+      // Reset vertical velocity
+      this.velocity.y = 0;
+      
+      console.log('Player respawned');
+      console.log(`Weapon ammo reset - Revolver: ${this.weaponAmmo.revolver}, Shotgun: ${this.weaponAmmo.shotgun}`);
     };
   }
 
@@ -327,8 +324,8 @@ export class Player {
     // Adjust FOV based on sprinting and aiming with smoother transitions
     if (this.isAiming && this.canAim) {
       this.targetFOV = this.aimFOV;
-    } else if (this.isSprinting && this.isMoving() && !window.quickDraw?.inDuel) {
-      // FOV effect when sprinting, but not in QuickDraw duel
+    } else if (this.isSprinting && this.isMoving()) {
+      // FOV effect when sprinting
       this.targetFOV = this.defaultFOV + 7; // Less extreme FOV increase (was 10)
     } else {
       this.targetFOV = this.defaultFOV;
@@ -352,15 +349,6 @@ export class Player {
     
     // Footstep sounds logic based on movement
     const positionBeforeMovement = this.previousPosition.clone();
-    
-    // Check for nearest player for potential quickdraw on mobile
-    if (window.mobileControls && typeof window.checkNearestPlayerForQuickdraw === 'function') {
-      const nearbyPlayer = window.checkNearestPlayerForQuickdraw(this);
-      // Update mobile UI if nearby player found
-      if (window.mobileControls) {
-        window.mobileControls.checkForNearbyPlayers(nearbyPlayer !== null);
-      }
-    }
     
     // Update camera bob (only if on ground)
     // Always update the head bob regardless of whether we're on ground
@@ -403,10 +391,9 @@ export class Player {
    * @param {number} deltaTime - Time elapsed since last frame
    */
   move(deltaTime) {
-    if (this.forceLockMovement) return; // Complete override for duel mode
-    if (!this.canMove) return; // Movement lock (e.g. during Quick Draw)
+    if (!this.canMove) return; // Movement lock
     if (this.chatActive) return; // Don't move when chat is active
-
+    
     // Update jump cooldown if it's active
     if (this.jumpCooldown > 0) {
       this.jumpCooldown = Math.max(0, this.jumpCooldown - deltaTime);
@@ -671,11 +658,6 @@ export class Player {
    * @returns {number} The current movement speed
    */
   getMoveSpeed() {
-    // Disable sprinting in QuickDraw duels
-    if (window.quickDraw && window.quickDraw.inDuel) {
-      return this.normalSpeed;
-    }
-    
     // Apply sprint speed if sprint key is pressed
     return this.isSprinting ? this.sprintSpeed : this.normalSpeed;
   }
@@ -689,23 +671,11 @@ export class Player {
   }
 
   /**
-   * Checks for collision with the arena boundary or town objects
+   * Checks for collision with town objects
    * @param {THREE.Vector3} position - The position to check
    * @returns {boolean} - true if no collision, false if colliding
    */
   checkBoundaryCollision(position) {
-    // First check arena boundary if player is in a quickDraw arena
-    if (this.quickDrawLobbyIndex >= 0 && window.quickDraw && window.quickDraw.physics) {
-      const physics = window.quickDraw.physics;
-      const arenaIndex = this.quickDrawLobbyIndex;
-      
-      if (!physics.isPointInSpecificArenaBoundary(position, arenaIndex)) {
-        return false; // Colliding with arena boundary
-      }
-    }
-    
-    // Town border limits check removed - players can now leave town
-    
     // Check collision with town objects/colliders
     if (window.physics && window.physics.bodies) {
       // Create a small sphere for collision detection
@@ -718,9 +688,6 @@ export class Player {
       
       // Check each physics body that's not a player or arena boundary
       for (const body of window.physics.bodies) {
-        // Skip if this is an arena boundary
-        if (body.arenaBoundary) continue;
-        
         // Skip if mass > 0 (non-static body)
         if (body.mass > 0) continue;
         
@@ -862,8 +829,7 @@ export class Player {
       isReloading: this.isReloading,
       isSprinting: this.isSprinting,
       isShooting: this.viewmodel && this.viewmodel.animationState === 'shoot',
-      health: this.health,
-      quickDrawLobbyIndex: this.quickDrawLobbyIndex
+      health: this.health
     });
   }
 
@@ -1054,16 +1020,12 @@ export class Player {
     this.isReloading = false;
     this.isAiming = false;
     this.velocity.y = 0;
-    this.canAim = true;
     
     // Make sure UI is updated
     updateAmmoUI(this);
     
     // Reset vertical velocity
     this.velocity.y = 0;
-    
-    // Reset Quick Draw lobby information
-    this.quickDrawLobbyIndex = -1;
     
     console.log('Player respawned');
     console.log(`Weapon ammo reset - Revolver: ${this.weaponAmmo.revolver}, Shotgun: ${this.weaponAmmo.shotgun}`);
@@ -1182,28 +1144,6 @@ export class Player {
     this.sendNetworkUpdate(); // let others know
   }
   
-  /**
-   * Set the Quick Draw lobby index for this player
-   * @param {number} index - The lobby index (0-4) or -1 for none
-   */
-  setQuickDrawLobby(index) {
-    this.quickDrawLobbyIndex = index;
-    
-    // Update UI indicator
-    const lobbyIndicator = document.getElementById('lobby-indicator');
-    if (lobbyIndicator) {
-      if (index >= 0) {
-        lobbyIndicator.textContent = `Arena ${index + 1}`;
-        lobbyIndicator.style.display = 'block';
-      } else {
-        lobbyIndicator.style.display = 'none';
-      }
-    }
-    
-    // Send update to server
-    this.sendNetworkUpdate();
-  }
-
   /**
    * Updates aiming effects including crosshair animation
    * @param {number} deltaTime - Time elapsed since last frame
@@ -1363,9 +1303,6 @@ export class Player {
     
     // Check each physics body for ground
     for (const body of window.physics.bodies) {
-      // Skip if this is an arena boundary
-      if (body.arenaBoundary) continue;
-      
       // Skip if mass > 0 (non-static body)
       if (body.mass > 0) continue;
       

@@ -64,14 +64,8 @@ export function initInput(renderer, player, soundManager) {
         if (window.npcManager.instance.isBartenderNearby || window.npcManager.instance.nearbyNpc) {
           // Handle the interaction with the NPC
           window.npcManager.instance.handleInteraction(event, player);
-          return; // Exit early, don't process QuickDraw
+          return;
         }
-      }
-      
-      // If no NPC interaction was handled, check if it's for QuickDraw challenge
-      if (window.quickDraw) {
-        window.quickDraw.handleChallengeKeypress(event);
-        return;
       }
     }
     
@@ -338,8 +332,6 @@ function hideInstructionsOnMobile() {
     document.getElementById('portal-instructions'),
     document.getElementById('proper-shootout-instructions'),
     document.getElementById('reload-message'),
-    document.getElementById('quick-draw-message'),
-    document.getElementById('quick-draw-countdown'),
     document.getElementById('health-counter'),
     document.getElementById('health-bar-container')
   ];
@@ -471,91 +463,27 @@ function createMobileControls(player, soundManager) {
   reloadButton.style.color = 'white';
   reloadButton.style.zIndex = '1002';
   
-  // Create quickdraw invite button (initially hidden, shows when near players)
-  const inviteButton = document.createElement('div');
-  inviteButton.id = 'invite-button';
-  inviteButton.className = 'mobile-button';
-  inviteButton.innerText = 'E';
-  inviteButton.style.position = 'fixed';
-  inviteButton.style.top = '50%'; // Center vertically
-  inviteButton.style.left = '50%'; // Center horizontally
-  inviteButton.style.transform = 'translate(-50%, -50%)'; // Perfect centering
-  inviteButton.style.width = '80px';
-  inviteButton.style.height = '80px';
-  inviteButton.style.backgroundColor = 'rgba(0, 128, 0, 0.5)';
-  inviteButton.style.border = '2px solid rgba(255, 255, 255, 0.7)';
-  inviteButton.style.borderRadius = '50%';
-  inviteButton.style.display = 'none'; // Hidden by default
-  inviteButton.style.justifyContent = 'center';
-  inviteButton.style.alignItems = 'center';
-  inviteButton.style.fontSize = '32px';
-  inviteButton.style.fontWeight = 'bold';
-  inviteButton.style.color = 'white';
-  inviteButton.style.zIndex = '1001';
-  
-  // Create quickdraw accept button (initially hidden, shows when receiving invites)
-  const acceptButton = document.createElement('div');
-  acceptButton.id = 'accept-button';
-  acceptButton.className = 'mobile-button';
-  acceptButton.innerHTML = '<span style="font-size: 14px; position: absolute; top: -20px; color: white;">accept</span>A';
-  acceptButton.style.position = 'fixed';
-  acceptButton.style.top = '40%';
-  acceptButton.style.left = '40%';
-  acceptButton.style.width = '70px';
-  acceptButton.style.height = '70px';
-  acceptButton.style.backgroundColor = 'rgba(0, 255, 0, 0.5)';
-  acceptButton.style.border = '2px solid rgba(255, 255, 255, 0.7)';
-  acceptButton.style.borderRadius = '50%';
-  acceptButton.style.display = 'none'; // Hidden by default
-  acceptButton.style.justifyContent = 'center';
-  acceptButton.style.alignItems = 'center';
-  acceptButton.style.fontSize = '28px';
-  acceptButton.style.fontWeight = 'bold';
-  acceptButton.style.color = 'white';
-  acceptButton.style.zIndex = '1003';
-  
-  // Create quickdraw decline button (initially hidden, shows when receiving invites)
-  const declineButton = document.createElement('div');
-  declineButton.id = 'decline-button';
-  declineButton.className = 'mobile-button';
-  declineButton.innerHTML = '<span style="font-size: 14px; position: absolute; top: -20px; color: white;">decline</span>D';
-  declineButton.style.position = 'fixed';
-  declineButton.style.top = '40%';
-  declineButton.style.left = '60%';
-  declineButton.style.width = '70px';
-  declineButton.style.height = '70px';
-  declineButton.style.backgroundColor = 'rgba(255, 0, 0, 0.5)';
-  declineButton.style.border = '2px solid rgba(255, 255, 255, 0.7)';
-  declineButton.style.borderRadius = '50%';
-  declineButton.style.display = 'none'; // Hidden by default
-  declineButton.style.justifyContent = 'center';
-  declineButton.style.alignItems = 'center';
-  declineButton.style.fontSize = '28px';
-  declineButton.style.fontWeight = 'bold';
-  declineButton.style.color = 'white';
-  declineButton.style.zIndex = '1003';
-  
-  // Create bartender interaction button (initially hidden, shows when near bartender)
-  const bartenderButton = document.createElement('div');
-  bartenderButton.id = 'bartender-button';
-  bartenderButton.className = 'mobile-button';
-  bartenderButton.innerText = '🥃';
-  bartenderButton.style.position = 'fixed';
-  bartenderButton.style.top = '50%';
-  bartenderButton.style.left = '50%';
-  bartenderButton.style.transform = 'translate(-50%, -50%)';
-  bartenderButton.style.width = '80px';
-  bartenderButton.style.height = '80px';
-  bartenderButton.style.backgroundColor = 'rgba(139, 69, 19, 0.7)'; // Brown color for whiskey/drink theme
-  bartenderButton.style.border = '2px solid rgba(255, 215, 0, 0.8)'; // Gold border
-  bartenderButton.style.borderRadius = '50%';
-  bartenderButton.style.display = 'none'; // Hidden by default
-  bartenderButton.style.justifyContent = 'center';
-  bartenderButton.style.alignItems = 'center';
-  bartenderButton.style.fontSize = '32px';
-  bartenderButton.style.fontWeight = 'bold';
-  bartenderButton.style.color = 'white';
-  bartenderButton.style.zIndex = '1004';
+  // Create fire button (always visible but only activates when needed)
+  const fireButton = document.createElement('div');
+  fireButton.id = 'fire-button';
+  fireButton.className = 'mobile-button';
+  fireButton.innerText = '🔥';
+  fireButton.style.position = 'fixed';
+  fireButton.style.top = '50%';
+  fireButton.style.left = '50%';
+  fireButton.style.transform = 'translate(-50%, -50%)';
+  fireButton.style.width = '80px';
+  fireButton.style.height = '80px';
+  fireButton.style.backgroundColor = 'rgba(255, 0, 0, 0.5)';
+  fireButton.style.border = '2px solid rgba(255, 255, 255, 0.7)';
+  fireButton.style.borderRadius = '50%';
+  fireButton.style.display = 'flex';
+  fireButton.style.justifyContent = 'center';
+  fireButton.style.alignItems = 'center';
+  fireButton.style.fontSize = '32px';
+  fireButton.style.fontWeight = 'bold';
+  fireButton.style.color = 'white';
+  fireButton.style.zIndex = '1003';
   
   // Create weapon indicator UI (toggle buttons)
   const weaponContainer = document.createElement('div');
@@ -754,10 +682,7 @@ function createMobileControls(player, soundManager) {
   document.body.appendChild(weaponContainer);
   document.body.appendChild(jumpButton);
   document.body.appendChild(reloadButton);
-  document.body.appendChild(inviteButton);
-  document.body.appendChild(acceptButton);
-  document.body.appendChild(declineButton);
-  document.body.appendChild(bartenderButton);
+  document.body.appendChild(fireButton);
   document.body.appendChild(leftControlHint);
   document.body.appendChild(rightControlHint);
   document.body.appendChild(cameraControlHint);
@@ -796,45 +721,6 @@ function createMobileControls(player, soundManager) {
     
     return result;
   };
-  
-  // Function to check if player is near another player for quickdraw
-  function checkForNearbyPlayers() {
-    // This function should be called from the game loop to show/hide the invite button
-    // For now, we'll just add the interface - the actual implementation will need
-    // to be connected to the multiplayer system
-  }
-  
-  // Function to handle incoming quickdraw invites
-  function showQuickdrawInvite() {
-    acceptButton.style.display = 'flex';
-    declineButton.style.display = 'flex';
-  }
-  
-  // Function to hide quickdraw invite buttons
-  function hideQuickdrawInvite() {
-    acceptButton.style.display = 'none';
-    declineButton.style.display = 'none';
-  }
-  
-  // Ensure audio context is resumed for mobile
-  function ensureAudioContextResumed() {
-    if (soundManager && soundManager.audioContext && 
-        soundManager.audioContext.state !== 'running') {
-      // Resume the audio context on first user interaction
-      soundManager.audioContext.resume().then(() => {
-        console.log('AudioContext resumed successfully');
-        // Play a silent sound to fully activate audio
-        if (soundManager.buffers['revolverdraw']) {
-          const silentSound = soundManager.playSound('revolverdraw', 0, 0.01);
-          if (silentSound && silentSound.gainNode) {
-            silentSound.gainNode.gain.value = 0.01;
-          }
-        }
-      }).catch(err => {
-        console.error('Failed to resume AudioContext:', err);
-      });
-    }
-  }
   
   // Touch start handler
   touchOverlay.addEventListener('touchstart', (e) => {
@@ -1213,32 +1099,29 @@ function createMobileControls(player, soundManager) {
     e.preventDefault();
   });
   
-  // Quickdraw invite button handler
-  inviteButton.addEventListener('touchstart', (e) => {
-    // Send quickdraw invite to nearby player
-    if (window.quickDraw && typeof window.quickDraw.sendChallenge === 'function') {
-      window.quickDraw.sendChallenge();
+  // Fire button handler
+  fireButton.addEventListener('touchstart', (e) => {
+    if (player.canAim && !player.isFAiming) {
+      player.isAiming = true;
+      player.isFAiming = true;
+      
+      // Optionally show arms in first-person
+      if (player.arms) {
+        player.arms.setVisible(true);
+      }
+      
+      // Show and prepare crosshair for animation
+      const crosshair = document.getElementById('crosshair');
+      if (crosshair) {
+        // Reset any existing animation classes
+        crosshair.classList.remove('contract', 'expand', 'expanded');
+        crosshair.style.display = 'block';
+      }
+
+      if (soundManager) {
+        soundManager.playSound(player.activeWeapon === 'shotgun' ? "shotgundraw" : "revolverdraw");
+      }
     }
-    e.preventDefault();
-  });
-  
-  // Quickdraw accept button handler
-  acceptButton.addEventListener('touchstart', (e) => {
-    // Accept quickdraw invite
-    if (window.quickDraw && typeof window.quickDraw.acceptChallenge === 'function') {
-      window.quickDraw.acceptChallenge();
-    }
-    hideQuickdrawInvite();
-    e.preventDefault();
-  });
-  
-  // Quickdraw decline button handler
-  declineButton.addEventListener('touchstart', (e) => {
-    // Decline quickdraw invite
-    if (window.quickDraw && typeof window.quickDraw.declineChallenge === 'function') {
-      window.quickDraw.declineChallenge();
-    }
-    hideQuickdrawInvite();
     e.preventDefault();
   });
   
@@ -1258,49 +1141,45 @@ function createMobileControls(player, soundManager) {
     e.preventDefault();
   });
   
-  // Bartender button handler
-  bartenderButton.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    
-    // Trigger the interaction with bartender via the NPC manager
-    if (window.npcManager && window.npcManager.instance) {
-      // Call the interaction handler with null event (indicating mobile trigger)
-      window.npcManager.instance.handleInteraction(null, player);
-      
-      // Hide the button after it's used
-      hideBartenderButton();
-    }
-  });
-  
   // Handle window resize to update the screen width calculation
   window.addEventListener('resize', () => {
     screenWidth = window.innerWidth;
   });
   
-  // Function to show bartender interaction button
-  function showBartenderButton() {
-    bartenderButton.style.display = 'flex';
+  // Ensure audio context is resumed for mobile
+  function ensureAudioContextResumed() {
+    if (soundManager && soundManager.audioContext && 
+        soundManager.audioContext.state !== 'running') {
+      // Resume the audio context on first user interaction
+      soundManager.audioContext.resume().then(() => {
+        console.log('AudioContext resumed successfully');
+        // Play a silent sound to fully activate audio
+        if (soundManager.buffers['revolverdraw']) {
+          const silentSound = soundManager.playSound('revolverdraw', 0, 0.01);
+          if (silentSound && silentSound.gainNode) {
+            silentSound.gainNode.gain.value = 0.01;
+          }
+        }
+      }).catch(err => {
+        console.error('Failed to resume AudioContext:', err);
+      });
+    }
   }
-
-  // Function to hide bartender interaction button
-  function hideBartenderButton() {
-    bartenderButton.style.display = 'none';
-  }
-
+  
   // Return methods to be called from the game loop
   return {
     checkForNearbyPlayers: function(nearbyPlayersExist) {
       // Show/hide the invite button based on whether there are nearby players
-      inviteButton.style.display = nearbyPlayersExist ? 'flex' : 'none';
+      fireButton.style.display = nearbyPlayersExist ? 'flex' : 'none';
     },
-    showQuickdrawInvite: showQuickdrawInvite,
-    hideQuickdrawInvite: hideQuickdrawInvite,
+    showQuickdrawInvite: function() {},
+    hideQuickdrawInvite: function() {},
     // Export constants so they can be adjusted externally if needed
     getConstants: function() {
       return CONSTANTS;
     },
-    showBartenderButton: showBartenderButton,
-    hideBartenderButton: hideBartenderButton
+    showBartenderButton: function() {},
+    hideBartenderButton: function() {}
   };
 }
 
@@ -1420,34 +1299,3 @@ function ensureFullscreen() {
     }
   }
 }
-
-/**
- * Create optimized smoke effect for mobile
- * @param {HTMLElement} drawCircle - The draw circle element
- */
-function createOptimizedSmokeEffect(drawCircle) {
-  if (isMobileDevice()) {
-    // Use mobile-optimized version
-    drawCircle.style.display = 'block';
-    drawCircle.style.width = '150px';
-    drawCircle.style.height = '150px';
-    drawCircle.style.borderWidth = '4px';
-    drawCircle.style.opacity = '0.7';
-    drawCircle.style.boxShadow = '0 0 10px rgba(255, 0, 0, 0.5)';
-    // Remove desktop animation and add mobile-optimized animation
-    drawCircle.classList.remove('draw-circle-animation');
-    drawCircle.classList.add('draw-circle-animation-mobile');
-  } else {
-    // Desktop full version
-    drawCircle.style.display = 'block';
-    drawCircle.style.width = '300px';
-    drawCircle.style.height = '300px';
-    drawCircle.style.borderWidth = '8px';
-    drawCircle.style.opacity = '1';
-    drawCircle.style.boxShadow = '0 0 20px #FF0000';
-    drawCircle.classList.add('draw-circle-animation');
-  }
-}
-
-// Export the smoke effect function so it can be used in game logic
-export { createOptimizedSmokeEffect };

@@ -180,47 +180,6 @@ export class Bullet {
     // Current bullet position
     const endPos = this.mesh.position.clone();
     
-    // Check if crossing Quick Draw arena boundary using the physics system
-    if (window.quickDraw && window.quickDraw.physics) {
-      const physics = window.quickDraw.physics;
-      
-      // Check if bullet is crossing the arena boundary
-      const bulletInArena = window.quickDraw.isPointInArena(endPos);
-      const prevInArena = window.quickDraw.isPointInArena(this.lastPosition);
-      
-      // Calculate if bullet is crossing the boundary
-      const bulletCrossingBoundary = bulletInArena !== prevInArena;
-      
-      // If the bullet is crossing the boundary
-      if (bulletCrossingBoundary) {
-        // Removed boundary crossing restrictions to allow free shooting across boundaries
-        /*
-        const playerInDuel = window.quickDraw.inDuel;
-        const isLocalPlayerBullet = Number(this.sourcePlayerId) === Number(window.localPlayer.id);
-        
-        // Case 1: Player in duel and their bullet trying to exit
-        if (playerInDuel && isLocalPlayerBullet && !bulletInArena) {
-          return { active: false, hit: { type: 'arena', position: endPos } };
-        }
-        
-        // Case 2: Player outside trying to shoot in
-        if (!playerInDuel && isLocalPlayerBullet && bulletInArena) {
-          return { active: false, hit: { type: 'arena', position: endPos } };
-        }
-        
-        // Case 3: Bullet from duel player hitting boundary from inside
-        if (playerInDuel && !isLocalPlayerBullet && !bulletInArena) {
-          return { active: false, hit: { type: 'arena', position: endPos } };
-        }
-        
-        // Case 4: Bullet from outside player hitting boundary from outside
-        if (!playerInDuel && !isLocalPlayerBullet && bulletInArena) {
-          return { active: false, hit: { type: 'arena', position: endPos } };
-        }
-        */
-      }
-    }
-
     // Check for tumbleweed hits if tumbleweedManager exists
     if (window.tumbleweedManager) {
       // Update the raycaster with the bullet's movement path
@@ -291,28 +250,6 @@ export class Bullet {
         // Skip bullet's owner by converting both IDs to numbers
         if (Number(playerId) === Number(this.sourcePlayerId)) continue;
         if (!playerObj || !playerObj.group) continue;
-
-        // Prevent hits across arena boundary or between different game modes
-        // Only allow hits if players are in compatible states:
-        // 1. Both in the same QuickDraw duel
-        // 2. Both in the regular town area (not in any game mode)
-        
-        const sourcePlayerId = Number(this.sourcePlayerId);
-        const targetPlayerId = Number(playerId);
-        
-        // Check if source and target are in QuickDraw duel
-        const bulletPlayerInDuel = window.quickDraw && window.quickDraw.inDuel;
-        const targetPlayerInDuel = window.quickDraw && 
-                                   window.quickDraw.duelOpponentId === targetPlayerId;
-        
-        // Make sure players are in the same game mode to allow hits
-        // Remove restriction to allow free shooting
-        // const bothInDuel = bulletPlayerInDuel && targetPlayerInDuel;
-        // const bothInRegularTown = !bulletPlayerInDuel && !targetPlayerInDuel;
-        
-        // if (!(bothInDuel || bothInRegularTown)) {
-        //   continue; // Skip collision check if players are in different areas/modes
-        // }
         
         // Detect which hit zone was hit (head, body, limbs)
         const hitResult = this.checkPlayerHitZones(playerObj, endPos);
@@ -391,30 +328,6 @@ export class Bullet {
               damage: hitResult.damage, // Send the damage amount to the server
               isShotgunPellet: this.isShotgunPellet // Send information about shotgun pellets
             }, this.bulletId);
-            
-            // Quick Draw duels with better logging
-            if (window.quickDraw && window.quickDraw.inDuel && 
-                window.quickDraw.duelState === 'draw' && 
-                Number(playerId) === Number(window.quickDraw.duelOpponentId) && 
-                Number(this.sourcePlayerId) === Number(window.localPlayer.id)) {
-                
-                // Use logger for important hit information
-                if (window.logger) {
-                  window.logger.info(`Quick Draw hit detected! Player ${this.sourcePlayerId} hit player ${playerId} in the ${hitResult.zone} for ${hitResult.damage} damage`);
-                }
-                
-                // We don't need to send both a playerHit and a quickDrawShoot - just use one
-                // The previous playerHit is enough for the server to handle this hit
-                // Commenting out the additional QuickDraw notification to prevent double-hits
-                /*
-                window.networkManager.sendQuickDrawShoot(
-                  playerId, 
-                  window.quickDraw.activeArenaIndex,
-                  hitResult.zone,
-                  hitResult.damage
-                );
-                */
-            }
           }
           
           return { 
@@ -846,7 +759,7 @@ export class Bullet {
    */
   handleServerImpact(hitType, targetId, position, scene) {
     // Skip creating ground impact effect
-    if (hitType === 'ground' || hitType === 'arena' || hitType === 'boundary') {
+    if (hitType === 'ground' || hitType === 'boundary') {
       return { active: false, hit: { type: hitType, targetId, position } };
     }
     

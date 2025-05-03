@@ -8,12 +8,11 @@ import { Bullet } from './bullet.js';
 import { ThirdPersonModel } from './playerModel.js';
 import { PhysicsSystem } from './physics.js';
 import { createMuzzleFlash, createSmokeEffect, createImpactEffect, preloadMuzzleFlash, preloadSmokeEffect, SmokeRingEffect, DrunkennessEffect } from './effects.js';
-import { QuickDraw } from './quickDraw.js';
 import { updateAmmoUI, updateHealthUI } from './ui.js';
 import { Viewmodel } from './viewmodel.js';
 import { initPlayerIdentity, verifyIdentityWithServer } from './playerIdentity.js';
 import logger from './logger.js';
-import { FlyingEagle } from './flyingEagle.js';
+// Removed FlyingEagle import
 import { initChat, handleChatMessage, addSystemMessage } from './chat.js';
 import { initNpcManager, npcManager } from './npcManager.js';
 console.log("NPC Manager module loaded");
@@ -42,7 +41,6 @@ let playersMap = new Map();     // Master map including local + remote
 // Scenes, camera, etc.
 let renderer, camera;
 let multiplayerManager;
-let quickDraw;
 let physics;
 let lastTime = 0;
 
@@ -110,8 +108,6 @@ async function init() {
     soundManager.loadSound("revolverdraw", "sounds/revolverdraw.mp3");
     // replacing shellejection with the combined reloading sound
     soundManager.loadSound("reloading", "sounds/reloading.mp3");
-    // Load the bell start sound for Quick Draw start signal
-    soundManager.loadSound("bellstart", "sounds/bellstart.mp3");
     // Load impact sounds
     soundManager.loadSound("woodimpact", "sounds/woodimpact.mp3");
     soundManager.loadSound("fleshimpact", "sounds/fleshimpact.mp3");
@@ -133,7 +129,6 @@ async function init() {
     soundManager.loadSound("dramatic", "sounds/dramatic.mp3");
     soundManager.loadSound("eaglescream", "sounds/eaglescream.mp3");
     soundManager.loadSound("eagledeath", "sounds/eagledeath.mp3");
-    soundManager.loadSound("quickdrawending", "sounds/quickdrawending.mp3");
     soundManager.loadSound("playerfall", "sounds/playerfall.mp3");
     soundManager.loadSound("ambience", "sounds/ambience.mp3");
     
@@ -243,17 +238,6 @@ async function init() {
     // Make multiplayerManager globally accessible
     window.multiplayerManager = multiplayerManager;
 
-    // Create flying eagle that follows the camera
-    window.flyingEagle = new FlyingEagle({
-      scene: scene,
-      camera: camera
-    });
-    
-    // Set the default town center for the eagle to fly around
-    const townCenter = new THREE.Vector3(0, 0, 0); // Center of the town
-    window.flyingEagle.townCenter = townCenter;
-    window.flyingEagle.setDefaultFlightPath();
-
     // Initialize the local player
     localPlayer = new Player({
       scene: scene,
@@ -278,51 +262,10 @@ async function init() {
     // Make scene globally accessible for physics visualization
     window.scene = scene;
 
-    // Function to check for nearby players for quickdraw on mobile
-    window.checkNearestPlayerForQuickdraw = function(player) {
-      if (!remotePlayers || !player) return null;
-      
-      const minDistance = 5; // Distance threshold to show invite button
-      let nearestPlayer = null;
-      let nearestDistance = Infinity;
-      
-      // Check all remote players
-      for (const [id, remotePlayer] of remotePlayers.entries()) {
-        // Skip if no position
-        if (!remotePlayer || !remotePlayer.group || !remotePlayer.group.position) continue;
-        
-        // Calculate distance to remote player
-        const distance = player.group.position.distanceTo(remotePlayer.group.position);
-        
-        // Update nearest player if closer
-        if (distance < minDistance && distance < nearestDistance) {
-          nearestPlayer = remotePlayer;
-          nearestDistance = distance;
-        }
-      }
-      
-      return nearestPlayer;
-    };
-
-    // Initialize Quick Draw game mode after the local player is created
-    quickDraw = new QuickDraw(scene, localPlayer, networkManager, soundManager);
-    
     // Initialize drunkenness effect - pass both player and camera arguments
     const drunkennessEffect = new DrunkennessEffect(localPlayer, camera);
     console.log('Drunkenness effect initialized');
     
-    // Initialize the QuickDraw game mode
-    quickDraw.init();
-    
-    // Make quickDraw globally accessible for debugging
-    window.quickDraw = quickDraw;
-    
-    // Share the main physics system with game modes
-    quickDraw.physics = physics;
-    
-    // Make updateHealthUI globally accessible for the Quick Draw mode to use
-    window.updateHealthUI = updateHealthUI;
-
     // Show connection status
     const networkStatus = document.createElement('div');
     networkStatus.id = 'network-status';
@@ -415,12 +358,6 @@ async function init() {
     // Handle local player death
     networkManager.onDeath = (killerId) => {
       console.log(`You were killed by player ${killerId}`);
-      
-      // Skip death message if in QuickDraw duel (defeat message is shown instead)
-      if (window.quickDraw && window.quickDraw.inDuel) {
-        console.log('In QuickDraw duel, skipping automatic death message');
-        return;
-      }
       
       // Show death message
       const deathMessage = document.createElement('div');
@@ -520,12 +457,6 @@ async function init() {
     networkManager.onKill = (targetId) => {
       console.log(`You killed player ${targetId}`);
       
-      // Skip kill message if in QuickDraw duel (victory message is shown instead)
-      if (window.quickDraw && window.quickDraw.inDuel) {
-        console.log('In QuickDraw duel, skipping kill message');
-        return;
-      }
-      
       // Show kill message
       const killMessage = document.createElement('div');
       killMessage.innerText = 'KILL!';
@@ -617,7 +548,7 @@ async function init() {
       }
       
       // Reload weapon with the R key
-      if (event.code === 'KeyR' && !quickDraw.inDuel) {
+      if (event.code === 'KeyR') {
         localPlayer.startReload();
       }
       
@@ -822,26 +753,6 @@ function animate(time) {
   // Update remote players (animations, movement interpolation, etc.)
   multiplayerManager.update(deltaTime);
   
-  // Update Quick Draw game mode
-  if (quickDraw) {
-    quickDraw.update(deltaTime);
-    
-    // Camera safety check for QuickDraw
-    if (quickDraw.duelState === 'draw') {
-      // In draw phase, ALWAYS use the player's camera directly
-      if (localPlayer && localPlayer.camera) {
-        // For render call below - temporarily save which camera to use
-        window._renderWithCamera = localPlayer.camera;
-        
-        // Also update renderer references to be extra safe
-        window.renderer.camera = localPlayer.camera;
-        if (window.renderer.instance) {
-          window.renderer.instance.camera = localPlayer.camera;
-        }
-      }
-    }
-  }
-
   // Update smoke ring effects
   for (let i = smokeRings.length - 1; i >= 0; i--) {
     // If the smoke ring is inactive after update, we can remove it
@@ -882,32 +793,16 @@ function animate(time) {
   // Update FPS display
   updateFPS(renderer, camera, deltaTime);
 
-  // Update flying eagle if it exists
-  if (window.flyingEagle) {
-    window.flyingEagle.update(deltaTime);
-  }
-
   // Update NPCs through npc manager
   if (window.npcManager) {
     // NPC manager handles its own internal updates
   }
 
-  // CAMERA SELECTION LOGIC:
-  // 1. First priority: Use special flag camera if set in QuickDraw draw phase
-  // 2. Second priority: Use window.renderer.camera
-  // 3. Fallback: Use default camera
+  // Use the window.renderer camera
   let renderCamera;
-  
-  if (window._renderWithCamera) {
-    // Use the camera explicitly set by QuickDraw draw phase
-    renderCamera = window._renderWithCamera;
-    // Clear the flag after use
-    window._renderWithCamera = null;
-  } else if (window.renderer && window.renderer.camera) {
-    // Use the window.renderer camera
+  if (window.renderer && window.renderer.camera) {
     renderCamera = window.renderer.camera;
   } else {
-    // Use default camera as last resort
     renderCamera = camera;
   }
   
@@ -954,11 +849,6 @@ function handleLocalPlayerShoot(bulletStart, shootDir) {
     }
   });
   
-  // Add this section to check for Quick Draw hit
-  if (quickDraw && quickDraw.inDuel && quickDraw.duelState === 'draw' && quickDraw.duelOpponentId) {
-    // We'll handle this in the bullet collision code instead
-  }
-
   // Create smoke ring effect - only if not mobile
   if (!window.isMobile) {
     const availableSmokeRing = smokeRings.find(ring => !ring.active);
@@ -1370,10 +1260,6 @@ function updateDebugVisualization() {
 
 // Handle window unload to cleanup game mode resources
 window.addEventListener('beforeunload', () => {
-  if (quickDraw) {
-    quickDraw.cleanup();
-  }
-  
   if (physics) {
     physics.cleanup();
   }
@@ -1423,17 +1309,6 @@ function initImprovedHitboxSystem() {
     // Local player might have a model reference
     if (playerObj.model && typeof playerObj.model.checkBulletHit === 'function') {
       return playerObj.model.checkBulletHit(bulletPos);
-    }
-    
-    // Special case for QuickDraw mode
-    if (window.quickDraw && window.quickDraw.inDuel) {
-      const opponentId = window.quickDraw.duelOpponentId;
-      if (opponentId && window.playersMap) {
-        const opponentModel = window.playersMap.get(opponentId.toString());
-        if (opponentModel && typeof opponentModel.checkBulletHit === 'function') {
-          return opponentModel.checkBulletHit(bulletPos);
-        }
-      }
     }
     
     // Last resort: fall back to original implementation

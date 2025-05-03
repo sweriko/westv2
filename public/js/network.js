@@ -230,7 +230,6 @@ export class NetworkManager {
           isAiming: false,
           isShooting: false,
           isReloading: false,
-          quickDrawLobbyIndex: message.quickDrawLobbyIndex || -1,
           isBot: message.isBot || false, // Legacy bot flag
           isNpc: message.isNpc || false, // New NPC flag
           username: message.username || `Player_${message.id}`,
@@ -266,8 +265,6 @@ export class NetworkManager {
               message.isShooting !== undefined ? message.isShooting : existing.isShooting;
             existing.isReloading =
               message.isReloading !== undefined ? message.isReloading : existing.isReloading;
-            existing.quickDrawLobbyIndex =
-              message.quickDrawLobbyIndex !== undefined ? message.quickDrawLobbyIndex : existing.quickDrawLobbyIndex;
             existing.health =
               message.health !== undefined ? message.health : existing.health;
             existing.isDying =
@@ -293,7 +290,6 @@ export class NetworkManager {
                 isAiming: message.isAiming || false,
                 isShooting: message.isShooting || false,
                 isReloading: message.isReloading || false, 
-                quickDrawLobbyIndex: message.quickDrawLobbyIndex || -1,
                 health: message.health || 100,
                 isDying: message.isDying || false,
                 isBot: message.isBot || false,
@@ -335,39 +331,29 @@ export class NetworkManager {
       case 'hit':
         console.log(`I was hit by player ${message.sourceId} in the ${message.hitZone || 'body'} for ${message.hitData?.damage || 20} damage`);
         
-        // Check if this is a QuickDraw duel hit - if so, let QuickDraw system handle it
-        const isQuickDrawDuel = window.quickDraw && window.quickDraw.inDuel && 
-                               window.quickDraw.duelOpponentId === Number(message.sourceId);
+        // Add damage to hitData if it's missing (for NPC hits)
+        let damage = 40; // Default body shot damage
+        if (message.hitZone === 'head') {
+          damage = 100;
+        } else if (message.hitZone === 'limbs') {
+          damage = 20;
+        }
         
-        if (!isQuickDrawDuel && this.onPlayerHit) {
-          // Only handle non-QuickDraw hits here
-          
-          // Add damage to hitData if it's missing (for NPC hits)
-          let damage = 40; // Default body shot damage
-          if (message.hitZone === 'head') {
-            damage = 100;
-          } else if (message.hitZone === 'limbs') {
-            damage = 20;
-          }
-          
-          // If hitData is missing (from NPC), create it
-          if (!message.hitData) {
-            message.hitData = {
-              damage: damage,
-              hitZone: message.hitZone || 'body'
-            };
-          }
-          
-          // Ensure damage property exists in hitData
-          if (message.hitData && !message.hitData.damage) {
-            message.hitData.damage = damage;
-          }
-          
+        // If hitData is missing (from NPC), create it
+        if (!message.hitData) {
+          message.hitData = {
+            damage: damage,
+            hitZone: message.hitZone || 'body'
+          };
+        }
+        
+        // Ensure damage property exists in hitData
+        if (message.hitData && !message.hitData.damage) {
+          message.hitData.damage = damage;
+        }
+        
+        if (this.onPlayerHit) {
           this.onPlayerHit(message.sourceId, message.hitData, message.health, message.hitZone);
-        } else if (isQuickDrawDuel) {
-          console.log(`[Network] Deferring hit handling to QuickDraw system`);
-          // Mark the message so QuickDraw knows this came from network.js
-          message._from_network = true;
         }
         break;
 
@@ -489,7 +475,7 @@ export class NetworkManager {
 
   /**
    * Sends local player position/rotation etc. to the server.
-   * @param {Object} playerData - { position, rotation, isAiming, isReloading, isSprinting, isShooting, quickDrawLobbyIndex }
+   * @param {Object} playerData - { position, rotation, isAiming, isReloading, isSprinting, isShooting }
    */
   sendUpdate(playerData) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
@@ -566,87 +552,6 @@ export class NetworkManager {
           sequenceNumber: this.sequenceNumber
         })
       );
-    }
-  }
-  
-  /**
-   * Sends a request to join a specific Quick Draw arena queue.
-   * @param {number} arenaIndex - The arena index (0-4)
-   */
-  sendQuickDrawJoin(arenaIndex) {
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      // Anti-cheat: Add sequence number for message ordering
-      this.sequenceNumber++;
-      
-      this.socket.send(
-        JSON.stringify({
-          type: 'quickDrawJoin',
-          sequenceNumber: this.sequenceNumber,
-          arenaIndex: arenaIndex
-        })
-      );
-    }
-  }
-  
-  /**
-   * Sends a request to leave the Quick Draw queue.
-   */
-  sendQuickDrawLeave() {
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      // Anti-cheat: Add sequence number for message ordering
-      this.sequenceNumber++;
-      
-      this.socket.send(
-        JSON.stringify({
-          type: 'quickDrawLeave',
-          sequenceNumber: this.sequenceNumber
-        })
-      );
-    }
-  }
-  
-  /**
-   * Notifies the server that the player is ready for a Quick Draw duel.
-   * @param {number} arenaIndex - The arena index for the duel
-   */
-  sendQuickDrawReady(arenaIndex) {
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      // Anti-cheat: Add sequence number for message ordering
-      this.sequenceNumber++;
-      
-      this.socket.send(
-        JSON.stringify({
-          type: 'quickDrawReady',
-          sequenceNumber: this.sequenceNumber,
-          arenaIndex: arenaIndex
-        })
-      );
-    }
-  }
-  
-  /**
-   * Notifies the server that the player has shot their opponent in a Quick Draw duel.
-   * @param {number|string} opponentId - The opponent's player ID
-   * @param {number} arenaIndex - The arena index for the duel
-   * @param {string} hitZone - The hit zone ('head', 'body', 'limbs')
-   * @param {number} damage - The damage amount
-   */
-  sendQuickDrawShoot(opponentId, arenaIndex, hitZone = 'body', damage = 40) {
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      // Anti-cheat: Add sequence number and nonce for replay protection
-      this.sequenceNumber++;
-      const nonce = this._generateNonce();
-      
-      console.log(`Sending Quick Draw hit notification to server: player ${this.playerId} hit player ${opponentId} in the ${hitZone} for ${damage} damage`);
-      this.socket.send(JSON.stringify({
-        type: 'quickDrawShoot',
-        sequenceNumber: this.sequenceNumber,
-        nonce: nonce,
-        opponentId: opponentId,
-        arenaIndex: arenaIndex,
-        hitZone: hitZone,
-        damage: damage
-      }));
     }
   }
 

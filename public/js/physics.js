@@ -1,6 +1,5 @@
 /**
  * Physics system using cannon.js for collision detection and physics simulation.
- * Focused on creating invisible boundaries for the QuickDraw arenas.
  */
 export class PhysicsSystem {
   constructor() {
@@ -27,9 +26,6 @@ export class PhysicsSystem {
     // Debug helper for visualizing physics bodies
     this.debugMeshes = [];
     this.debugMode = false;
-    
-    // Track arena boundaries separately
-    this.arenaBoundaryBodies = [];
     
     // Initialize ground
     this.initGround();
@@ -84,126 +80,6 @@ export class PhysicsSystem {
   }
   
   /**
-   * Creates an invisible cylindrical boundary for a QuickDraw arena
-   * @param {THREE.Vector3} center - Center position of the arena
-   * @param {number} radius - Radius of the cylindrical arena
-   * @param {number} height - Height of the cylindrical arena
-   * @param {number} arenaIndex - Index of the arena (0-4)
-   * @returns {CANNON.Body} - The created physics body
-   */
-  createQuickDrawArenaBoundary(center, radius, height, arenaIndex = 0) {
-    // First remove any existing arena boundary for this index
-    this.removeQuickDrawArenaBoundaryByIndex(arenaIndex);
-    
-    // Create a physics body for the arena boundary
-    const arenaBody = new CANNON.Body({
-      mass: 0, // Static body
-      material: this.defaultMaterial
-    });
-    
-    // Position at the center
-    arenaBody.position.set(center.x, center.y + height/2, center.z);
-    
-    // Use a hollow cylinder (cylinder + inverted cylinder)
-    // We make the walls a bit thick (0.5 units) to ensure reliable collision detection
-    const wallThickness = 0.5;
-    
-    // Outer cylinder (pushing inward)
-    const outerRadius = radius + wallThickness;
-    const segments = 16; // Number of sides for the cylinder approximation
-    
-    // Create segments around the circle to approximate the cylinder
-    for (let i = 0; i < segments; i++) {
-      const angle1 = (i / segments) * Math.PI * 2;
-      const angle2 = ((i + 1) / segments) * Math.PI * 2;
-      
-      const x1 = Math.cos(angle1) * radius;
-      const z1 = Math.sin(angle1) * radius;
-      const x2 = Math.cos(angle2) * radius;
-      const z2 = Math.sin(angle2) * radius;
-      
-      // Calculate the position and orientation of this wall segment
-      const segCenter = {
-        x: (x1 + x2) / 2,
-        z: (z1 + z2) / 2
-      };
-      
-      const length = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(z2 - z1, 2));
-      
-      // Create a box shape for this wall segment
-      const halfExtents = new CANNON.Vec3(length/2, height/2, wallThickness/2);
-      const wallShape = new CANNON.Box(halfExtents);
-      
-      // Get the angle to rotate this wall segment
-      const rotationY = Math.atan2(z2 - z1, x2 - x1) + Math.PI/2;
-      
-      // Add the shape to the body with the appropriate offset and rotation
-      const offset = new CANNON.Vec3(segCenter.x, 0, segCenter.z);
-      const quaternion = new CANNON.Quaternion();
-      quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), rotationY);
-      
-      arenaBody.addShape(wallShape, offset, quaternion);
-    }
-    
-    // Bottom circle to prevent falling through
-    const bottomShape = new CANNON.Cylinder(radius, radius, wallThickness, segments);
-    const bottomOffset = new CANNON.Vec3(0, -height/2, 0);
-    const bottomQuaternion = new CANNON.Quaternion();
-    bottomQuaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI / 2);
-    arenaBody.addShape(bottomShape, bottomOffset, bottomQuaternion);
-    
-    arenaBody.arenaBoundary = true; // Tag this body as an arena boundary
-    arenaBody.arenaIndex = arenaIndex; // Store which arena this belongs to
-    arenaBody.collisionFilterGroup = 2; // Group 2 for arena boundaries
-    
-    // Add the arena body to the world
-    this.world.addBody(arenaBody);
-    this.bodies.push(arenaBody);
-    
-    // Store in our array of arena boundaries
-    this.arenaBoundaryBodies[arenaIndex] = arenaBody;
-    
-    // If debug mode is enabled, create a visual representation
-    if (this.debugMode) {
-      this.createDebugMesh(arenaBody);
-    }
-    
-    console.log(`Created QuickDraw arena boundary ${arenaIndex + 1} at`, center, "with radius", radius, "and height", height);
-    
-    return arenaBody;
-  }
-  
-  /**
-   * Removes a QuickDraw arena boundary for a specific arena index
-   * @param {number} arenaIndex - The index of the arena (0-4)
-   */
-  removeQuickDrawArenaBoundaryByIndex(arenaIndex) {
-    if (this.arenaBoundaryBodies[arenaIndex]) {
-      this.world.removeBody(this.arenaBoundaryBodies[arenaIndex]);
-      
-      // Remove from our bodies array
-      const index = this.bodies.indexOf(this.arenaBoundaryBodies[arenaIndex]);
-      if (index !== -1) {
-        this.bodies.splice(index, 1);
-      }
-      
-      // Clear the reference in our arena boundaries array
-      this.arenaBoundaryBodies[arenaIndex] = null;
-      console.log(`Removed QuickDraw arena boundary ${arenaIndex + 1}`);
-    }
-  }
-  
-  /**
-   * Removes the QuickDraw arena boundary (legacy method for backward compatibility)
-   */
-  removeQuickDrawArenaBoundary() {
-    // Remove all arena boundaries
-    for (let i = 0; i < this.arenaBoundaryBodies.length; i++) {
-      this.removeQuickDrawArenaBoundaryByIndex(i);
-    }
-  }
-  
-  /**
    * Create a physics body for a player
    * @param {THREE.Vector3} position - Initial position
    * @param {number} radius - Player collision radius
@@ -237,47 +113,6 @@ export class PhysicsSystem {
     return playerBody;
   }
   
-  /**
-   * Checks if a point is inside any active arena boundary
-   * @param {THREE.Vector3} point - The point to check
-   * @returns {boolean} - True if inside, false if outside
-   */
-  isPointInArenaBoundary(point) {
-    // Check all arena boundaries
-    for (let i = 0; i < this.arenaBoundaryBodies.length; i++) {
-      if (this.isPointInSpecificArenaBoundary(point, i)) {
-        return true;
-      }
-    }
-    return false;
-  }
-  
-  /**
-   * Checks if a point is inside a specific arena boundary
-   * @param {THREE.Vector3} point - The point to check
-   * @param {number} arenaIndex - The arena index to check
-   * @returns {boolean} - True if inside, false if outside
-   */
-  isPointInSpecificArenaBoundary(point, arenaIndex) {
-    // If no arena boundary exists for this index, return false
-    if (!this.arenaBoundaryBodies[arenaIndex]) return false;
-    
-    // Get arena position
-    const arenaPos = this.arenaBoundaryBodies[arenaIndex].position;
-    const pointVec = new CANNON.Vec3(point.x, point.y, point.z);
-    
-    // Calculate horizontal distance (ignoring Y) from arena center
-    const dx = pointVec.x - arenaPos.x;
-    const dz = pointVec.z - arenaPos.z;
-    const horizontalDist = Math.sqrt(dx * dx + dz * dz);
-    
-    // Get the radius - assuming 15 is the standard radius for all arenas
-    const radius = 15;
-    
-    // Check if point is inside the cylinder horizontally
-    return horizontalDist < radius;
-  }
-
   /**
    * Creates a debug mesh to visualize a physics body
    * @param {CANNON.Body} body - The physics body to visualize
@@ -571,6 +406,5 @@ export class PhysicsSystem {
     
     this.bodies = [];
     this.debugMeshes = [];
-    this.arenaBoundaryBodies = [];
   }
 }
