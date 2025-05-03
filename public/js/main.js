@@ -327,9 +327,11 @@ async function init() {
     // Anti-cheat: Listen for server-initiated respawn
     networkManager.onRespawn = (position, health, bullets) => {
       if (localPlayer) {
-        // Set position
-        localPlayer.group.position.copy(position);
-        localPlayer.previousPosition.copy(position);
+        // Set position directly without ground offset adjustment
+        if (position) {
+          localPlayer.group.position.copy(position);
+          localPlayer.previousPosition.copy(position);
+        }
         
         // Update health and bullets
         localPlayer.health = health || 100;
@@ -339,6 +341,10 @@ async function init() {
         localPlayer.isReloading = false;
         localPlayer.isAiming = false;
         localPlayer.velocity.y = 0;
+        
+        // Reset movement flags - critical for allowing movement after respawn
+        localPlayer.canMove = true;
+        localPlayer.forceLockMovement = false;
         localPlayer.canAim = true;
         
         // Update UI
@@ -760,6 +766,28 @@ function animate(time) {
         // Set the last hit zone for server validation
         if (bullet.bulletId !== null && result.hit.zone) {
           bullet.setLastHitZone(result.hit.zone);
+        }
+        
+        // CRITICAL: Notify server about the player hit
+        if (bullet.sourcePlayerId === localPlayer.id) {
+          // Only send hit events for bullets fired by the local player
+          networkManager.sendPlayerHit(
+            result.hit.playerId, // The ID of the player who was hit
+            {
+              position: {
+                x: result.hit.position.x,
+                y: result.hit.position.y,
+                z: result.hit.position.z
+              },
+              zone: result.hit.zone || 'body',
+              damage: result.hit.damage || 40
+            },
+            bullet.bulletId // Pass the bullet ID for server validation
+          );
+          
+          if (window.logger) {
+            window.logger.info(`Sent hit event to server: player ${result.hit.playerId} hit in ${result.hit.zone} by bullet ${bullet.bulletId}`);
+          }
         }
       }
       scene.remove(bullet.mesh);

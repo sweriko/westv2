@@ -97,7 +97,7 @@ export class MultiplayerManager {
 
     networkManager.onPlayerJoined = (playerData) => {
       if (playerData && playerData.id !== this.localPlayerId) {
-        console.log(`Player joined: ${playerData.id}${playerData.isNpc ? ' (NPC)' : (playerData.isBot ? ' (BOT)' : '')}`);
+        console.log(`Player joined: ${playerData.id}`);
         this.addPlayer(playerData.id, playerData);
         this.notifyPlayersUpdated();
       }
@@ -161,33 +161,6 @@ export class MultiplayerManager {
       
       // Normal update
       if (playerModel) {
-        // For NPCs/Bots, cache the latest network data to use in the animation update
-        if (updatedData && (playerModel.isBot || playerModel.isNpc || (updatedData.isNpc || updatedData.isBot))) {
-          // Cache the network data for use in the animation update
-          playerModel._cachedNetworkData = {
-            ...updatedData,
-            isNpc: updatedData.isNpc || playerModel.isNpc,
-            isBot: updatedData.isBot || playerModel.isBot
-          };
-          
-          // Ensure isNpc/isBot flags are set on the model
-          playerModel.isNpc = playerModel._cachedNetworkData.isNpc;
-          playerModel.isBot = playerModel._cachedNetworkData.isBot;
-          
-          // If the NPC is walking, direct to walking animation immediately
-          if (updatedData.isWalking && !playerModel.isWalking) {
-            playerModel.isWalking = true;
-            if (playerModel.directToWalking) {
-              playerModel.directToWalking(false);
-            }
-          } else if (!updatedData.isWalking && playerModel.isWalking) {
-            playerModel.isWalking = false;
-            if (playerModel.directToIdle) {
-              playerModel.directToIdle();
-            }
-          }
-        }
-        
         playerModel.update(updatedData);
       } else if (updatedData) {
         // If we don't have this model yet, create it
@@ -250,8 +223,20 @@ export class MultiplayerManager {
     };
 
     // Anti-cheat: Broadcast that some player was hit (server validated)
-    networkManager.onPlayerHitBroadcast = (targetId, sourceId, hitPos, newHealth, hitZone) => {
-      console.log(`Player ${targetId} was hit by ${sourceId} in the ${hitZone || 'body'}`);
+    networkManager.onPlayerHitBroadcast = (hitData) => {
+      // Make sure we have valid data
+      if (!hitData || !hitData.targetId) {
+        console.warn("Invalid hit broadcast data received");
+        return;
+      }
+      
+      const targetId = hitData.targetId;
+      const sourceId = hitData.sourceId;
+      const hitPos = hitData.position;
+      const newHealth = hitData.health;
+      const hitZone = hitData.zone || 'body';
+      
+      console.log(`Player ${targetId} was hit by ${sourceId} in the ${hitZone}`);
       
       // Convert targetId to integer if it's a string
       const playerId = typeof targetId === 'string' ? parseInt(targetId, 10) : targetId;
@@ -422,27 +407,8 @@ export class MultiplayerManager {
     
     console.log(`Adding remote player ${playerId} to scene`);
     
-    let playerModel;
-    
-    // Check if this is an NPC or bot
-    const isNpc = initialData.isNpc || false;
-    const isBot = initialData.isBot || false;
-    
-    // Use specialized NPC models for NPCs
-    if (isNpc && window.npcManager && window.npcManager.instance) {
-      // Let the NPC manager handle creating the appropriate model
-      playerModel = window.npcManager.instance.createOrUpdateNpc(playerId, initialData);
-    } else {
-      // Create standard player model for regular players and bots
-      playerModel = new ThirdPersonModel(this.scene, playerId);
-    }
-    
-    // Set bot/NPC flag if this is not a human player
-    playerModel.isBot = isBot;
-    playerModel.isNpc = isNpc;
-    
-    // Track if this is an AI-controlled character
-    const isAiControlled = playerModel.isBot || playerModel.isNpc;
+    // Create standard player model
+    const playerModel = new ThirdPersonModel(this.scene, playerId);
     
     // Add to tracking map - used by main.js for bullet hit detection
     this.remotePlayers.set(playerId, playerModel);
@@ -463,8 +429,8 @@ export class MultiplayerManager {
       playerModel.group.rotation.y = initialData.rotation.y;
     }
     
-    // Apply skin information if provided and not an NPC/bot
-    if (!isNpc && !isBot && initialData.skins) {
+    // Apply skin information if provided
+    if (initialData.skins) {
       console.log(`Applying initial skin data for player ${playerId}:`, initialData.skins);
       
       // Update skin permissions
@@ -499,26 +465,8 @@ export class MultiplayerManager {
       }
     }
     
-    // For NPCs/Bots, ensure model is prepared correctly and animation is initialized
-    if (isAiControlled) {
-      // Store the network data for future updates
-      playerModel._cachedNetworkData = { ...initialData };
-      
-      // Ensure animations load and initialize correctly
-      setTimeout(() => {
-        // Set initial animation state based on data
-        if (initialData.isWalking && playerModel.directToWalking) {
-          playerModel.isWalking = true;
-          playerModel.directToWalking(false);
-        } else if (playerModel.directToIdle) {
-          playerModel.isWalking = false;
-          playerModel.directToIdle();
-        }
-      }, 500); // Delay slightly to ensure model is loaded
-    }
-    
     // Create username label
-    this.createPlayerLabel(playerId, initialData.username || `Player_${playerId}`, isAiControlled);
+    this.createPlayerLabel(playerId, initialData.username || `Player_${playerId}`, false);
     
     return playerModel;
   }
@@ -550,15 +498,9 @@ export class MultiplayerManager {
     div.style.userSelect = 'none';
     div.style.zIndex = '10';
     
-    // Add special styling for AI-controlled characters
-    if (isAiControlled) {
-      div.classList.add('ai-controlled');
-      div.style.backgroundColor = 'rgba(50, 150, 255, 0.5)'; // Blue background for NPCs
-      div.textContent = username; // Remove robot emoji, just use the name
-    } else {
-      div.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'; // Regular background for players
-      div.textContent = username;
-    }
+    // Regular styling for players
+    div.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'; // Regular background for players
+    div.textContent = username;
     
     // Add to DOM
     this.labelContainer.appendChild(div);
@@ -618,32 +560,12 @@ export class MultiplayerManager {
         
         // Also call the general update method if it exists
         if (playerModel.update) {
-          // For NPCs/Bots, make sure we're passing the animation state correctly
-          if (playerModel.isBot || playerModel.isNpc) {
-            // Check for cached data that was received in onPlayerUpdate
-            const cachedData = playerModel._cachedNetworkData;
-            if (cachedData) {
-              // Clone the data to avoid permanent modifications to cached data
-              const clonedData = { ...cachedData };
-              
-              // Only include skin data on initial update or when it has actually changed
-              if (!playerModel._initialSkinApplied) {
-                playerModel._initialSkinApplied = true;
-              } else {
-                // Remove skin data from subsequent updates to prevent constant reapplication
-                delete clonedData.skins;
-              }
-              
-              playerModel.update(clonedData);
-            }
+          // DON'T pass deltaTime to update when the player is in a frozen aim pose
+          // This prevents animation mixer from resetting the animation each frame
+          if (playerModel.isAiming && !playerModel.isShooting && !playerModel.isJumping) {
+            // Skip sending deltaTime update which would reset the animation
           } else {
-            // DON'T pass deltaTime to update when the player is in a frozen aim pose
-            // This prevents animation mixer from resetting the animation each frame
-            if (playerModel.isAiming && !playerModel.isShooting && !playerModel.isJumping) {
-              // Skip sending deltaTime update which would reset the animation
-            } else {
-              playerModel.update(deltaTime);
-            }
+            playerModel.update(deltaTime);
           }
         }
       }

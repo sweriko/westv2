@@ -56,19 +56,6 @@ export function initInput(renderer, player, soundManager) {
     // Skip game input if chat is active
     if (isChatInputActive()) return;
     
-    // Check for NPC interaction first
-    if (event.code === 'KeyE') {
-      // Try to handle NPC interaction first - highest priority
-      if (window.npcManager && window.npcManager.instance) {
-        // Check if there's a bartender or other NPC nearby
-        if (window.npcManager.instance.isBartenderNearby || window.npcManager.instance.nearbyNpc) {
-          // Handle the interaction with the NPC
-          window.npcManager.instance.handleInteraction(event, player);
-          return;
-        }
-      }
-    }
-    
     // Weapon switching with number keys
     if (event.code === 'Digit1') {
       player.switchWeapon('revolver');

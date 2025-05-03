@@ -157,10 +157,10 @@ export class Bullet {
   }
 
   /**
-   * Updates the bullet's movement & handles collisions with NPC or players.
+   * Updates the bullet's movement & handles collisions with players.
    * Uses client-side prediction with server authority.
    * @param {number} deltaTime
-   * @param {THREE.Group} npc
+   * @param {THREE.Object3D|null} npc - NPC object (null after cleanup)
    * @param {THREE.Scene} scene
    * @param {Map<number, object>} allPlayers - Map of local + remote players.
    * @returns {Object} - Result of the update containing active state and hit info.
@@ -234,128 +234,167 @@ export class Bullet {
     // Anti-cheat: For local bullets, collision detection is only client-side prediction
     // For remote bullets, we rely on client-side collision for visual effects
     
-    // 1) Check collision with NPC
-    if (npc) {
-      const npcBox = new THREE.Box3().setFromObject(npc);
-      npcBox.expandByScalar(0.2);
-      if (npcBox.containsPoint(endPos)) {
-        createImpactEffect(endPos, this.direction, scene, 'npc');
-        return { active: false, hit: { type: 'npc', target: npc } };
-      }
-    }
-
-    // 2) Check collision with players
+    // Check collision with players
     if (allPlayers) {
-      for (const [playerId, playerObj] of allPlayers.entries()) {
+      // First create an array of [playerId, playerObj] pairs to iterate through
+      const playerEntries = [];
+      
+      // Check if allPlayers is a Map
+      if (allPlayers instanceof Map) {
+        // Use Map entries directly
+        playerEntries.push(...allPlayers.entries());
+      } 
+      // Check if it has a working entries function
+      else if (typeof allPlayers.entries === 'function') {
+        try {
+          playerEntries.push(...allPlayers.entries());
+        } catch (e) {
+          // If entries() fails, fall back to Object.entries
+          playerEntries.push(...Object.entries(allPlayers));
+        }
+      } 
+      // Fallback to treating as a regular object
+      else {
+        playerEntries.push(...Object.entries(allPlayers));
+      }
+      
+      // Now process all players
+      for (const [playerId, playerObj] of playerEntries) {
         // Skip bullet's owner by converting both IDs to numbers
-        if (Number(playerId) === Number(this.sourcePlayerId)) continue;
-        if (!playerObj || !playerObj.group) continue;
+        if (this.sourcePlayerId !== null && Number(playerId) === Number(this.sourcePlayerId)) {
+          continue;
+        }
         
-        // Detect which hit zone was hit (head, body, limbs)
-        const hitResult = this.checkPlayerHitZones(playerObj, endPos);
+        // Check if player has a valid model
+        if (!playerObj || !playerObj.group) {
+          continue;
+        }
         
-        if (hitResult.hit) {
-          // Check that this isn't a hit on the local player's own model
-          const isHitOnLocalPlayer = window.localPlayer && 
-                                   Number(window.localPlayer.id) === Number(playerId);
+        // Check bullet-player collision using precise hit zones
+        const hitZoneResult = this.checkPlayerHitZones(playerObj, endPos);
+        
+        if (hitZoneResult.hit) {
+          // First, create impact effect to give visual feedback
+          createImpactEffect(endPos, this.direction, scene, 'player');
           
-          if (!isHitOnLocalPlayer) {
-            // Create the impact effect
-            createImpactEffect(endPos, this.direction, scene, 'player');
-            
-            // Only play sounds and show hitmarker if this is the local player's bullet
-            if (this.isLocalBullet && window.localPlayer && window.localPlayer.soundManager) {
-              // Show hitmarker image for 100ms
-              this.showHitMarker(endPos);
-              
-              // Play sound with 300ms delay
-              if (hitResult.zone === 'head') {
-                // For headshots, only play headshotmarker (not both sounds)
-                setTimeout(() => {
-                  window.localPlayer.soundManager.playSound("headshotmarker", 100);
-                }, 300);
-              } else {
-                // For body/limb hits, play regular hitmarker sound
-                setTimeout(() => {
-                  window.localPlayer.soundManager.playSound("hitmarker", 100);
-                }, 300);
-              }
-            }
-          } else {
-            console.log("Prevented impact effect on local player's own model");
+          // Store the hit zone (head, body, limbs) for damage feedback
+          if (this.setLastHitZone) {
+            this.setLastHitZone(hitZoneResult.zone);
           }
           
-          // Anti-cheat: For local bullets, send hit to server and let server decide
-          if (this.isLocalBullet && window.networkManager) {
-            // Track recent hits to prevent accidentally sending multiple hit notifications
-            if (!window.hitDebounce) {
-              window.hitDebounce = new Map();
-            }
-            
-            // Generate a unique key for this hit (player ID + hit zone + approximate position)
-            const hitKey = `${playerId}_${hitResult.zone}_${Math.round(endPos.x)}_${Math.round(endPos.y)}_${Math.round(endPos.z)}`;
-            const now = performance.now();
-            const lastHitTime = window.hitDebounce.get(hitKey) || 0;
-            
-            // Use a shorter debounce time for shotgun pellets to allow multiple pellets to register hits
-            const debounceTime = this.isShotgunPellet ? 50 : 500; // 50ms for shotgun, 500ms for regular bullets
-            
-            if (now - lastHitTime < debounceTime) {
-              // Use logger for debug logs
-              if (window.logger) {
-                window.logger.debug(`Debouncing duplicate hit detection: ${hitKey}`);
-              }
-              return { 
-                active: false, 
-                hit: { 
-                  type: 'player', 
-                  playerId, 
-                  bulletId: this.bulletId,
-                  zone: hitResult.zone,
-                  damage: hitResult.damage,
-                  debounced: true
-                } 
-              };
-            }
-            
-            // Update the last hit time for this target
-            window.hitDebounce.set(hitKey, now);
-            
-            window.networkManager.sendPlayerHit(playerId, {
-              position: { x: endPos.x, y: endPos.y, z: endPos.z },
-              sourcePlayerId: this.sourcePlayerId,
-              hitZone: hitResult.zone, // Send the hit zone to the server
-              damage: hitResult.damage, // Send the damage amount to the server
-              isShotgunPellet: this.isShotgunPellet // Send information about shotgun pellets
-            }, this.bulletId);
+          // Show hit marker (for local bullets only)
+          if (this.isLocalBullet) {
+            this.showHitMarker(endPos);
           }
           
+          // Show hit marker for client-side feedback (even for remote bullets)
           return { 
             active: false, 
             hit: { 
               type: 'player', 
-              playerId, 
-              bulletId: this.bulletId,
-              zone: hitResult.zone,
-              damage: hitResult.damage
+              playerId: playerId,
+              position: endPos,
+              zone: hitZoneResult.zone 
             } 
           };
         }
       }
     }
 
-    // 3) Check collision with ground
-    if (this.mesh.position.y <= 0.1) {
-      // Skip creating ground impact effect
-      return { active: false, hit: { type: 'ground', position: endPos } };
+    // Check for collision with terrain
+    const terrain = window.terrain;
+    if (terrain && terrain.checkRayCollision) {
+      const collision = terrain.checkRayCollision(this.lastPosition, this.direction, displacement.length());
+      if (collision.hit) {
+        // Create impact effect
+        createImpactEffect(collision.position, this.direction, scene, 'ground');
+        
+        // Return hit info
+        return { 
+          active: false, 
+          hit: { 
+            type: 'terrain', 
+            position: collision.position 
+          } 
+        };
+      }
     }
 
-    // 4) If bullet exceeded max distance, remove it.
-    if (this.distanceTraveled >= this.maxDistance) {
+    // Check for ground collision (if no terrain system exists)
+    if (!terrain && endPos.y <= 0.05) {
+      // Create impact effect on ground
+      const impactPosition = new THREE.Vector3(endPos.x, 0, endPos.z);
+      createImpactEffect(impactPosition, this.direction, scene, 'ground');
+      
+      // Return hit info
+      return { 
+        active: false, 
+        hit: { 
+          type: 'ground', 
+          position: impactPosition 
+        } 
+      };
+    }
+
+    // Check for train collision
+    if (window.trainManager && window.trainManager.checkBulletCollision) {
+      const trainCollision = window.trainManager.checkBulletCollision(this.lastPosition, endPos);
+      if (trainCollision.hit) {
+        // Create impact effect
+        createImpactEffect(trainCollision.position, this.direction, scene, 'train');
+        
+        // Return hit info
+        return { 
+          active: false, 
+          hit: { 
+            type: 'train', 
+            position: trainCollision.position 
+          } 
+        };
+      }
+    }
+
+    // Check for scene object collisions (buildings, props)
+    if (window.objectColliders) {
+      for (const collider of window.objectColliders) {
+        // Skip if collider is invalid
+        if (!collider || !collider.type) continue;
+        
+        let intersection = null;
+        
+        // Different intersection tests based on collider type
+        if (collider.type === 'sphere') {
+          // Sphere collision
+          intersection = raycaster.ray.intersectSphere(collider.sphere, new THREE.Vector3());
+        } else if (collider.type === 'box') {
+          // Box collision
+          raycaster.set(this.lastPosition, this.direction);
+          const intersections = raycaster.intersectBox(collider.box, new THREE.Vector3());
+          intersection = intersections.length > 0 ? intersections[0] : null;
+        }
+        
+        if (intersection) {
+          // Create impact effect
+          createImpactEffect(intersection, this.direction, scene, 'object');
+          
+          // Return hit info
+          return { 
+            active: false, 
+            hit: { 
+              type: 'object', 
+              position: intersection,
+              collider: collider
+            } 
+          };
+        }
+      }
+    }
+
+    // Check for max distance
+    if (this.distanceTraveled > this.maxDistance) {
       return { active: false, hit: null };
     }
 
-    // Still active
     return { active: true, hit: null };
   }
   

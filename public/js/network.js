@@ -212,7 +212,7 @@ export class NetworkManager {
 
       // Another player joined
       case 'playerJoined':
-        console.log(`Player ${message.id} joined${message.isNpc ? ' (NPC)' : (message.isBot ? ' (BOT)' : '')}`);
+        console.log(`Player ${message.id} joined`);
         
         // Skip if this is our own ID
         if (message.id === this.playerId) {
@@ -230,8 +230,6 @@ export class NetworkManager {
           isAiming: false,
           isShooting: false,
           isReloading: false,
-          isBot: message.isBot || false, // Legacy bot flag
-          isNpc: message.isNpc || false, // New NPC flag
           username: message.username || `Player_${message.id}`,
           skins: message.skins || { bananaSkin: false } // Include skin information
         });
@@ -269,10 +267,6 @@ export class NetworkManager {
               message.health !== undefined ? message.health : existing.health;
             existing.isDying =
               message.isDying !== undefined ? message.isDying : existing.isDying;
-            existing.isBot =
-              message.isBot !== undefined ? message.isBot : existing.isBot;
-            existing.isNpc =
-              message.isNpc !== undefined ? message.isNpc : existing.isNpc;
             existing.isWalking =
               message.isWalking !== undefined ? message.isWalking : existing.isWalking;
             
@@ -292,8 +286,6 @@ export class NetworkManager {
                 isReloading: message.isReloading || false, 
                 health: message.health || 100,
                 isDying: message.isDying || false,
-                isBot: message.isBot || false,
-                isNpc: message.isNpc || false,
                 isWalking: message.isWalking || false,
                 username: message.username || `Player_${message.id}`,
                 skins: message.skins || { bananaSkin: false } // Include skin information
@@ -331,7 +323,7 @@ export class NetworkManager {
       case 'hit':
         console.log(`I was hit by player ${message.sourceId} in the ${message.hitZone || 'body'} for ${message.hitData?.damage || 20} damage`);
         
-        // Add damage to hitData if it's missing (for NPC hits)
+        // Add damage to hitData if it's missing
         let damage = 40; // Default body shot damage
         if (message.hitZone === 'head') {
           damage = 100;
@@ -339,7 +331,7 @@ export class NetworkManager {
           damage = 20;
         }
         
-        // If hitData is missing (from NPC), create it
+        // If hitData is missing, create it
         if (!message.hitData) {
           message.hitData = {
             damage: damage,

@@ -25,6 +25,9 @@ export class Player {
 
     this.group = new THREE.Group();
     
+    // Initialize previousPosition BEFORE calling spawnPlayerRandomly
+    this.previousPosition = new THREE.Vector3();
+    
     // Start at a random spawn point in the town street
     this.spawnPlayerRandomly();
     
@@ -137,9 +140,6 @@ export class Player {
     // Flag to control when aiming is allowed (used by various game systems)
     this.canAim = true;
     
-    // Store previous position to detect collision with arena boundary
-    this.previousPosition = new THREE.Vector3();
-    
     // Anti-cheat: Server reconciliation
     this.serverPosition = new THREE.Vector3();
     this.isReconciling = false;
@@ -182,7 +182,7 @@ export class Player {
     while (!validSpawn && attempts < maxAttempts) {
       // Random position within the main street
       spawnX = (Math.random() - 0.5) * 10; // Random X between -5 and 5 (main street)
-      spawnY = 2.72; // Eye level
+      spawnY = 2.72; // Eye level, no adjustment needed here - we set camera height directly
       spawnZ = (Math.random() - 0.5) * 40; // Random Z between -20 and 20
       
       // Check if this position is valid (not colliding with anything)
@@ -195,16 +195,19 @@ export class Player {
     if (!validSpawn) {
       console.warn(`Could not find valid spawn position after ${maxAttempts} attempts. Using fallback.`);
       spawnX = 0;
-      spawnY = 2.72; // Consistent eye level
+      spawnY = 2.72; // Consistent eye level, no adjustment needed
       spawnZ = 0;
     }
 
     this.group.position.set(spawnX, spawnY, spawnZ);
     
+    // Store the position for collision reference
+    this.previousPosition.copy(this.group.position);
+    
     // Random rotation (facing any direction)
     this.group.rotation.y = Math.random() * Math.PI * 2;
     
-    console.log(`Player spawned at: X=${spawnX.toFixed(2)}, Z=${spawnZ.toFixed(2)}`);
+    console.log(`Player spawned at: X=${spawnX.toFixed(2)}, Y=${spawnY.toFixed(2)}, Z=${spawnZ.toFixed(2)}`);
   }
 
   /**
@@ -232,9 +235,11 @@ export class Player {
     networkManager.onRespawn = (position, health, bullets, maxBullets, activeWeapon) => {
       console.log("Server-initiated respawn");
       
-      // Set position
-      this.group.position.copy(position);
-      this.previousPosition.copy(position);
+      // Set position directly without ground offset adjustment
+      if (position) {
+        this.group.position.copy(position);
+        this.previousPosition.copy(position);
+      }
       
       // Update health
       this.health = health || 100;
@@ -274,13 +279,20 @@ export class Player {
       this.isAiming = false;
       this.velocity.y = 0;
       
+      // Reset movement flags - critical for allowing movement after respawn
+      this.canMove = true;
+      this.forceLockMovement = false;
+      this.canAim = true;
+      
       // Make sure UI is updated
       updateAmmoUI(this);
+      updateHealthUI(this);
       
       // Reset vertical velocity
       this.velocity.y = 0;
       
-      console.log('Player respawned');
+      console.log('Player respawned from server');
+      console.log(`Position: X=${this.group.position.x.toFixed(2)}, Y=${this.group.position.y.toFixed(2)}, Z=${this.group.position.z.toFixed(2)}`);
       console.log(`Weapon ammo reset - Revolver: ${this.weaponAmmo.revolver}, Shotgun: ${this.weaponAmmo.shotgun}`);
     };
   }
@@ -1021,6 +1033,11 @@ export class Player {
     this.isAiming = false;
     this.velocity.y = 0;
     
+    // Reset movement flags - critical for allowing movement after respawn
+    this.canMove = true;
+    this.forceLockMovement = false;
+    this.canAim = true;
+    
     // Make sure UI is updated
     updateAmmoUI(this);
     
@@ -1028,6 +1045,7 @@ export class Player {
     this.velocity.y = 0;
     
     console.log('Player respawned');
+    console.log(`Position: X=${this.group.position.x.toFixed(2)}, Y=${this.group.position.y.toFixed(2)}, Z=${this.group.position.z.toFixed(2)}`);
     console.log(`Weapon ammo reset - Revolver: ${this.weaponAmmo.revolver}, Shotgun: ${this.weaponAmmo.shotgun}`);
   }
 
