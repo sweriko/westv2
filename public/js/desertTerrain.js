@@ -104,14 +104,14 @@ export class DesertTerrain {
                 sandGrains: 0.3
             },
             heightScale: {
-                base: 15,
-                dunes: 40, // Reduced from 70 for lower dune heights
-                secondaryDunes: 20, // Reduced from 30
-                ridges: 10, // Reduced from 15
-                detail: 8,
-                // Increased height adjustments for more pronounced micro-detail
-                microRipples: 2.0, // Increased for more visible grooves
-                sandGrains: 0.3  // Slightly increased from 0.2
+                base: 5, // Reduced from 15 for much flatter base terrain
+                dunes: 10, // Drastically reduced from 40 for very low dune heights
+                secondaryDunes: 5, // Reduced from 20 for flatter secondary dunes
+                ridges: 2, // Significantly reduced from 10 for minimal ridges
+                detail: 2, // Reduced from 8 for less dramatic detail
+                // Keeping micro-detail adjustments as they're already small
+                microRipples: 2.0,
+                sandGrains: 0.3
             },
             duneDirection: Math.PI * 0.25, // Wind direction
             sandColors: [
