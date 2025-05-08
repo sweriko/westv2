@@ -1317,9 +1317,10 @@ function degToRad(degrees) {
 
 // Train variables
 const TRAIN_SPEED = 0.0003; // Same speed as client to maintain consistency
-const TRAIN_TRACK_START = { x: 0, y: 0, z: -1000 };
-const TRAIN_TRACK_END = { x: 0, y: 0, z: 1000 };
-const TRAIN_TRACK_LENGTH = 2000; // Total length between start and end
+// Updated track endpoints for half-circle around town
+const TRAIN_TRACK_START = { x: 0, y: 0.5, z: -200 }; // Estimated position from client-side calculation
+const TRAIN_TRACK_END = { x: 0, y: 0.5, z: 200 }; // Estimated position from client-side calculation
+const TRAIN_TRACK_LENGTH = 650; // Approximated arc length of half-circle (PI * radius)
 const TRAIN_CYCLE_TIME = Math.floor(TRAIN_TRACK_LENGTH / (TRAIN_SPEED * 60)); // Time in ms for a full one-way trip
 
 // Time-based tracking

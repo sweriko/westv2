@@ -2,6 +2,7 @@ import { Viewmodel } from './viewmodel.js';
 import { updateAmmoUI, updateHealthUI, showDamageIndicator } from './ui.js';
 import { applyRecoil } from './effects.js';
 import { networkManager } from './network.js';
+import { HorseSystem } from './horseSystem.js';
 
 /**
  * The local Player class (first-person).
@@ -62,6 +63,25 @@ export class Player {
     this.sprintSpeed = 7; // Reduced from 12 for more realistic running
     this.sprintJumpBoost = 1.1; // Reduced further for more subtle sprint jumping effect
 
+    // Horse riding properties
+    this.horseSystem = new HorseSystem(scene);
+    this.isRidingHorse = false;
+    this.horseSpeed = 30; // Extremely fast speed for dramatic effect
+    this.normalCameraY = -0.7; // Store normal camera height
+    this.horseCameraY = 1.5; // Higher camera position for better riding perspective
+    this.horseDirection = 0; // Direction the horse is facing
+    this.targetHorseDirection = 0; // Target direction for smooth turning
+    this.horseDirectionLerpFactor = 4; // How quickly horse turns to target direction
+    this.horseTurningSpeed = 0.05; // Base turning speed (reduced from previous 0.07)
+    this.isHorseTurningLeft = false; // Flag for tracking continuous turning
+    this.isHorseTurningRight = false; // Flag for tracking continuous turning
+    
+    // Camera stabilization
+    this.cameraStabilizationActive = true; // Enable by default
+    this.cameraTiltAmount = 0; // Current camera tilt amount
+    this.cameraTargetTilt = 0; // Target tilt amount
+    this.cameraTiltSpeed = 5; // How quickly camera tilts
+    
     // Aiming
     this.isAiming = false;
     this.defaultFOV = 75;
@@ -297,6 +317,10 @@ export class Player {
     };
   }
 
+  /**
+   * Updates player state
+   * @param {number} deltaTime - Time since last update in seconds
+   */
   update(deltaTime) {
     // Skip update if paused
     if (window.isPaused) return;
@@ -304,10 +328,44 @@ export class Player {
     // Store the previous position for collision detection and footsteps
     this.previousPosition.copy(this.group.position);
     
-    // Platform stability check - prevent falling through platforms 
-    this.stabilizePlatformPosition();
+    // First, update train movement if player is on train
+    if (this.isOnTrain) {
+      this.updateTrainRiding(deltaTime);
+    }
     
-    // Anti-cheat: Handle server reconciliation
+    // Apply smooth horse direction updates
+    if (this.isRidingHorse) {
+      // Update target direction based on turning flags
+      if (this.isHorseTurningLeft) {
+        this.targetHorseDirection += this.horseTurningSpeed;
+      }
+      if (this.isHorseTurningRight) {
+        this.targetHorseDirection -= this.horseTurningSpeed;
+      }
+      
+      // Smoothly interpolate actual horse direction toward target
+      this.horseDirection = THREE.MathUtils.lerp(
+        this.horseDirection,
+        this.targetHorseDirection,
+        Math.min(1, deltaTime * this.horseDirectionLerpFactor)
+      );
+      
+      // Apply camera stabilization - add tilt based on turning
+      if (this.cameraStabilizationActive) {
+        // Calculate target tilt based on turning direction and speed
+        const turnRate = (this.isHorseTurningRight ? 1 : (this.isHorseTurningLeft ? -1 : 0)) * this.horseTurningSpeed;
+        this.cameraTargetTilt = turnRate * 0.4; // Tilt proportional to turning speed
+        
+        // Smoothly interpolate actual tilt
+        this.cameraTiltAmount = THREE.MathUtils.lerp(
+          this.cameraTiltAmount,
+          this.cameraTargetTilt,
+          Math.min(1, deltaTime * this.cameraTiltSpeed)
+        );
+      }
+    }
+    
+    // Update network reconciliation
     if (this.isReconciling) {
       // Calculate distance to server position
       const distance = this.group.position.distanceTo(this.serverPosition);
@@ -322,6 +380,24 @@ export class Player {
       }
     }
     
+    // Now process movement - even when on train (lets player move freely on train)
+    if (this.canMove && !this.forceLockMovement) {
+      this.move(deltaTime);
+    }
+    
+    // Update horse system
+    if (this.horseSystem) {
+      this.horseSystem.update(deltaTime);
+      
+      // If riding, update horse position to follow player
+      if (this.isRidingHorse) {
+        this.horseSystem.positionAtPlayer(this.group.position, this.horseDirection);
+      }
+    }
+    
+    // Platform stability check - prevent falling through platforms 
+    this.stabilizePlatformPosition();
+    
     // Smoothly interpolate the gun offset & FOV
     const targetOffset = this.isAiming && this.canAim ? this.aimOffset : this.holsterOffset;
     this.currentGunOffset.lerp(targetOffset, 0.1);
@@ -332,13 +408,16 @@ export class Player {
     } else {
       console.warn("Viewmodel is not initialized!");
     }
-
-    // Adjust FOV based on sprinting and aiming with smoother transitions
+    
+    // Adjust FOV based on sprinting, horse riding, and aiming with smoother transitions
     if (this.isAiming && this.canAim) {
       this.targetFOV = this.aimFOV;
     } else if (this.isSprinting && this.isMoving()) {
       // FOV effect when sprinting
       this.targetFOV = this.defaultFOV + 7; // Less extreme FOV increase (was 10)
+    } else if (this.isRidingHorse && this.isMoving()) {
+      // FOV effect when on horseback
+      this.targetFOV = this.defaultFOV + 10; // Wider FOV when on horse
     } else {
       this.targetFOV = this.defaultFOV;
     }
@@ -356,12 +435,6 @@ export class Player {
       this.camera.updateProjectionMatrix();
     }
 
-    // Process movement
-    this.move(deltaTime);
-    
-    // Footstep sounds logic based on movement
-    const positionBeforeMovement = this.previousPosition.clone();
-    
     // Update camera bob (only if on ground)
     // Always update the head bob regardless of whether we're on ground
     this.updateHeadBob(deltaTime);
@@ -369,8 +442,10 @@ export class Player {
     // Update aiming effects including crosshair
     this.updateAiming(deltaTime);
     
-    // Update footstep sounds based on movement
-    this.updateFootstepSounds(deltaTime, positionBeforeMovement);
+    // Update footstep sounds based on movement (only if not on horse)
+    if (!this.isRidingHorse) {
+      this.updateFootstepSounds(deltaTime, this.previousPosition);
+    }
     
     // Send periodic network updates
     const now = performance.now();
@@ -378,7 +453,7 @@ export class Player {
       this.lastNetworkUpdate = now;
       this.sendNetworkUpdate();
     }
-
+    
     if (this.soundManager) {
       // Update audio listener position to follow the player's camera
       // Use precise camera position rather than group position for better audio
@@ -395,6 +470,148 @@ export class Player {
       
       // Update the audio listener position
       this.soundManager.updateListenerPosition(cameraPosition, cameraDirection, upVector);
+    }
+  }
+  
+  /**
+   * Updates player position and physics when riding the train
+   * @param {number} deltaTime - Time since last update in seconds
+   */
+  updateTrainRiding(deltaTime) {
+    // Check if train floor exists
+    if (!window.trainWagonFloor) {
+      this.isOnTrain = false;
+      console.log("Train floor no longer exists, stopping train ride");
+      return;
+    }
+    
+    // Get detailed information about the train floor mesh
+    const floorMesh = window.trainWagonFloor;
+    
+    // Create bounding box to get proper dimensions and position
+    const bbox = new THREE.Box3().setFromObject(floorMesh);
+    
+    // Get floor top position and boundaries
+    const floorTopY = bbox.max.y;
+    const floorMinX = bbox.min.x;
+    const floorMaxX = bbox.max.x;
+    const floorMinZ = bbox.min.z;
+    const floorMaxZ = bbox.max.z;
+    
+    // ---- APPROACH: Track train's movement AND rotation ----
+    
+    // If this is the first frame on the train, initialize tracking vars
+    if (!this._lastTrainState) {
+      this._lastTrainState = {
+        position: new THREE.Vector3(),
+        quaternion: new THREE.Quaternion()
+      };
+      
+      // Get current train position and rotation
+      if (window.train) {
+        window.train.getWorldPosition(this._lastTrainState.position);
+        window.train.getWorldQuaternion(this._lastTrainState.quaternion);
+      } else {
+        // Fallback to floor mesh if train doesn't exist
+        floorMesh.getWorldPosition(this._lastTrainState.position);
+        floorMesh.getWorldQuaternion(this._lastTrainState.quaternion);
+      }
+      
+      // Calculate initial relative position (player's offset from train center)
+      this._relativePosition = this.group.position.clone().sub(this._lastTrainState.position);
+      
+      console.log("Train riding initialized with relative position:", this._relativePosition);
+    }
+    
+    // Get current train position and rotation
+    const currentTrainState = {
+      position: new THREE.Vector3(),
+      quaternion: new THREE.Quaternion()
+    };
+    
+    if (window.train) {
+      window.train.getWorldPosition(currentTrainState.position);
+      window.train.getWorldQuaternion(currentTrainState.quaternion);
+    } else {
+      // Fallback to floor mesh
+      floorMesh.getWorldPosition(currentTrainState.position);
+      floorMesh.getWorldQuaternion(currentTrainState.quaternion);
+    }
+    
+    // Calculate positional delta (how much the train moved)
+    const positionDelta = new THREE.Vector3().subVectors(
+      currentTrainState.position,
+      this._lastTrainState.position
+    );
+    
+    // Calculate rotational delta (how much the train rotated)
+    const rotationDelta = new THREE.Quaternion().multiplyQuaternions(
+      currentTrainState.quaternion,
+      this._lastTrainState.quaternion.clone().invert()
+    );
+    
+    // Apply train movement to player
+    this.group.position.add(positionDelta);
+    
+    // Apply train rotation to player's relative position
+    // This rotates the player around the train's center point
+    if (!rotationDelta.equals(new THREE.Quaternion())) {
+      // Get player's position relative to train center
+      const relativePos = this.group.position.clone().sub(currentTrainState.position);
+      
+      // Apply rotation to this relative position
+      relativePos.applyQuaternion(rotationDelta);
+      
+      // Update player position based on rotated offset
+      this.group.position.copy(currentTrainState.position).add(relativePos);
+    }
+    
+    // Update last train state for next frame
+    this._lastTrainState.position.copy(currentTrainState.position);
+    this._lastTrainState.quaternion.copy(currentTrainState.quaternion);
+    
+    // ---- Keep player above floor ----
+    
+    // Calculate a safe height above the floor
+    const MIN_HEIGHT_ABOVE_FLOOR = 0.3;
+    if (this.group.position.y < floorTopY + MIN_HEIGHT_ABOVE_FLOOR) {
+      this.group.position.y = floorTopY + MIN_HEIGHT_ABOVE_FLOOR;
+      this.velocity.y = 0; // Stop downward velocity
+    }
+    
+    // ---- CHECK IF PLAYER WALKED OFF THE TRAIN ----
+    
+    // Convert player position to train's local space to check boundaries
+    const trainWorldMatrix = new THREE.Matrix4();
+    floorMesh.updateWorldMatrix(true, false);
+    trainWorldMatrix.copy(floorMesh.matrixWorld);
+    const trainWorldMatrixInverse = trainWorldMatrix.clone().invert();
+    
+    // Get player position in train's local space
+    const playerLocalPos = this.group.position.clone().applyMatrix4(trainWorldMatrixInverse);
+    
+    // Check boundaries in local space
+    const margin = 0.5;
+    const floorWidth = floorMaxX - floorMinX;
+    const floorDepth = floorMaxZ - floorMinZ;
+    const halfWidth = floorWidth / 2;
+    const halfDepth = floorDepth / 2;
+    
+    const isOffTrain = 
+      playerLocalPos.x < -halfWidth - margin ||
+      playerLocalPos.x > halfWidth + margin ||
+      playerLocalPos.z < -halfDepth - margin ||
+      playerLocalPos.z > halfDepth + margin ||
+      this.group.position.y < floorTopY - 2;
+    
+    if (isOffTrain) {
+      console.log("Player left train floor");
+      this.isOnTrain = false;
+      this._lastTrainState = null;
+      this._relativePosition = null;
+    } else {
+      // Enable jumping while on train
+      this.canJump = true;
     }
   }
 
@@ -509,7 +726,18 @@ export class Player {
       // Normal movement - apply player rotation
       movement.x = this.velocity.x * deltaTime;
       movement.z = this.velocity.z * deltaTime;
-      movement.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.group.rotation.y);
+      
+      // Use horse direction when riding, otherwise use camera direction
+      if (this.isRidingHorse) {
+        movement.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.horseDirection);
+        
+        // Update horse model rotation to match movement direction
+        if (this.horseSystem && this.horseSystem.horse) {
+          this.horseSystem.horse.rotation.y = this.horseDirection + Math.PI;
+        }
+      } else {
+        movement.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.group.rotation.y);
+      }
     }
     
     // Calculate desired new position
@@ -612,48 +840,148 @@ export class Player {
   updateHeadBob(deltaTime) {
     // Update target bobbing intensity based on movement
     if (this.isMoving() && this.canJump) {
-      // Very subtle bobbing values for higher camera position
-      this.targetBobIntensity = this.isSprinting ? 0.022 : 0.011;
+      if (this.isRidingHorse) {
+        // Much stronger bobbing for horse riding - significantly increased
+        this.targetBobIntensity = 0.15; // More than doubled for a much more pronounced effect
+      } else {
+        // Very subtle bobbing values for normal walking/running
+        this.targetBobIntensity = this.isSprinting ? 0.022 : 0.011;
+      }
     } else {
       this.targetBobIntensity = 0;
     }
+    
+    // Make transitioning to full intensity faster for horse riding
+    const transitionSpeed = this.isRidingHorse ? 6 : this.bobTransitionSpeed; // Faster ramp-up for horse
     
     // Smoothly transition bob intensity
     this.bobIntensity = THREE.MathUtils.lerp(
       this.bobIntensity,
       this.targetBobIntensity,
-      Math.min(1, deltaTime * this.bobTransitionSpeed)
+      Math.min(1, deltaTime * transitionSpeed)
     );
     
     // Only calculate bob if intensity is significant
     if (this.bobIntensity > 0.001) {
       // Update phase at a speed proportional to movement
-      // Use different frequencies for vertical and horizontal to create more natural movement
-      this.bobPhase += deltaTime * (this.isSprinting ? 10 : 6);
+      if (this.isRidingHorse) {
+        // Horse gallop has a regular, rhythmic pattern
+        // Use faster speed that feels impactful for a horse gallop
+        const baseSpeed = 10; // Increased from 7 for more impactful movement
+        const speedVariation = this.isMoving() ? 
+                             (this.moveForward ? 2 : (this.moveBackward ? -1 : 0)) : 0;
+        this.bobPhase += deltaTime * (baseSpeed + speedVariation);
+      } else {
+        this.bobPhase += deltaTime * (this.isSprinting ? 10 : 6);
+      }
       
-      // Calculate vertical and horizontal components
-      const verticalBob = Math.sin(this.bobPhase * 2) * this.bobIntensity;
-      // Much smaller horizontal component
-      const horizontalBob = Math.cos(this.bobPhase) * this.bobIntensity * 0.3;
-      
-      // Apply to camera position smoothly - ensure we're using defaultCameraHeight
-      this.camera.position.y = THREE.MathUtils.lerp(
-        this.camera.position.y,
-        this.defaultCameraHeight + verticalBob,
-        Math.min(1, deltaTime * 8)
-      );
-      
-      // Extremely subtle horizontal movement
-      this.camera.position.x = THREE.MathUtils.lerp(
-        this.camera.position.x,
-        horizontalBob,
-        Math.min(1, deltaTime * 3)
-      );
+      if (this.isRidingHorse) {
+        // Intensified horse riding vertical motion
+        // Four-beat gallop pattern using sine waves at different phases
+        // Primary up/down motion (main bounce)
+        const baseBob = Math.sin(this.bobPhase * 1.5) * this.bobIntensity * 1.0; // Increased multiplier
+        
+        // Secondary bounce from the horse's four-beat gait - stronger impacts
+        // These offsets create the four-beat rhythm with more pronounced hoofbeats
+        const frontHoofBob = Math.sin(this.bobPhase * 3 + 0.5) * this.bobIntensity * 0.5; // More than doubled
+        const rearHoofBob = Math.sin(this.bobPhase * 3 + 2.1) * this.bobIntensity * 0.4; // More than doubled
+        
+        // Add random jitter to simulate uneven terrain
+        const terrainJitter = (Math.random() - 0.5) * this.bobIntensity * 0.2;
+        
+        // Combine for an intense galloping motion
+        let verticalBob = baseBob + frontHoofBob + rearHoofBob + terrainJitter;
+        
+        // Enhanced horizontal sway - more pronounced side-to-side motion
+        let horizontalBob = Math.cos(this.bobPhase * 1.5) * this.bobIntensity * 0.4; // More than doubled
+        
+        // Add slight horizontal jitter
+        horizontalBob += (Math.random() - 0.5) * this.bobIntensity * 0.1;
+        
+        // Apply camera position changes
+        const targetY = this.horseCameraY;
+        
+        // Vertical movement (up and down gallop) - more responsive
+        this.camera.position.y = THREE.MathUtils.lerp(
+          this.camera.position.y,
+          targetY + verticalBob,
+          Math.min(1, deltaTime * 12) // Increased responsiveness
+        );
+        
+        // Horizontal movement (side to side sway) - more responsive
+        this.camera.position.x = THREE.MathUtils.lerp(
+          this.camera.position.x,
+          horizontalBob,
+          Math.min(1, deltaTime * 8) // Increased responsiveness
+        );
+        
+        // More pronounced forward/backward motion with the gallop
+        const forwardBob = Math.sin(this.bobPhase * 1.5 + 0.8) * this.bobIntensity * 0.3; // Tripled
+        this.camera.position.z = THREE.MathUtils.lerp(
+          this.camera.position.z,
+          forwardBob,
+          Math.min(1, deltaTime * 8) // Increased responsiveness
+        );
+        
+        // Apply enhanced camera rotation effects
+        
+        // More pronounced roll (side to side tilt) from the gallop
+        const naturalRoll = Math.cos(this.bobPhase * 1.5) * 0.02; // More than doubled
+        
+        // Combine natural roll with stabilization tilt for turns
+        const totalRoll = naturalRoll + this.cameraTiltAmount;
+        
+        this.camera.rotation.z = THREE.MathUtils.lerp(
+          this.camera.rotation.z,
+          totalRoll,
+          Math.min(1, deltaTime * 5) // Increased responsiveness
+        );
+        
+        // More intense pitch (up/down tilt) that follows the gallop rhythm
+        const pitchAngle = Math.sin(this.bobPhase * 1.5 - 0.4) * 0.015; // Tripled
+        
+        // We don't directly set rotation.x as that's controlled by the mouse
+        // Instead we apply a stronger delta to the existing rotation
+        const currentPitch = this.camera.rotation.x;
+        this.camera.rotation.x = THREE.MathUtils.lerp(
+          currentPitch,
+          currentPitch + pitchAngle,
+          Math.min(1, deltaTime * 2) // Increased responsiveness
+        );
+      } else {
+        // Normal walking/running bob effect
+        const verticalBob = Math.sin(this.bobPhase * 2) * this.bobIntensity;
+        const horizontalBob = Math.cos(this.bobPhase) * this.bobIntensity * 0.3;
+        
+        // Apply to camera position smoothly
+        const targetY = this.defaultCameraHeight;
+        
+        this.camera.position.y = THREE.MathUtils.lerp(
+          this.camera.position.y,
+          targetY + verticalBob,
+          Math.min(1, deltaTime * 8)
+        );
+        
+        this.camera.position.x = THREE.MathUtils.lerp(
+          this.camera.position.x,
+          horizontalBob,
+          Math.min(1, deltaTime * 3)
+        );
+        
+        // Smoothly reset camera roll
+        this.camera.rotation.z = THREE.MathUtils.lerp(
+          this.camera.rotation.z,
+          0,
+          Math.min(1, deltaTime * 3)
+        );
+      }
     } else {
       // Smoothly return to default position when not moving
+      const targetY = this.isRidingHorse ? this.horseCameraY : this.defaultCameraHeight;
+      
       this.camera.position.y = THREE.MathUtils.lerp(
         this.camera.position.y,
-        this.defaultCameraHeight,
+        targetY,
         Math.min(1, deltaTime * 4)
       );
       
@@ -662,6 +990,27 @@ export class Player {
         0,
         Math.min(1, deltaTime * 3)
       );
+      
+      this.camera.position.z = THREE.MathUtils.lerp(
+        this.camera.position.z,
+        0,
+        Math.min(1, deltaTime * 3)
+      );
+      
+      // Reset camera roll, maintaining stabilization tilt for horse turns
+      if (this.isRidingHorse) {
+        this.camera.rotation.z = THREE.MathUtils.lerp(
+          this.camera.rotation.z,
+          this.cameraTiltAmount, // Keep the stabilization tilt even when not moving
+          Math.min(1, deltaTime * 3)
+        );
+      } else {
+        this.camera.rotation.z = THREE.MathUtils.lerp(
+          this.camera.rotation.z,
+          0,
+          Math.min(1, deltaTime * 3)
+        );
+      }
     }
   }
 
@@ -670,8 +1019,18 @@ export class Player {
    * @returns {number} The current movement speed
    */
   getMoveSpeed() {
-    // Apply sprint speed if sprint key is pressed
-    return this.isSprinting ? this.sprintSpeed : this.normalSpeed;
+    // Return horse speed if riding a horse
+    if (this.isRidingHorse) {
+      return this.horseSpeed;
+    }
+    
+    // Return sprint speed if sprinting
+    if (this.isSprinting) {
+      return this.sprintSpeed;
+    }
+    
+    // Return normal speed for walking
+    return this.normalSpeed;
   }
   
   /**
@@ -834,13 +1193,27 @@ export class Player {
         y: this.group.position.y,
         z: this.group.position.z
       },
-      rotation: {
-        y: this.group.rotation.y
+      rotation: this.group.rotation.y,
+      camRotation: this.camera.rotation.x,
+      velocity: {
+        x: this.velocity.x,
+        y: this.velocity.y,
+        z: this.velocity.z
+      },
+      direction: {
+        x: direction.x,
+        y: direction.y,
+        z: direction.z
       },
       isAiming: this.isAiming,
+      isShooting: this.isShooting,
       isReloading: this.isReloading,
       isSprinting: this.isSprinting,
-      isShooting: this.viewmodel && this.viewmodel.animationState === 'shoot',
+      isRidingHorse: this.isRidingHorse,
+      horseDirection: this.isRidingHorse ? this.horseDirection : undefined,
+      activeWeapon: this.activeWeapon,
+      isJumping: this.isJumping,
+      isOnTrain: this.isOnTrain,
       health: this.health
     });
   }
@@ -1812,5 +2185,152 @@ export class Player {
         revolverDesktopIndicator.className = 'desktop-weapon-indicator';
       }
     }
+  }
+
+  /**
+   * Teleports player to the train wagon floor
+   * @returns {boolean} Whether the teleport was successful
+   */
+  teleportToTrain() {
+    // Debug existing components to help diagnose issues
+    console.log("Train components check:", {
+      trainExists: !!window.train,
+      floorMeshExists: !!window.trainWagonFloor,
+      floorBodyExists: !!window.trainFloorBody
+    });
+    
+    // Check if train wagon floor exists (only requiring trainWagonFloor now)
+    if (!window.trainWagonFloor) {
+      console.warn("Cannot teleport to train: Train wagon floor not found");
+      return false;
+    }
+    
+    // Get detailed information about the train floor mesh
+    const floorMesh = window.trainWagonFloor;
+    
+    // Create bounding box to get proper dimensions
+    const bbox = new THREE.Box3().setFromObject(floorMesh);
+    
+    // Calculate the top surface of the floor (maximum Y value)
+    const floorTopY = bbox.max.y;
+    
+    // Calculate center of the floor
+    const floorCenterX = (bbox.min.x + bbox.max.x) / 2;
+    const floorCenterZ = (bbox.min.z + bbox.max.z) / 2;
+    
+    // Get world position of the floor center
+    const floorWorldPos = new THREE.Vector3();
+    floorMesh.getWorldPosition(floorWorldPos);
+    
+    // Teleport player to center of the floor with proper height
+    this.group.position.set(
+      floorWorldPos.x,
+      floorTopY + 1.5, // Position player clearly above the floor
+      floorWorldPos.z
+    );
+    
+    // Reset velocity
+    this.velocity.set(0, 0, 0);
+    
+    // Initialize train riding state
+    this._lastTrainState = {
+      position: new THREE.Vector3(),
+      quaternion: new THREE.Quaternion()
+    };
+    
+    // Initialize with current train position and rotation
+    if (window.train) {
+      window.train.getWorldPosition(this._lastTrainState.position);
+      window.train.getWorldQuaternion(this._lastTrainState.quaternion);
+    } else {
+      // Fallback to floor mesh if train doesn't exist
+      floorMesh.getWorldPosition(this._lastTrainState.position);
+      floorMesh.getWorldQuaternion(this._lastTrainState.quaternion);
+    }
+    
+    // Calculate initial relative position
+    this._relativePosition = this.group.position.clone().sub(this._lastTrainState.position);
+    
+    this.isOnTrain = true;
+    
+    // Enable jumping on train
+    this.canJump = true;
+    this.isJumping = false;
+    
+    // Play teleport sound if available
+    if (this.soundManager) {
+      this.soundManager.playSound("teleport", 0, 0.8);
+    }
+    
+    console.log("Teleported to train at position:", this.group.position.toArray());
+    return true;
+  }
+
+  /**
+   * Toggle horse riding state
+   */
+  toggleHorseRiding() {
+    if (this.isRidingHorse) {
+      // Dismount the horse
+      this.isRidingHorse = false;
+      
+      // Reset camera rotation - transfer camera Y rotation to group rotation
+      const currentLookDirection = this.camera.rotation.y;
+      this.group.rotation.y += currentLookDirection;
+      this.camera.rotation.y = 0;
+      
+      // Return camera to normal height
+      this.camera.position.y = this.normalCameraY;
+      
+      // Reset camera position offsets
+      this.camera.position.x = 0;
+      this.camera.position.z = 0;
+      
+      // Reset horse turning flags
+      this.isHorseTurningLeft = false;
+      this.isHorseTurningRight = false;
+      
+      // Reset camera stabilization
+      this.cameraTiltAmount = 0;
+      this.cameraTargetTilt = 0;
+      
+      // Hide the horse
+      this.horseSystem.hide();
+      
+      if (this.soundManager) {
+        this.soundManager.playSound("jumpland", 0, 1.0);
+      }
+    } else {
+      // Mount the horse
+      this.isRidingHorse = true;
+      
+      // Initialize horse direction to match the player's current rotation
+      this.horseDirection = this.group.rotation.y;
+      this.targetHorseDirection = this.horseDirection;
+      
+      // Reset camera position to centered
+      this.camera.position.x = 0;
+      this.camera.position.z = 0;
+      
+      // Position horse at player location
+      this.horseSystem.positionAtPlayer(this.group.position, this.horseDirection);
+      
+      // Elevate camera
+      this.camera.position.y = this.horseCameraY;
+      
+      // Reset turning flags
+      this.isHorseTurningLeft = false;
+      this.isHorseTurningRight = false;
+      
+      // Show the horse
+      this.horseSystem.show();
+      
+      if (this.soundManager) {
+        this.soundManager.playSound("jumpup", 0, 1.0);
+      }
+    }
+    
+    // Let network know about horse riding status change
+    this.sendNetworkUpdate();
   }
 }

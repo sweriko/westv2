@@ -85,22 +85,24 @@ export class DesertTerrain {
         
         // Calculate optimal terrain size based on town dimensions
         const townSize = Math.max(townDimensions.width, townDimensions.length);
-        const desertSize = Math.max(5000, townSize * 25); // At least 25x larger than town
+        // Use skybox radius but extend terrain slightly beyond it to prevent horizon gap
+        const skyboxRadius = 2500; // Increased from 900 to match scene.js
+        // Extend terrain 10% beyond skybox to ensure proper horizon blending
+        const desertSize = skyboxRadius * 2 * 1.1;
         
         // Setup with appropriate settings
         this.config = {
-            size: desertSize, // Size based on town dimensions
-            resolution: 196, // Resolution of the terrain (vertices per side)
-            cactiCount: 120, // Number of cacti to place (increased from 60)
+            size: desertSize, // Size to extend slightly beyond skybox
+            resolution: 256, // Increased from 128 for better terrain-collider fidelity
             noiseScale: {
-                base: 0.0003,
-                dunes: 0.0008,
-                secondaryDunes: 0.0015,
-                ridges: 0.003,
-                detail: 0.01,
-                flat: 0.0003,
+                base: 0.0004, // Slightly increased for more detail in smaller terrain
+                dunes: 0.001, // Slightly increased for more visible features
+                secondaryDunes: 0.0018,
+                ridges: 0.0035,
+                detail: 0.012,
+                flat: 0.0004,
                 // Enhanced micro-detail scales for more prominent sand ripples
-                microRipples: 0.04, // Adjusted for better groove definition
+                microRipples: 0.045, // Slightly increased for better visibility
                 sandGrains: 0.3
             },
             heightScale: {
@@ -122,23 +124,29 @@ export class DesertTerrain {
                 new THREE.Color(0xffc890)  // Highlight areas
             ],
             distanceBlur: {
-                enabled: true,
-                startDistance: desertSize * 0.35, // Start blurring at 35% distance from center
-                endDistance: desertSize * 0.5,    // Maximum blur at edge
-                skyboxColor: new THREE.Color(0xaad6f5), // Light blue to match skybox horizon
-                atmosphericHaze: true,            // Enable atmospheric haze on dunes
-                hazeStartDistance: desertSize * 0.15, // Start atmospheric effect closer
-                hazeFactor: 0.6                  // Strength of the atmospheric effect
+                enabled: false, // Disabled distance blur
+                startDistance: skyboxRadius * 0.85,
+                endDistance: skyboxRadius * 0.98,
+                skyboxColor: new THREE.Color(0xaad6f5),
+                atmosphericHaze: false,    // Disabled atmospheric haze
+                hazeStartDistance: skyboxRadius * 0.6,
+                hazeFactor: 0
             },
             dunes: {
                 smoothing: true,          // Enable dune edge smoothing
                 smoothingFactor: 0.7,     // How much to smooth dune edges (0-1)
                 ridgeSharpness: 0.4       // Reduced ridge sharpness (0-1)
             },
-            townBuffer: townSize * 1.2 // Buffer distance around town where terrain is flat
+            townBuffer: townSize * 1.2, // Buffer distance around town where terrain is flat
+            edgeFix: {
+                enabled: true,              // Enable special edge treatment
+                heightAtEdge: 5.0,          // Height at the very edge to connect with skybox
+                startDistance: skyboxRadius * 0.85, // Start raising terrain at same point as blur
+                endSharpness: 0.2           // Sharp transition at the very edge
+            }
         };
         
-        console.log(`Creating desert terrain with size ${desertSize} around town of size ${townSize}`);
+        console.log(`Creating optimized desert terrain: size ${desertSize}, extends ${Math.round((desertSize/2) - skyboxRadius)} units beyond skybox`);
         
         // Create noise generators
         this.baseNoise = new PerlinNoise(Math.random());
@@ -200,11 +208,37 @@ export class DesertTerrain {
     
     // Check if a point is near the train track
     isNearTrainTrack(x, z) {
+        // Access global train path if available from scene.js
+        if (window.trainPath) {
+            // Width of the flattened area on each side of the track
+            const trackWidth = 1.5; // Slightly wider to ensure the track is fully flattened
+            
+            // Create a vector for the current point
+            const pointVector = new THREE.Vector3(x, 0, z);
+            
+            // Find the closest point on the curve to our point
+            // Get enough points from the curve for accuracy
+            const curvePoints = window.trainPath.getPoints(200);
+            let closestDist = Infinity;
+            
+            // Find the closest point on the curve
+            for (let i = 0; i < curvePoints.length; i++) {
+                const dist = pointVector.distanceTo(curvePoints[i]);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                }
+            }
+            
+            // Check if the point is within track width
+            return closestDist <= trackWidth;
+        }
+        
+        // Fallback to the old method if trainPath is not available
         // Access global train track constants
         const trackStart = window.TRAIN_TRACK_START || new THREE.Vector3(0, 0, -1000);
         const trackEnd = window.TRAIN_TRACK_END || new THREE.Vector3(0, 0, 1000);
         
-        // Width of the flattened area on each side of the track (1m as requested)
+        // Width of the flattened area on each side of the track
         const trackWidth = 1.0;
         
         // Create a line segment representing the track
@@ -276,12 +310,9 @@ export class DesertTerrain {
         // Create vertex colors array
         const colors = new Float32Array(vertices.length);
         
-        // Edge fade values
-        const edgeFadeStart = this.config.size * 0.4; // Start fading at 40% from center
-        const edgeFadeEnd = this.config.size * 0.5;   // Complete fade at edge
-        
-        // Create buffer for vertex height adjustments (for sand waves)
-        const heightAtEdge = this.config.size * 0.03;  // Raise edges slightly to blend with sky better
+        // Edge fade values - optimized for smaller terrain
+        const edgeFadeStart = this.config.distanceBlur.startDistance;
+        const edgeFadeEnd = this.config.distanceBlur.endDistance;
         
         // Apply noise to create terrain
         for (let i = 0; i < vertices.length; i += 3) {
@@ -352,10 +383,18 @@ export class DesertTerrain {
                 height *= 0.2;
             }
             
-            // Apply edge blending - gradually reduce height near edges
-            if (distFromCenter > edgeFadeStart) {
-                const edgeFactor = 1.0 - Math.min(1, (distFromCenter - edgeFadeStart) / (edgeFadeEnd - edgeFadeStart));
-                height *= edgeFactor;
+            // EDGE FIX - Improved edge handling for horizon blending
+            if (this.config.edgeFix.enabled && distFromCenter > this.config.edgeFix.startDistance) {
+                // Calculate how far we are toward the edge (0 = at start, 1 = at very edge)
+                const edgeProgress = Math.min(1.0, (distFromCenter - this.config.edgeFix.startDistance) / 
+                                     (this.config.size/2 - this.config.edgeFix.startDistance));
+                
+                // Use a curve that rises sharply at the end
+                const raiseFactor = Math.pow(edgeProgress, 1.0 + this.config.edgeFix.endSharpness * 5.0);
+                
+                // As we approach the very edge, terrain height becomes less important
+                // and the fixed edge height becomes more important
+                height = height * (1.0 - raiseFactor) + this.config.edgeFix.heightAtEdge * raiseFactor;
             }
             
             // Apply height to vertex
@@ -414,49 +453,11 @@ export class DesertTerrain {
                 finalColor.lerp(this.config.sandColors[3], Math.abs(microDetail + 0.3) * 0.2);
             }
             
-            // Store color
+            // Set the final vertex color
             const colorIdx = i;
             colors[colorIdx] = finalColor.r;
             colors[colorIdx + 1] = finalColor.g;
             colors[colorIdx + 2] = finalColor.b;
-            
-            // Apply atmospheric haze effect to dune edges and higher areas
-            if (this.config.distanceBlur.atmosphericHaze && distFromCenter > this.config.distanceBlur.hazeStartDistance) {
-                // Calculate haze factor based on distance and height
-                const distanceFactor = Math.min(1.0, (distFromCenter - this.config.distanceBlur.hazeStartDistance) / 
-                                   (this.config.distanceBlur.endDistance - this.config.distanceBlur.hazeStartDistance));
-                
-                // More haze on higher terrain (silhouettes against sky)
-                const heightFactor = Math.min(1.0, height / (this.config.heightScale.dunes * 0.5));
-                
-                // Combine factors with configurable intensity
-                const hazeFactor = distanceFactor * heightFactor * this.config.distanceBlur.hazeFactor;
-                
-                // Apply more intense sky color blending to higher dunes
-                const skyColorBlend = this.config.distanceBlur.skyboxColor.clone();
-                
-                // Apply haze color blend
-                colors[colorIdx] = finalColor.r * (1 - hazeFactor) + skyColorBlend.r * hazeFactor;
-                colors[colorIdx + 1] = finalColor.g * (1 - hazeFactor) + skyColorBlend.g * hazeFactor;
-                colors[colorIdx + 2] = finalColor.b * (1 - hazeFactor) + skyColorBlend.b * hazeFactor;
-            }
-            
-            // Apply distance blur/fog effect by blending with skybox color at edges
-            if (this.config.distanceBlur.enabled && distFromCenter > this.config.distanceBlur.startDistance) {
-                const blurFactor = Math.min(1.0, (distFromCenter - this.config.distanceBlur.startDistance) / 
-                                       (this.config.distanceBlur.endDistance - this.config.distanceBlur.startDistance));
-                
-                // Apply stronger color blend for more dramatic effect
-                colors[colorIdx] = colors[colorIdx] * (1 - blurFactor) + this.config.distanceBlur.skyboxColor.r * blurFactor;
-                colors[colorIdx + 1] = colors[colorIdx + 1] * (1 - blurFactor) + this.config.distanceBlur.skyboxColor.g * blurFactor;
-                colors[colorIdx + 2] = colors[colorIdx + 2] * (1 - blurFactor) + this.config.distanceBlur.skyboxColor.b * blurFactor;
-                
-                // Gradually raise the terrain at edges to create a smooth blend with sky
-                if (distFromCenter > this.config.distanceBlur.startDistance) {
-                    const heightBlendFactor = Math.pow(blurFactor, 2.0); // Stronger curve for height adjustment
-                    vertices[i + 1] += heightAtEdge * heightBlendFactor;
-                }
-            }
         }
         
         // Add colors to geometry
@@ -492,6 +493,35 @@ export class DesertTerrain {
         this.terrainMesh.position.set(0, -0.05, 0);
         
         this.scene.add(this.terrainMesh);
+        
+        // Create a heightfield collision shape in the physics system if available
+        if (window.physics) {
+            console.log("Creating high-resolution terrain collider for physics...");
+            // Sample the terrain heights for physics collision
+            const sizeX = Math.min(this.config.resolution, 128); // Limit for performance
+            const sizeZ = Math.min(this.config.resolution, 128); // Limit for performance
+            const heightData = new Array(sizeX);
+            const elementSize = this.config.size / sizeX;
+            
+            // Initialize heightData array
+            for (let i = 0; i < sizeX; i++) {
+                heightData[i] = new Array(sizeZ);
+                for (let j = 0; j < sizeZ; j++) {
+                    // Calculate world position
+                    const x = (i - sizeX/2) * elementSize;
+                    const z = (j - sizeZ/2) * elementSize;
+                    // Get height from our terrain function
+                    heightData[i][j] = this.getHeightAt(x, z);
+                }
+            }
+            
+            // Call method to update/create the terrain collider
+            if (typeof window.physics.updateTerrainCollider === 'function') {
+                window.physics.updateTerrainCollider(heightData, this.config.size, elementSize);
+            } else {
+                console.warn("Physics system does not support heightfield terrain colliders. Using height sampling instead.");
+            }
+        }
         
         return this.terrainMesh;
     }
@@ -559,7 +589,7 @@ export class DesertTerrain {
         const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
         texture.wrapS = THREE.RepeatWrapping;
         texture.wrapT = THREE.RepeatWrapping;
-        texture.repeat.set(15, 15); // Reduced from 20 to make patterns larger
+        texture.repeat.set(10, 10); // Reduced from 15 for smaller terrain size
         texture.needsUpdate = true;
         
         return texture;
@@ -606,152 +636,234 @@ export class DesertTerrain {
         const texture = new THREE.DataTexture(data, size, size, THREE.RedFormat);
         texture.wrapS = THREE.RepeatWrapping;
         texture.wrapT = THREE.RepeatWrapping;
-        texture.repeat.set(20, 20);
+        texture.repeat.set(12, 12); // Reduced from 20 for smaller terrain size
         texture.needsUpdate = true;
         
         return texture;
     }
     
-    // Add cacti to the scene
-    addCacti() {
-        // Create cactus materials
-        const cactusMaterial = new THREE.MeshStandardMaterial({
-            color: 0x2d5c2d,
-            roughness: 0.8,
-            metalness: 0.2,
-        });
-        
-        // Cactus segments to be instanced
-        const segmentGeometries = [
-            // Main trunk (shorter now)
-            this.createCactusTrunk(2.5, 4, 20, 8),
-            // Arm segment (horizontal part)
-            this.createCactusArm(1.8, 2.2, 8, 8),
-            // Arm tip (vertical part) 
-            this.createCactusTrunk(1.5, 1.8, 12, 8),
+    // Add shrubs to the scene using the shrub1.glb model
+    addShrubs() {
+        // Increased count for better coverage
+        const scatterObjects = [
+            { name: 'shrub1', count: 1200 },
+            { name: 'shrub2', count: 1100 },
+            { name: 'cactus1', count: 400 },
+            { name: 'cactus2', count: 350 },
+            { name: 'rock1', count: 900 },
+            { name: 'rock2', count: 800 }
         ];
         
-        // Create instanced mesh for each geometry type
-        const cactusCount = this.config.cactiCount;
-        const instancedSegments = [];
-        
-        // Create instanced mesh for each segment type
-        for (let i = 0; i < segmentGeometries.length; i++) {
-            const instancedMesh = new THREE.InstancedMesh(
-                segmentGeometries[i],
-                cactusMaterial,
-                cactusCount * (i === 0 ? 1 : 2) // One trunk per cactus, two arms per cactus
-            );
-            instancedMesh.castShadow = true;
-            instancedMesh.receiveShadow = true;
-            instancedSegments.push(instancedMesh);
-        }
-        
-        // Helper matrices and vectors
-        const matrix = new THREE.Matrix4();
+        // Prepare matrix reuse
+        const scatterMatrix = new THREE.Matrix4();
         const position = new THREE.Vector3();
         const rotation = new THREE.Euler();
         const quaternion = new THREE.Quaternion();
         const scale = new THREE.Vector3();
         
-        // Create cacti in a ring pattern around the town
-        for (let i = 0; i < cactusCount; i++) {
-            // Random position avoiding town center area using a ring distribution
-            let x, z, townBlend;
-            const angle = Math.random() * Math.PI * 2; // Random angle around circle
-            const minRadius = Math.max(this.townDimensions.width, this.townDimensions.length) + 150; // Min distance from town center
-            const maxRadius = this.config.size * 0.3; // Max distance from town center
-            
-            // Calculate position in a ring around the town
-            const radius = minRadius + Math.random() * (maxRadius - minRadius);
-            x = Math.cos(angle) * radius;
-            z = Math.sin(angle) * radius;
-            
-            // Verify this position is in the desert part of the terrain
-            townBlend = this.getTownBlendFactor(x, z);
-            
-            // If not in desert, try again with a larger radius
-            if (townBlend < 0.9) {
-                const adjustedRadius = minRadius * 1.2;
-                x = Math.cos(angle) * adjustedRadius;
-                z = Math.sin(angle) * adjustedRadius;
-                townBlend = this.getTownBlendFactor(x, z);
-            }
-            
-            // Calculate height based on terrain
-            const baseHeight = this.baseNoise.noise(x * this.config.noiseScale.base, z * this.config.noiseScale.base) 
-                * this.config.heightScale.base;
-            const duneHeight = this.getDirectionalDuneHeight(x, z);
-            const y = baseHeight + duneHeight;
-            
-            // Random scale and rotation
-            const cactusScale = 0.3 + Math.random() * 0.5; // Slightly smaller scale range
-            const trunkRotation = Math.random() * Math.PI * 2;
-            
-            // Position and orient the trunk
-            position.set(x, y, z);
-            rotation.set(0, trunkRotation, 0);
-            quaternion.setFromEuler(rotation);
-            scale.set(cactusScale, cactusScale, cactusScale);
-            
-            matrix.compose(position, quaternion, scale);
-            instancedSegments[0].setMatrixAt(i, matrix);
-            
-            // Add arms to the cactus with varying heights and angles
-            for (let arm = 0; arm < 2; arm++) {
-                // Calculate arm position on the trunk
-                const armHeight = 5 + Math.random() * 8; // Lower arm position
-                const armAngle = arm * Math.PI + (Math.random() * 0.5 - 0.25);
-                const armLength = 4 + Math.random() * 3;
-                
-                // Horizontal arm segment
-                const armX = x + Math.cos(trunkRotation + armAngle) * 2 * cactusScale;
-                const armZ = z + Math.sin(trunkRotation + armAngle) * 2 * cactusScale;
-                const armY = y + armHeight * cactusScale;
-                
-                position.set(armX, armY, armZ);
-                rotation.set(Math.PI/2, trunkRotation + armAngle + Math.PI/2, 0);
-                quaternion.setFromEuler(rotation);
-                
-                matrix.compose(position, quaternion, scale);
-                instancedSegments[1].setMatrixAt(i * 2 + arm, matrix);
-                
-                // Vertical arm tip
-                const tipX = armX + Math.cos(trunkRotation + armAngle) * armLength * cactusScale;
-                const tipZ = armZ + Math.sin(trunkRotation + armAngle) * armLength * cactusScale;
-                const tipY = armY;
-                
-                position.set(tipX, tipY, tipZ);
-                rotation.set(0, trunkRotation, 0);
-                quaternion.setFromEuler(rotation);
-                
-                matrix.compose(position, quaternion, scale);
-                instancedSegments[2].setMatrixAt(i * 2 + arm, matrix);
+        // Center of town for reference
+        const townCenter = new THREE.Vector3(0, 0, 0);
+        const townConcentrationRadius = this.config.townBuffer * 1.8;
+        
+        // Create skybox reference
+        const skyboxRadius = this.config.size / 2 / 1.1; // Derive from terrain size and buffer
+        
+        console.time('Height map generation');
+        
+        // Pre-compute a height map for improved performance
+        console.time('Height map generation');
+        const heightMap = {};
+        const heightMapResolution = 4; // Reduced from 8 for higher precision matching terrain detail
+        const heightMapRadius = skyboxRadius;
+        
+        // Only create a partial heightmap for major areas to save initialization time
+        for (let x = -heightMapRadius; x <= heightMapRadius; x += heightMapResolution) {
+            for (let z = -heightMapRadius; z <= heightMapRadius; z += heightMapResolution) {
+                // Only calculate heights for points within our radius
+                const distFromCenter = Math.sqrt(x * x + z * z);
+                if (distFromCenter <= heightMapRadius) {
+                    // Use the terrain height function which is much faster than raycasting
+                    const y = this.getHeightAt(x, z);
+                    const key = `${Math.round(x)},${Math.round(z)}`;
+                    heightMap[key] = y;
+                }
             }
         }
+        console.timeEnd('Height map generation');
         
-        // Update matrices and add to scene
-        for (const instancedMesh of instancedSegments) {
-            instancedMesh.instanceMatrix.needsUpdate = true;
-            this.scene.add(instancedMesh);
-        }
+        // Function to get height at a position (using heightmap for speed)
+        const getHeightAtPosition = (x, z) => {
+            // Round to nearest point in our grid
+            const gridX = Math.round(x / heightMapResolution) * heightMapResolution;
+            const gridZ = Math.round(z / heightMapResolution) * heightMapResolution;
+            const key = `${Math.round(gridX)},${Math.round(gridZ)}`;
+            
+            if (heightMap[key] !== undefined) {
+                return heightMap[key];
+            }
+            
+            // Fallback to analytic height function if the point isn't in our map
+            return this.getHeightAt(x, z);
+        };
         
-        return instancedSegments;
-    }
-    
-    // Create a cactus trunk segment
-    createCactusTrunk(topRadius, bottomRadius, height, segments) {
-        const geometry = new THREE.CylinderGeometry(topRadius, bottomRadius, height, segments);
-        geometry.translate(0, height/2, 0);
-        return geometry;
-    }
-    
-    // Create a cactus arm segment (horizontal part)
-    createCactusArm(topRadius, bottomRadius, length, segments) {
-        const geometry = new THREE.CylinderGeometry(topRadius, bottomRadius, length, segments);
-        geometry.rotateZ(Math.PI/2);
-        geometry.translate(length/2, 0, 0);
-        return geometry;
+        const loader = new THREE.GLTFLoader();
+        
+        // For each model, create a random number of instances
+        scatterObjects.forEach(model => {
+            const modelPath = `models/scatter/${model.name}.glb`;
+            
+            // Increase stone/rock spawning by giving them a higher instance count
+            let instanceCount;
+            if (model.name.startsWith('rock')) {
+                // Significantly more rocks (3-4x more than other objects)
+                instanceCount = Math.floor((model.count / scatterObjects.length) * 3.5) + Math.floor(Math.random() * 10);
+            } else {
+                // Normal amount for other objects
+                instanceCount = Math.floor(model.count / scatterObjects.length) + Math.floor(Math.random() * 5);
+            }
+            
+            loader.load(modelPath, (gltf) => {
+                console.log(`Loaded scatter model: ${modelPath}`, gltf);
+                
+                // Find the first mesh in the model
+                let scatterMesh = null;
+                gltf.scene.traverse((child) => {
+                    if (!scatterMesh && child.isMesh) {
+                        scatterMesh = child;
+                    }
+                });
+                
+                if (!scatterMesh) {
+                    console.error(`Could not find mesh in model: ${modelPath}`);
+                    return;
+                }
+                
+                // Create instanced mesh for the scatter object
+                const instancedScatter = new THREE.InstancedMesh(
+                    scatterMesh.geometry,
+                    scatterMesh.material,
+                    instanceCount
+                );
+                instancedScatter.castShadow = true;
+                instancedScatter.receiveShadow = true;
+                
+                // Create scatter objects throughout the terrain
+                let instancesPlaced = 0;
+                
+                // How many to place in the town area (higher percentage for rocks)
+                const townConcentrationPercentage = model.name.startsWith('rock') ? 0.7 : 0.3;
+                const townInstanceCount = Math.floor(instanceCount * townConcentrationPercentage);
+                const outsideInstanceCount = instanceCount - townInstanceCount;
+                
+                // 1. First place objects in and around town
+                for (let i = 0; i < townInstanceCount * 3 && instancesPlaced < townInstanceCount; i++) {
+                    // Random position in or around town center
+                    const angle = Math.random() * Math.PI * 2;
+                    // Concentrate in town and 100m around it
+                    const radius = Math.random() * townConcentrationRadius;
+                    const x = Math.cos(angle) * radius;
+                    const z = Math.sin(angle) * radius;
+                    
+                    // Skip if near train track
+                    if (this.isNearTrainTrack(x, z)) {
+                        continue;
+                    }
+                    
+                    // OPTIMIZED: Use pre-calculated height map instead of raycasting
+                    const y = getHeightAtPosition(x, z);
+                    
+                    // Random scale based on model type
+                    let objectScale;
+                    let yOffset = 0; // Default no offset
+                    
+                    // Apply appropriate scale and y-offset based on model type
+                    if (model.name.startsWith('shrub')) {
+                        objectScale = 0.05 + Math.random() * 0.15;
+                    } else if (model.name.startsWith('cactus')) {
+                        objectScale = 0.08 + Math.random() * 0.12;
+                    } else if (model.name.startsWith('rock')) {
+                        objectScale = 0.03 + Math.random() * 0.10;
+                        // Apply negative y-offset to rocks to partially embed them in the ground
+                        yOffset = -0.5 * objectScale;
+                    }
+                    
+                    // Random rotation
+                    const objectRotation = Math.random() * Math.PI * 2;
+                    
+                    // Position and orient the object precisely on terrain with any needed offset
+                    position.set(x, y + yOffset, z);
+                    rotation.set(0, objectRotation, 0);
+                    quaternion.setFromEuler(rotation);
+                    scale.set(objectScale, objectScale, objectScale);
+                    
+                    scatterMatrix.compose(position, quaternion, scale);
+                    instancedScatter.setMatrixAt(instancesPlaced, scatterMatrix);
+                    instancesPlaced++;
+                }
+                
+                // 2. Then place remaining objects outside town
+                for (let i = 0; i < outsideInstanceCount * 3 && instancesPlaced < instanceCount; i++) {
+                    // Random position in the terrain but outside town radius
+                    const angle = Math.random() * Math.PI * 2;
+                    // Place between town radius and skybox
+                    const radius = townConcentrationRadius + Math.random() * (skyboxRadius - townConcentrationRadius);
+                    const x = Math.cos(angle) * radius;
+                    const z = Math.sin(angle) * radius;
+                    
+                    // Skip if near train track
+                    if (this.isNearTrainTrack(x, z)) {
+                        continue;
+                    }
+                    
+                    // OPTIMIZED: Use pre-calculated height map instead of raycasting
+                    const y = getHeightAtPosition(x, z);
+                    
+                    // Random scale based on model type
+                    let objectScale;
+                    let yOffset = 0; // Default no offset
+                    
+                    // Apply appropriate scale and y-offset based on model type
+                    if (model.name.startsWith('shrub')) {
+                        objectScale = 0.05 + Math.random() * 0.15;
+                    } else if (model.name.startsWith('cactus')) {
+                        objectScale = 0.08 + Math.random() * 0.12;
+                    } else if (model.name.startsWith('rock')) {
+                        objectScale = 0.03 + Math.random() * 0.10;
+                        // Apply negative y-offset to rocks to partially embed them in the ground
+                        yOffset = -0.5 * objectScale;
+                    }
+                    
+                    // Random rotation
+                    const objectRotation = Math.random() * Math.PI * 2;
+                    
+                    // Position and orient the object precisely on terrain with any needed offset
+                    position.set(x, y + yOffset, z);
+                    rotation.set(0, objectRotation, 0);
+                    quaternion.setFromEuler(rotation);
+                    scale.set(objectScale, objectScale, objectScale);
+                    
+                    scatterMatrix.compose(position, quaternion, scale);
+                    instancedScatter.setMatrixAt(instancesPlaced, scatterMatrix);
+                    instancesPlaced++;
+                }
+                
+                // Update matrices and add to scene
+                instancedScatter.instanceMatrix.needsUpdate = true;
+                this.scene.add(instancedScatter);
+                
+                console.log(`Added ${instancesPlaced} ${model.name} objects to terrain`);
+            }, 
+            // Add progress handler
+            (xhr) => {
+                console.log(`${modelPath}: ${(xhr.loaded / xhr.total * 100)}% loaded`);
+            },
+            // Add error handler
+            (error) => {
+                console.error(`Error loading model ${modelPath}:`, error);
+            });
+        });
+        
+        return scatterObjects;
     }
     
     // Generate the entire desert environment
@@ -761,9 +873,62 @@ export class DesertTerrain {
         // Generate terrain mesh
         this.generateTerrain();
         
-        // Add cacti
-        this.addCacti();
+        // Add shrubs
+        this.addShrubs();
         
         console.log("Desert terrain generation complete");
+    }
+    
+    // Fast, analytic height query – matches exactly what we used in generateTerrain()
+    getHeightAt(x, z) {
+        // Get blend factor for town area
+        const townBlend = this.getTownBlendFactor(x, z);
+        
+        // Base terrain height
+        let height = this.baseNoise.noise(
+            x * this.config.noiseScale.base,
+            z * this.config.noiseScale.base
+        ) * this.config.heightScale.base;
+        
+        // Add directional dune height
+        const duneHeight = this.getDirectionalDuneHeight(x, z);
+        height += duneHeight * townBlend;
+        
+        // Add detail height
+        const detailHeight = this.detailNoise.noise(
+            x * this.config.noiseScale.detail,
+            z * this.config.noiseScale.detail
+        ) * this.config.heightScale.detail;
+        
+        height += detailHeight * Math.min(1, duneHeight / 20) * townBlend;
+        
+        // Add micro ripples for sand texture
+        const microRipples = this.microRipplesNoise.noise(
+            x * this.config.noiseScale.microRipples,
+            z * this.config.noiseScale.microRipples
+        ) * this.config.heightScale.microRipples;
+        
+        height += microRipples * 0.3 * townBlend;
+        
+        // Apply edge fix if enabled
+        if (this.config.edgeFix && this.config.edgeFix.enabled) {
+            const worldEdge = this.config.size / 2;
+            const distToEdgeX = worldEdge - Math.abs(x);
+            const distToEdgeZ = worldEdge - Math.abs(z);
+            const distToEdge = Math.min(distToEdgeX, distToEdgeZ);
+            
+            if (distToEdge < this.config.edgeFix.startDistance) {
+                const edgeBlend = 1.0 - (distToEdge / this.config.edgeFix.startDistance);
+                const edgeWeight = Math.pow(edgeBlend, this.config.edgeFix.endSharpness);
+                height = THREE.MathUtils.lerp(height, this.config.edgeFix.heightAtEdge, edgeWeight);
+            }
+        }
+        
+        // Flatten areas near train tracks
+        if (this.isNearTrainTrack(x, z)) {
+            height = 0.1; // Flat height for train tracks
+        }
+        
+        return height;
     }
 } 

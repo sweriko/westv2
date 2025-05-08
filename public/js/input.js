@@ -38,12 +38,24 @@ export function initInput(renderer, player, soundManager) {
 
       // Slightly lower sensitivity when aiming
       const sensitivity = player.isAiming ? 0.001 : 0.002;
+      
+      // Add smoothness to mouse look when on horseback - reduces jankiness
+      const horseSensitivity = sensitivity * 0.85; // Slightly lower sensitivity on horseback
 
-      // Yaw
-      player.group.rotation.y -= movementX * sensitivity;
+      // Handle rotation differently based on riding state
+      if (player.isRidingHorse) {
+        // When on horseback, only rotate the camera, not the player direction
+        // This allows looking around while the horse maintains its own direction
+        player.camera.rotation.y -= movementX * horseSensitivity;
+      } else {
+        // Normal behavior when not on horse
+        player.group.rotation.y -= movementX * sensitivity;
+      }
 
-      // Pitch (limit to avoid flipping)
-      player.camera.rotation.x -= movementY * sensitivity;
+      // Pitch (limit to avoid flipping) - always update camera pitch
+      // Add smoothness to pitch when on horseback - prevents jarring camera movements
+      const pitchSensitivity = player.isRidingHorse ? horseSensitivity : sensitivity;
+      player.camera.rotation.x -= movementY * pitchSensitivity;
       player.camera.rotation.x = Math.max(
         -Math.PI / 2,
         Math.min(Math.PI / 2, player.camera.rotation.x)
@@ -75,9 +87,26 @@ export function initInput(renderer, player, soundManager) {
         break;
       case 'KeyA':
         player.moveLeft = true;
+        // When on horseback, set turning flag instead of directly changing direction
+        if (player.isRidingHorse) {
+          player.isHorseTurningLeft = true;
+        }
         break;
       case 'KeyD':
         player.moveRight = true;
+        // When on horseback, set turning flag instead of directly changing direction
+        if (player.isRidingHorse) {
+          player.isHorseTurningRight = true;
+        }
+        break;
+      case 'KeyT':
+        // Teleport to train wagon
+        if (player.teleportToTrain) {
+          const success = player.teleportToTrain();
+          if (success && soundManager) {
+            soundManager.playSound("teleport");
+          }
+        }
         break;
       case 'KeyF':
         // Alternative aiming method - holding F to aim
@@ -101,6 +130,12 @@ export function initInput(renderer, player, soundManager) {
           if (soundManager) {
             soundManager.playSound(player.activeWeapon === 'shotgun' ? "shotgundraw" : "revolverdraw");
           }
+        }
+        break;
+      case 'KeyH':
+        // Toggle horse riding
+        if (player.toggleHorseRiding) {
+          player.toggleHorseRiding();
         }
         break;
       case 'Space':
@@ -145,9 +180,17 @@ export function initInput(renderer, player, soundManager) {
         break;
       case 'KeyA':
         player.moveLeft = false;
+        // Stop horse turning when key is released
+        if (player.isRidingHorse) {
+          player.isHorseTurningLeft = false;
+        }
         break;
       case 'KeyD':
         player.moveRight = false;
+        // Stop horse turning when key is released
+        if (player.isRidingHorse) {
+          player.isHorseTurningRight = false;
+        }
         break;
       case 'KeyF':
         // Stop aiming when F is released (only if F aiming was active)
@@ -792,9 +835,6 @@ function createMobileControls(player, soundManager) {
           rightControlHint.style.borderColor = 'rgba(255, 255, 255, 0.7)';
           rightControlHint.style.backgroundColor = 'rgba(0, 0, 0, 0.4)';
           
-          // Do not move the entire joystick anymore
-          // Just keep it in place and let only the knob move
-          
           // Start aiming immediately on touch
           player.isAiming = true;
           isAimingWithTouch = true;
@@ -826,10 +866,9 @@ function createMobileControls(player, soundManager) {
   // Touch move handler
   touchOverlay.addEventListener('touchmove', (e) => {
     // Dismiss any instructions/info banner that might be visible
-    const instructionsElement = document.getElementById('instructions');
-    if (instructionsElement && instructionsElement.parentNode) {
-      instructionsElement.parentNode.removeChild(instructionsElement);
-    }
+    document.querySelectorAll('.info-banner').forEach(banner => {
+      banner.style.display = 'none';
+    });
     
     for (let i = 0; i < e.touches.length; i++) {
       const touch = e.touches[i];
@@ -867,6 +906,21 @@ function createMobileControls(player, soundManager) {
           // Left/right based on horizontal movement
           player.moveLeft = deltaX < -CONSTANTS.MOVE_THRESHOLD;
           player.moveRight = deltaX > CONSTANTS.MOVE_THRESHOLD;
+          
+          // When on horseback, also adjust horse direction with left joystick
+          if (player.isRidingHorse) {
+            if (deltaX < -CONSTANTS.MOVE_THRESHOLD) {
+              player.isHorseTurningLeft = true;
+              player.isHorseTurningRight = false;
+            } else if (deltaX > CONSTANTS.MOVE_THRESHOLD) {
+              player.isHorseTurningRight = true;
+              player.isHorseTurningLeft = false;
+            } else {
+              // Reset both flags when joystick is centered
+              player.isHorseTurningLeft = false;
+              player.isHorseTurningRight = false;
+            }
+          }
         }
       }
       
@@ -894,9 +948,18 @@ function createMobileControls(player, soundManager) {
           }
         }
         
-        // Apply camera rotation - allow for 360° movement
-        player.group.rotation.y -= deltaX * CONSTANTS.LOOK_SENSITIVITY * 0.01;
-        player.camera.rotation.x -= deltaY * CONSTANTS.LOOK_SENSITIVITY * 0.01;
+        // Apply camera rotation
+        if (player.isRidingHorse) {
+          // When riding, only rotate the camera, not the player's direction
+          // Apply a reduced sensitivity for smoother horseback camera movement
+          const horseSensitivity = CONSTANTS.LOOK_SENSITIVITY * 0.8;
+          player.camera.rotation.y -= deltaX * horseSensitivity * 0.01;
+          player.camera.rotation.x -= deltaY * horseSensitivity * 0.01;
+        } else {
+          // Regular behavior when not riding
+          player.group.rotation.y -= deltaX * CONSTANTS.LOOK_SENSITIVITY * 0.01;
+          player.camera.rotation.x -= deltaY * CONSTANTS.LOOK_SENSITIVITY * 0.01;
+        }
         
         // Limit vertical rotation to avoid flipping
         player.camera.rotation.x = Math.max(
@@ -914,9 +977,17 @@ function createMobileControls(player, soundManager) {
         const deltaX = touch.clientX - cameraStartPos.x;
         const deltaY = touch.clientY - cameraStartPos.y;
         
-        // Apply full 360° camera rotation based on touch movement
-        player.group.rotation.y -= deltaX * CONSTANTS.CAMERA_ROTATION_SENSITIVITY * 0.01;
-        player.camera.rotation.x -= deltaY * CONSTANTS.CAMERA_ROTATION_SENSITIVITY * 0.01;
+        // Apply camera rotation based on riding state
+        if (player.isRidingHorse) {
+          // When riding, only rotate the camera with reduced sensitivity
+          const horseSensitivity = CONSTANTS.CAMERA_ROTATION_SENSITIVITY * 0.8;
+          player.camera.rotation.y -= deltaX * horseSensitivity * 0.01;
+          player.camera.rotation.x -= deltaY * horseSensitivity * 0.01;
+        } else {
+          // Normal behavior - rotate the whole player group
+          player.group.rotation.y -= deltaX * CONSTANTS.CAMERA_ROTATION_SENSITIVITY * 0.01;
+          player.camera.rotation.x -= deltaY * CONSTANTS.CAMERA_ROTATION_SENSITIVITY * 0.01;
+        }
         
         // Limit vertical rotation to avoid flipping
         player.camera.rotation.x = Math.max(
@@ -946,6 +1017,12 @@ function createMobileControls(player, soundManager) {
         player.moveBackward = false;
         player.moveLeft = false;
         player.moveRight = false;
+        
+        // Stop horse turning
+        if (player.isRidingHorse) {
+          player.isHorseTurningLeft = false;
+          player.isHorseTurningRight = false;
+        }
         
         // Reset visual feedback
         leftControlHint.style.borderColor = 'rgba(255, 255, 255, 0.3)';

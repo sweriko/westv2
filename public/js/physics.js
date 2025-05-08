@@ -58,21 +58,8 @@ export class PhysicsSystem {
   getTerrainHeightAt(x, z) {
     // If desert terrain is available, use its height
     if (window.desertTerrain) {
-      // Get blend factor - 0 means town (flat), 1 means desert
-      const townBlend = window.desertTerrain.getTownBlendFactor(x, z);
-      
-      if (townBlend > 0) {
-        // If outside town area, calculate terrain height
-        const baseNoise = window.desertTerrain.baseNoise.noise(
-          x * window.desertTerrain.config.noiseScale.base, 
-          z * window.desertTerrain.config.noiseScale.base
-        ) * window.desertTerrain.config.heightScale.base;
-        
-        const duneHeight = window.desertTerrain.getDirectionalDuneHeight(x, z);
-        
-        // Scale by blend factor for smooth transition
-        return (baseNoise + duneHeight * townBlend) * townBlend;
-      }
+      // Use the full terrain height calculation directly for perfect matching
+      return window.desertTerrain.getHeightAt(x, z);
     }
     
     // Default height for town area or if terrain not available
@@ -406,5 +393,53 @@ export class PhysicsSystem {
     
     this.bodies = [];
     this.debugMeshes = [];
+  }
+  
+  /**
+   * Updates or creates the terrain collider using heightfield data
+   * @param {Array<Array<number>>} heightData - 2D array of height values
+   * @param {number} size - Total terrain size
+   * @param {number} elementSize - Size of each heightfield element
+   */
+  updateTerrainCollider(heightData, size, elementSize) {
+    console.log(`Creating terrain collider with ${heightData.length}x${heightData[0].length} resolution`);
+    
+    // Remove existing terrain collider if any
+    if (this.terrainBody) {
+      this.world.removeBody(this.terrainBody);
+      // Find the index in bodies array and remove it
+      const index = this.bodies.findIndex(body => body === this.terrainBody);
+      if (index !== -1) {
+        this.bodies.splice(index, 1);
+      }
+    }
+    
+    // Create new heightfield shape
+    const terrainShape = new CANNON.Heightfield(heightData, {
+      elementSize: elementSize 
+    });
+    
+    // Create terrain body
+    this.terrainBody = new CANNON.Body({
+      mass: 0, // Static body
+      material: this.defaultMaterial
+    });
+    
+    // Add the shape
+    this.terrainBody.addShape(terrainShape);
+    
+    // Position the body - centered at 0,0 but offset by half the height down
+    // to align with the visual terrain
+    const minHeight = Math.min(...heightData.flat());
+    this.terrainBody.position.set(0, minHeight, 0);
+    
+    // Tag as terrain for identification
+    this.terrainBody.isTerrain = true;
+    
+    // Add to physics world
+    this.world.addBody(this.terrainBody);
+    this.bodies.push(this.terrainBody);
+    
+    console.log("Terrain collider created successfully");
   }
 }

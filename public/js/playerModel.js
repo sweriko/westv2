@@ -55,6 +55,15 @@ export class ThirdPersonModel {
     this.isAiming = false;
     this.isShooting = false;
     
+    // Horse riding state
+    this.isRidingHorse = false;
+    this.horse = null;
+    this.horseMixer = null;
+    this.horseGallopAction = null;
+    this.horsePositionOffset = new THREE.Vector3(0, 0, 0);
+    this.normalPlayerY = 0;
+    this.horseRidingPlayerY = 1.5; // Height offset when riding
+    
     // Animation timing - reduced for faster transitions
     this.walkBlendTime = 0.15;     // Blend between walking animations
     this.jumpBlendTime = 0.01;     // Almost immediate jump animation
@@ -719,6 +728,15 @@ export class ThirdPersonModel {
       }
     }
     
+    // Update horse mixer if riding
+    if (this.isRidingHorse && this.horseMixer && deltaTime > 0 && deltaTime < 1) {
+      try {
+        this.horseMixer.update(deltaTime);
+      } catch (e) {
+        console.warn("Error updating horse animation mixer:", e);
+      }
+    }
+    
     // Normal interpolation for network movement
     this.group.position.lerp(this.targetPosition, 0.1);
     
@@ -753,6 +771,15 @@ export class ThirdPersonModel {
       this.playDeathAnimation();
       // Don't process any other animation states after playing death animation
       return;
+    }
+    
+    // Update horse riding state first so other updates can take it into account
+    if (playerData.isRidingHorse !== undefined && playerData.isRidingHorse !== this.isRidingHorse) {
+      if (playerData.isRidingHorse) {
+        this.startRidingHorse();
+      } else {
+        this.stopRidingHorse();
+      }
     }
     
     // Handle jump animation first to ensure immediacy
@@ -818,12 +845,13 @@ export class ThirdPersonModel {
       }
 
       // Only process animation transitions if animations are loaded
-      // and we're not in a special state (aiming/shooting/jumping)
-      if (animationsLoaded && !this.isJumping && !this.isAiming && !this.isShooting) {
-        // Check if moving based on position change or explicit walking flag
+      // and we're not in a special state (aiming/shooting/jumping) and not riding a horse
+      if (animationsLoaded && !this.isJumping && !this.isAiming && !this.isShooting && !this.isRidingHorse) {
+        // Check if moving based on position change
         const isMovingNow = distance > 0.03;
         
-        const isRunningNow = distance > 0.2;
+        // Determine if running based on distance or explicit sprint flag
+        const isRunningNow = playerData.isSprinting || distance > 0.2;
         
         // Handle animation state transitions
         if (isMovingNow) {
@@ -1661,6 +1689,109 @@ export class ThirdPersonModel {
     if (skinChanged && this.activeSkin && !this.skinPermissions[this.activeSkin]) {
       // Reset to default skin if current skin is no longer permitted
       this.updateSkin('default');
+    }
+  }
+
+  /**
+   * Load horse model for this player
+   */
+  loadHorseModel() {
+    // Create loader instance
+    const loader = new THREE.GLTFLoader();
+    
+    // Load the horse model
+    loader.load('models/horse1.glb', 
+      // Success callback
+      (gltf) => {
+        this.horse = gltf.scene;
+        
+        // Scale and adjust the horse
+        this.horse.scale.set(2, 2, 2);
+        
+        // Add shadows
+        this.horse.traverse((node) => {
+          if (node.isMesh) {
+            node.castShadow = true;
+            node.receiveShadow = true;
+          }
+        });
+        
+        // Initially hide the horse
+        this.horse.visible = false;
+        
+        // Add the horse to the group
+        this.group.add(this.horse);
+        
+        // Set up animations
+        this.horseMixer = new THREE.AnimationMixer(this.horse);
+        const animations = gltf.animations;
+        
+        // Find and prepare the "Gallop" animation
+        const gallopAnim = animations.find(animation => animation.name === "Gallop");
+        if (gallopAnim) {
+          this.horseGallopAction = this.horseMixer.clipAction(gallopAnim);
+          this.horseGallopAction.timeScale = 1.2; // Slightly faster gallop
+          // Don't play it yet, only when needed
+        } else {
+          console.warn("Gallop animation not found in horse model for player", this.playerId);
+        }
+      },
+      undefined,
+      (error) => {
+        console.error('Error loading horse model:', error);
+      }
+    );
+  }
+
+  /**
+   * Start horse riding for this player
+   */
+  startRidingHorse() {
+    if (!this.isRidingHorse) {
+      this.isRidingHorse = true;
+      
+      // If we don't have the horse model yet, load it
+      if (!this.horse) {
+        this.loadHorseModel();
+      } else {
+        // Show the horse
+        this.horse.visible = true;
+      }
+      
+      // Raise the player model to sit on the horse
+      if (this.playerModel) {
+        this.playerModel.position.y = this.horseRidingPlayerY;
+      }
+      
+      // Start the gallop animation
+      if (this.horseGallopAction) {
+        this.horseGallopAction.play();
+        this.horseGallopAction.setLoop(THREE.LoopRepeat);
+      }
+    }
+  }
+  
+  /**
+   * Stop horse riding for this player
+   */
+  stopRidingHorse() {
+    if (this.isRidingHorse) {
+      this.isRidingHorse = false;
+      
+      // Hide the horse
+      if (this.horse) {
+        this.horse.visible = false;
+      }
+      
+      // Return the player model to normal height
+      if (this.playerModel) {
+        this.playerModel.position.y = this.normalPlayerY;
+      }
+      
+      // Stop the gallop animation
+      if (this.horseGallopAction) {
+        this.horseGallopAction.stop();
+      }
     }
   }
 }

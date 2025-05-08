@@ -15,6 +15,7 @@ import logger from './logger.js';
 // Removed FlyingEagle import
 import { initChat, handleChatMessage, addSystemMessage } from './chat.js';
 import './viewmodel-config.js';
+import { HorseSystem } from './horseSystem.js';
 
 // Check if device is mobile
 function isMobileDevice() {
@@ -103,6 +104,9 @@ async function init() {
     // Load impact sounds
     soundManager.loadSound("woodimpact", "sounds/woodimpact.mp3");
     soundManager.loadSound("fleshimpact", "sounds/fleshimpact.mp3");
+    
+    // Load teleport sound
+    soundManager.loadSound("teleport", "sounds/jumpup.mp3"); // Temporarily use jumpup sound
     
     // Load footstep and jump sounds
     soundManager.loadSound("leftstep", "sounds/leftstep.mp3");
@@ -490,10 +494,10 @@ async function init() {
       }
     };
 
-    // Add a keyboard handler for showing town colliders (T key)
+    // Add a keyboard handler for showing town colliders (V key for Visualization)
     window.addEventListener('keydown', function(event) {
-      // Toggle town collider visualization with T key
-      if (event.code === 'KeyT') {
+      // Toggle town collider visualization with V key
+      if (event.code === 'KeyV') {
         window.showTownColliders = !window.showTownColliders;
         
         // Show/hide collider meshes
@@ -503,7 +507,30 @@ async function init() {
           });
         }
         
-        console.log(`Town collider visualization: ${window.showTownColliders ? 'ENABLED' : 'DISABLED'}`);
+        // Also toggle train wagon floor visibility if it exists
+        if (window.trainWagonFloor) {
+          window.trainWagonFloor.visible = window.showTownColliders;
+        }
+        
+        console.log(`Collider visualization: ${window.showTownColliders ? 'ENABLED' : 'DISABLED'}`);
+      }
+      
+      // Debug train floor status with J key
+      if (event.code === 'KeyJ') {
+        console.log("Train components status:", {
+          trainExists: !!window.train,
+          floorMeshExists: !!window.trainWagonFloor,
+          floorBodyExists: !!window.trainFloorBody,
+          floorMeshName: window.trainWagonFloor ? window.trainWagonFloor.name : 'N/A',
+          floorMeshVisible: window.trainWagonFloor ? window.trainWagonFloor.visible : 'N/A'
+        });
+        
+        // Try to make floor visible for debugging
+        if (window.trainWagonFloor) {
+          window.trainWagonFloor.visible = true;
+          window.trainWagonFloor.material.opacity = 0.5;
+          console.log("Made train floor visible for debugging");
+        }
       }
       
       // Toggle debug mode with P key

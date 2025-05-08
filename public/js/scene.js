@@ -2,14 +2,20 @@
 export let scene;
 import { DesertTerrain } from './desertTerrain.js';
 import { TumbleweedManager } from './tumbleweed.js';
+import { GrassSystem } from './grassSystem.js';
+import { DustParticleEffect } from './dustParticleEffect.js';
+import { SmokeRingEffect } from './smokeRingEffect.js';
 
 // Adding skybox references for animation
 let skyMesh;
 let groundMesh;
-const SKYBOX_ROTATION_SPEED = 0.00001; // Much slower rotation speed
+const SKYBOX_ROTATION_SPEED = 0; // Set to 0 to disable rotation
 
 // Add tumbleweed manager
 let tumbleweedManager;
+
+// Add grass system
+let grassSystem;
 
 // Add train animation components
 let train;
@@ -45,6 +51,11 @@ const texturesLoaded = {
 // Track FPS updates
 let fpsUpdateCounter = 0;
 
+// Initialize global variables
+let camera, renderer, clock, gui;
+let trainSmokeEmitter;
+let dustParticleEffect;
+
 /**
  * Initializes the Three.js scene, camera, and renderer.
  * @returns {Object} - Contains the camera and renderer.
@@ -75,15 +86,14 @@ export function initScene() {
     loadTwoPartSkybox();
   });
   
-  // Change fog color to match desert colors instead of blue
-  const desertFogColor = new THREE.Color(0xec9e5c); // Desert sand color
-  scene.fog = new THREE.Fog(desertFogColor, 250, 900); // Increased fog distances
+  // Remove scene fog entirely
+  scene.fog = null;
 
   const camera = new THREE.PerspectiveCamera(
     75,
     window.innerWidth / window.innerHeight,
     0.1,
-    1000
+    10000  // Increased from 1000 to handle new skyboxRadius of 2500
   );
 
   // Increase ambient light intensity and warm it up to match desert environment
@@ -105,8 +115,12 @@ export function initScene() {
   // Create the desert terrain
   createDesertTerrain();
   
-  // Create circular train track and load train
+  // Create curved train track and load train
   createTrainSystem();
+  loadHorseModel();
+
+  // Initialize effects
+  initEffects();
 
   return { camera, renderer };
 }
@@ -117,46 +131,22 @@ export function initScene() {
  */
 function preloadSkyboxTextures(callback) {
   const textureLoader = new THREE.TextureLoader();
-  let loadedCount = 0;
-  const totalTextures = 2;
   
   // Add cache-busting query parameter
   const timestamp = Date.now();
   const skyUrl = `models/skypart.png?t=${timestamp}`;
-  const groundUrl = `models/groundpart.png?t=${timestamp}`;
   
-  function checkAllLoaded() {
-    loadedCount++;
-    if (loadedCount >= totalTextures) {
-      callback();
-    }
-  }
-
   // Preload the sky texture
   textureLoader.load(
     skyUrl,
     () => {
       console.log("Sky texture preloaded successfully");
-      checkAllLoaded();
+      callback();
     },
     undefined,
     () => {
       console.warn("Sky texture preload failed, continuing anyway");
-      checkAllLoaded();
-    }
-  );
-  
-  // Preload the ground texture
-  textureLoader.load(
-    groundUrl,
-    () => {
-      console.log("Ground texture preloaded successfully");
-      checkAllLoaded();
-    },
-    undefined,
-    () => {
-      console.warn("Ground texture preload failed, continuing anyway");
-      checkAllLoaded();
+      callback();
     }
   );
 }
@@ -165,234 +155,49 @@ function preloadSkyboxTextures(callback) {
  * Loads the two-part skybox with separate ground and animated sky
  */
 function loadTwoPartSkybox() {
+  console.log("Setting up skybox with equirectangular sky only");
+  
   const textureLoader = new THREE.TextureLoader();
-  const skyboxRadius = 900;
+  const skyboxRadius = 2500; // Significantly increased from original 900
   
-  // Function to create sky part with a texture
-  function createSkyPart(skyTexture) {
-    console.log("Creating sky part with texture");
-    
-    // Verify if texture is valid before proceeding
-    if (!skyTexture.image || !skyTexture.image.width || !skyTexture.image.height) {
-      console.error("Sky texture is invalid, using fallback instead");
-      createFallbackSkyPart();
-      return;
-    }
-    
-    // Create sky mesh with LARGER radius (1.01x)
-    const skyGeometry = new THREE.SphereGeometry(skyboxRadius * 1.01, 64, 32);
-    skyGeometry.scale(-1, 1, 1);
-    
-    const skyMaterial = new THREE.MeshBasicMaterial({
-      map: skyTexture,
-      transparent: true,
-      fog: false
-    });
-    
-    // Cleanup previous mesh if exists
-    if (skyMesh) {
-      scene.remove(skyMesh);
-      skyMesh.geometry.dispose();
-      skyMesh.material.dispose();
-    }
-    
-    skyMesh = new THREE.Mesh(skyGeometry, skyMaterial);
-    scene.add(skyMesh);
-    texturesLoaded.skyLoaded = true;
-    console.log("Sky part added to scene");
-  }
+  // Add cache-busting query parameter
+  const timestamp = Date.now();
   
-  // Function to create fallback sky part
-  function createFallbackSkyPart() {
-    console.log("Creating fallback sky part");
-    
-    // Create fallback sky with solid color
-    const skyGeometry = new THREE.SphereGeometry(skyboxRadius * 1.01, 64, 32);
-    skyGeometry.scale(-1, 1, 1);
-    
-    const skyMaterial = new THREE.MeshBasicMaterial({
-      color: 0x87CEEB, // Sky blue
-      side: THREE.BackSide,
-      fog: false
-    });
-    
-    // Cleanup previous mesh if exists
-    if (skyMesh) {
-      scene.remove(skyMesh);
-      skyMesh.geometry.dispose();
-      skyMesh.material.dispose();
-    }
-    
-    skyMesh = new THREE.Mesh(skyGeometry, skyMaterial);
-    scene.add(skyMesh);
-    texturesLoaded.skyLoaded = true;
-    console.log("Fallback sky part added to scene");
-  }
-  
-  // Function to create ground part with a texture
-  function createGroundPart(groundTexture) {
-    console.log("Creating ground part with texture");
-    
-    // Verify if texture is valid before proceeding
-    if (!groundTexture.image || !groundTexture.image.width || !groundTexture.image.height) {
-      console.error("Ground texture is invalid, using fallback instead");
-      createFallbackGroundPart();
-      return;
-    }
-    
-    // Create ground mesh with normal radius
-    const groundGeometry = new THREE.SphereGeometry(skyboxRadius, 64, 32);
-    groundGeometry.scale(-1, 1, 1);
-    
-    const groundMaterial = new THREE.MeshBasicMaterial({
-      map: groundTexture,
-      transparent: true,
-      fog: false
-    });
-    
-    // Cleanup previous mesh if exists
-    if (groundMesh) {
-      scene.remove(groundMesh);
-      groundMesh.geometry.dispose();
-      groundMesh.material.dispose();
-    }
-    
-    groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
-    scene.add(groundMesh);
-    texturesLoaded.groundLoaded = true;
-    console.log("Ground part added to scene");
-  }
-  
-  // Function to create fallback ground part
-  function createFallbackGroundPart() {
-    console.log("Creating fallback ground part");
-    
-    // Create fallback ground with solid color
-    const groundGeometry = new THREE.SphereGeometry(skyboxRadius, 64, 32);
-    groundGeometry.scale(-1, 1, 1);
-    
-    const groundMaterial = new THREE.MeshBasicMaterial({
-      color: 0xAA7755, // Desert sand color
-      side: THREE.BackSide,
-      fog: false
-    });
-    
-    // Cleanup previous mesh if exists
-    if (groundMesh) {
-      scene.remove(groundMesh);
-      groundMesh.geometry.dispose();
-      groundMesh.material.dispose();
-    }
-    
-    groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
-    scene.add(groundMesh);
-    texturesLoaded.groundLoaded = true;
-    console.log("Fallback ground part added to scene");
-  }
-  
-  // Function to load sky texture with retry capability and cache-busting
-  function loadSkyTexture(retryCount = 0) {
-    const maxRetries = 3;
-    texturesLoaded.skyAttempts++;
-    
-    // Add cache-busting query param
-    const timestamp = Date.now();
-    const url = `models/skypart.png?t=${timestamp}`;
-    
-    textureLoader.load(
-      url,
-      function(skyTexture) {
-        console.log("Sky texture loaded successfully");
-        skyTexture.needsUpdate = true; // Ensure texture is updated
-        createSkyPart(skyTexture);
-      },
-      // Progress callback
-      function(xhr) {
-        if (xhr.lengthComputable) {
-          const percentage = Math.round((xhr.loaded / xhr.total) * 100);
-          if (percentage === 25 || percentage === 50 || percentage === 75 || percentage === 100) {
-            console.log(`Loading sky texture: ${percentage}%`);
-          }
-        }
-      },
-      // Error callback
-      function(error) {
-        console.error('Error loading sky texture:', error);
-        
-        // Retry logic with increasing delay
-        if (retryCount < maxRetries) {
-          const delay = 500 * Math.pow(2, retryCount); // Exponential backoff: 500ms, 1000ms, 2000ms
-          console.log(`Retrying sky texture load (attempt ${retryCount + 1}/${maxRetries}) in ${delay}ms...`);
-          setTimeout(() => {
-            loadSkyTexture(retryCount + 1);
-          }, delay);
-        } else {
-          console.error('Failed to load sky texture after multiple attempts');
-          createFallbackSkyPart();
+  // Load the sky part for the scene background
+  const skyUrl = `models/skypart.png?t=${timestamp}`;
+  textureLoader.load(
+    skyUrl,
+    function(skyTexture) {
+      console.log("Sky texture loaded for scene background");
+      
+      // Store the texture for rotation
+      window.skyTexture = skyTexture;
+      
+      // Set the texture mapping type appropriate for equirectangular panoramas
+      skyTexture.mapping = THREE.EquirectangularReflectionMapping;
+      
+      // Set the scene background to this texture
+      scene.background = skyTexture;
+      
+      // Track that we've loaded the sky
+      texturesLoaded.skyLoaded = true;
+    },
+    // Progress callback
+    function(xhr) {
+      if (xhr.lengthComputable) {
+        const percentage = Math.round((xhr.loaded / xhr.total) * 100);
+        if (percentage === 25 || percentage === 50 || percentage === 75 || percentage === 100) {
+          console.log(`Loading sky texture: ${percentage}%`);
         }
       }
-    );
-  }
-  
-  // Function to load ground texture with retry capability and cache-busting
-  function loadGroundTexture(retryCount = 0) {
-    const maxRetries = 3;
-    texturesLoaded.groundAttempts++;
-    
-    // Add cache-busting query param
-    const timestamp = Date.now();
-    const url = `models/groundpart.png?t=${timestamp}`;
-    
-    textureLoader.load(
-      url,
-      function(groundTexture) {
-        console.log("Ground texture loaded successfully");
-        groundTexture.needsUpdate = true; // Ensure texture is updated
-        createGroundPart(groundTexture);
-      },
-      // Progress callback
-      function(xhr) {
-        if (xhr.lengthComputable) {
-          const percentage = Math.round((xhr.loaded / xhr.total) * 100);
-          if (percentage === 25 || percentage === 50 || percentage === 75 || percentage === 100) {
-            console.log(`Loading ground texture: ${percentage}%`);
-          }
-        }
-      },
-      // Error callback
-      function(error) {
-        console.error('Error loading ground texture:', error);
-        
-        // Retry logic with increasing delay
-        if (retryCount < maxRetries) {
-          const delay = 500 * Math.pow(2, retryCount); // Exponential backoff: 500ms, 1000ms, 2000ms
-          console.log(`Retrying ground texture load (attempt ${retryCount + 1}/${maxRetries}) in ${delay}ms...`);
-          setTimeout(() => {
-            loadGroundTexture(retryCount + 1);
-          }, delay);
-        } else {
-          console.error('Failed to load ground texture after multiple attempts');
-          createFallbackGroundPart();
-        }
-      }
-    );
-  }
-  
-  // Start the texture loading with retry capability
-  loadSkyTexture();
-  loadGroundTexture();
-  
-  // Safety check - if textures aren't loaded after 10 seconds, use fallbacks
-  setTimeout(() => {
-    if (!texturesLoaded.skyLoaded && texturesLoaded.skyAttempts < 4) {
-      console.warn("Sky texture not loaded after timeout, using fallback");
-      createFallbackSkyPart();
+    },
+    // Error callback - if all fails, just use a color
+    function(error) {
+      console.error("Failed to load sky texture for background:", error);
+      scene.background = new THREE.Color(0x87CEEB); // Sky blue
+      texturesLoaded.skyLoaded = true;
     }
-    if (!texturesLoaded.groundLoaded && texturesLoaded.groundAttempts < 4) {
-      console.warn("Ground texture not loaded after timeout, using fallback");
-      createFallbackGroundPart();
-    }
-  }, 10000);
+  );
 }
 
 /**
@@ -642,22 +447,48 @@ function createWesternBuilding(x, y, z) {
 }
 
 /**
- * Creates a straight train track and loads the train model
+ * Creates a curved train track (half-circle) around the town area
  */
 function createTrainSystem() {
-  // Create a straight path for the train
-  const numPoints = 2; // Just need two points for a straight line
+  // Create a half-circle path around the town 
+  const numPoints = 50; // More points for a smooth curve
   const points = [];
   const trackElevation = 0.5; // Slightly elevated above ground
 
-  // Add track endpoints
-  points.push(new THREE.Vector3(TRAIN_TRACK_START.x, TRAIN_TRACK_START.y + trackElevation, TRAIN_TRACK_START.z));
-  points.push(new THREE.Vector3(TRAIN_TRACK_END.x, TRAIN_TRACK_END.y + trackElevation, TRAIN_TRACK_END.z));
+  // Use town dimensions to calculate the radius 
+  // Add buffer to ensure the track is outside the town
+  const townRadius = Math.max(window.townDimensions.width, window.townDimensions.length) / 2;
+  const trackRadius = townRadius + 150; // 150 units away from the edge of town
+  
+  // Create half circle arc points
+  for (let i = 0; i < numPoints; i++) {
+    // Generate points for half-circle (180 degrees, from -90 to 90 degrees)
+    const angle = (i / (numPoints - 1)) * Math.PI - (Math.PI / 2);
+    const x = Math.cos(angle) * trackRadius;
+    const z = Math.sin(angle) * trackRadius;
+    points.push(new THREE.Vector3(x, trackElevation, z));
+  }
 
   // Create spline from points
   trainPath = new THREE.CatmullRomCurve3(points);
   trainPath.closed = false; // Open path, not a loop
 
+  // Update global track start and end points for other components
+  TRAIN_TRACK_START.copy(points[0]);
+  TRAIN_TRACK_END.copy(points[points.length - 1]);
+  
+  // Update window globals for terrain and other systems
+  window.TRAIN_TRACK_START = TRAIN_TRACK_START;
+  window.TRAIN_TRACK_END = TRAIN_TRACK_END;
+  window.trainPath = trainPath; // Make trainPath globally accessible
+  
+  // Recalculate track length for timing purposes
+  trainTrackLength = 0;
+  const tempPoints = trainPath.getPoints(200);
+  for (let i = 1; i < tempPoints.length; i++) {
+    trainTrackLength += tempPoints[i].distanceTo(tempPoints[i-1]);
+  }
+  
   // Visualize the path with a line - helps with debugging, can be removed later
   const pathGeometry = new THREE.BufferGeometry().setFromPoints(trainPath.getPoints(200));
   const pathMaterial = new THREE.LineBasicMaterial({ color: 0x888888 });
@@ -670,10 +501,38 @@ function createTrainSystem() {
     'models/train.glb',
     (gltf) => {
       train = gltf.scene;
+      
+      // Store train wagon floor reference for later use
+      let trainWagonFloor = null;
+      
       train.traverse((node) => {
         if (node.isMesh) {
           node.castShadow = true;
           node.receiveShadow = true;
+          
+          // Check for trainwagonfloor mesh
+          if (node.name.toLowerCase() === 'trainwagonfloor') {
+            trainWagonFloor = node;
+            console.log("Found train wagon floor mesh:", node.name);
+            
+            // Make the floor collider invisible (like the town colliders)
+            if (node.material) {
+              // Clone the material to avoid affecting other objects with the same material
+              node.material = node.material.clone();
+              node.material.transparent = true;
+              node.material.opacity = 0.0;
+              node.material.color.set(0x00ff00); // Make floor green in debug mode
+            }
+            
+            // Store the floor mesh for later use
+            window.trainWagonFloor = node;
+            
+            // Ensure the floor is initialized correctly
+            console.log("Train wagon floor initialized, visible in global scope:", !!window.trainWagonFloor);
+            
+            // Hide floor mesh by default (will be toggled by debug mode)
+            node.visible = false;
+          }
         }
       });
       
@@ -717,6 +576,49 @@ function createTrainSystem() {
       
       // Add to scene
       scene.add(train);
+      
+      // Expose train to window
+      window.train = train;
+      exposeTrainToWindow();
+      
+      // Create a physics body for the train wagon floor after the train is positioned
+      if (trainWagonFloor && window.physics) {
+        // Wait a frame to ensure the train is fully positioned
+        setTimeout(() => {
+          // Get the world geometry of the floor
+          const bbox = new THREE.Box3().setFromObject(trainWagonFloor);
+          const size = new THREE.Vector3();
+          bbox.getSize(size);
+          
+          const worldPos = new THREE.Vector3();
+          trainWagonFloor.getWorldPosition(worldPos);
+          
+          // Create a physics body for the floor
+          const halfExtents = new CANNON.Vec3(size.x/2, size.y/2, size.z/2);
+          const shape = new CANNON.Box(halfExtents);
+          
+          const trainFloorBody = new CANNON.Body({
+            mass: 0, // Static for physics purposes, but we'll manually update position
+            position: new CANNON.Vec3(worldPos.x, worldPos.y, worldPos.z),
+            shape: shape
+          });
+          
+          // Mark this body as a train floor for special handling
+          trainFloorBody.isTrainFloor = true;
+          trainFloorBody.trainMesh = trainWagonFloor;
+          
+          // Add to physics world
+          window.physics.world.addBody(trainFloorBody);
+          window.physics.bodies.push(trainFloorBody);
+          
+          // Store for convenient access
+          window.trainFloorBody = trainFloorBody;
+          
+          console.log("Created physics body for train wagon floor");
+        }, 100);
+      } else if (!trainWagonFloor) {
+        console.warn("No trainwagonfloor mesh found in the train model!");
+      }
       
       console.log('Train model loaded successfully');
     },
@@ -871,11 +773,28 @@ function getCurrentTrainDirection() {
 }
 
 /**
- * Updates the train position along the straight track
+ * Explicitly expose train-related objects to the window scope
+ */
+function exposeTrainToWindow() {
+  // Make sure train is exposed
+  window.train = train;
+  
+  console.log("Train objects exposed to window:", {
+    train: !!window.train,
+    trainWagonFloor: !!window.trainWagonFloor,
+    trainFloorBody: !!window.trainFloorBody
+  });
+}
+
+/**
+ * Updates the train position along the curved track
  * @param {number} deltaTime - Time since last frame in seconds
  */
 export function updateTrain(deltaTime) {
   if (!train) return;
+  
+  // Store previous position to calculate velocity
+  const prevPosition = train.position.clone();
   
   if (trainInitialized) {
     // Time-based train movement - calculate position based on global timer
@@ -886,17 +805,29 @@ export function updateTrain(deltaTime) {
     const position = trainPath.getPointAt(trainProgress);
     train.position.copy(position);
     
-    // Check if we need to update train rotation when changing direction
-    const expectedDirection = getCurrentTrainDirection();
-    if (train.userData.lastDirection !== expectedDirection) {
-      // Direction changed, rotate 180 degrees
-      const currentRotation = train.rotation.y;
-      train.rotation.y = currentRotation + Math.PI;
-      train.userData.lastDirection = expectedDirection;
-      
-      if (trainLogMessages) {
-        console.log(`Train changed direction to ${expectedDirection > 0 ? 'forwards' : 'backwards'}`);
-      }
+    // Orient the train to follow the curved path
+    const tangent = trainPath.getTangentAt(trainProgress).normalize();
+    
+    // Make the train face the direction of travel
+    if (trainDirection > 0) {
+      // Forward direction - directly use the tangent
+      const up = new THREE.Vector3(0, 1, 0);
+      train.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1), // default forward vector
+        tangent
+      );
+    } else {
+      // Backward direction - use the opposite tangent
+      const reverseTangent = tangent.clone().negate();
+      train.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1), // default forward vector
+        reverseTangent
+      );
+    }
+    
+    // Log only if verbose logging is enabled
+    if (trainLogMessages && trainProgress % 0.1 < 0.001) {
+      console.log(`Train at progress=${trainProgress.toFixed(4)}, direction=${trainDirection}`);
     }
   } else {
     // Original client-side train movement (fallback before server sync)
@@ -907,24 +838,194 @@ export function updateTrain(deltaTime) {
       // Reached the end, turn around
       trainDirection = -1;
       trainProgress = 1;
-      
-      // Rotate 180 degrees
-      const currentRotation = train.rotation.y;
-      train.rotation.y = currentRotation + Math.PI;
-      
     } else if (trainProgress <= 0) {
       // Reached the start, turn around
       trainDirection = 1;
       trainProgress = 0;
-      
-      // Rotate 180 degrees
-      const currentRotation = train.rotation.y;
-      train.rotation.y = currentRotation + Math.PI;
     }
     
     // Get position on the path
     const position = trainPath.getPointAt(trainProgress);
     train.position.copy(position);
+    
+    // Orient the train to follow the curved path
+    const tangent = trainPath.getTangentAt(trainProgress).normalize();
+    
+    // Make the train face the direction of travel
+    if (trainDirection > 0) {
+      // Forward direction
+      train.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1), // default forward vector
+        tangent
+      );
+    } else {
+      // Backward direction
+      const reverseTangent = tangent.clone().negate();
+      train.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1), // default forward vector
+        reverseTangent
+      );
+    }
+  }
+  
+  // Update train velocity based on position change
+  const newPosition = train.position;
+  const velocity = new THREE.Vector3().subVectors(newPosition, prevPosition).divideScalar(deltaTime);
+  
+  // Store velocity for use with players
+  train.userData.velocity = velocity;
+  
+  // Update the train floor physics body if it exists
+  if (window.trainFloorBody && window.trainWagonFloor) {
+    // Get world position and rotation of the wagon floor mesh
+    const worldPos = new THREE.Vector3();
+    window.trainWagonFloor.getWorldPosition(worldPos);
+    
+    // Update physics body position
+    window.trainFloorBody.position.copy(worldPos);
+    
+    // Get the world quaternion of the floor
+    const worldQuat = new THREE.Quaternion();
+    window.trainWagonFloor.getWorldQuaternion(worldQuat);
+    
+    // Update physics body rotation
+    window.trainFloorBody.quaternion.set(
+      worldQuat.x,
+      worldQuat.y,
+      worldQuat.z,
+      worldQuat.w
+    );
+    
+    // Store velocity in the floor body
+    window.trainFloorBody.trainVelocity = new CANNON.Vec3(
+      velocity.x,
+      velocity.y,
+      velocity.z
+    );
+  }
+  
+  // Periodically ensure train objects are exposed to window
+  if (Math.random() < 0.01) { // About every 100 frames
+    exposeTrainToWindow();
+  }
+  
+  // Update horse positions and animations if loaded
+  if (window.horses && window.horses.length > 0 && train) {
+    // Update animation mixers
+    if (window.horseMixers) {
+      window.horseMixers.forEach(mixer => {
+        mixer.update(deltaTime);
+      });
+    }
+    
+    // Current time for gallop animation
+    const currentTime = Date.now() / 1000;
+    
+    // Position the horses next to the train wagon floor
+    if (window.trainWagonFloor) {
+      // Get train floor position
+      const worldPos = new THREE.Vector3();
+      window.trainWagonFloor.getWorldPosition(worldPos);
+      
+      // Get train rotation
+      const worldQuat = new THREE.Quaternion();
+      train.getWorldQuaternion(worldQuat);
+      
+      // Update each horse with an offset
+      window.horses.forEach((horse, index) => {
+        // Base offset from train
+        const baseOffset = new THREE.Vector3(6, 0, 2);
+        
+        // Use the stored random offsets for natural positioning
+        const randomX = horse.userData.randomOffsetX || 0;
+        const randomZ = horse.userData.randomOffsetZ || 0;
+        const randomY = horse.userData.randomOffsetY || 0;
+        
+        // Calculate galloping bounce using sine wave with realistic easing
+        const phase = horse.userData.gallopPhase || 0;
+        const frequency = horse.userData.gallopFrequency || 15; 
+        const amplitude = horse.userData.gallopAmplitude || 0.08;
+        
+        // Create realistic horse gallop motion with easing
+        // Horses have quick upward movement and slower downward movement
+        let wave = Math.sin(currentTime * frequency + phase);
+        
+        // Add easing: sharper rise, slower fall
+        // When wave is positive (rising), make it more pronounced
+        // When wave is negative (falling), make it more gradual
+        if (wave > 0) {
+            // Fast rise (make positive values more pronounced)
+            wave = Math.pow(wave, 0.7); // Sharper rise with power < 1
+        } else {
+            // Slow fall (make negative values less pronounced)
+            wave = -Math.pow(-wave, 1.3); // More gradual fall with power > 1
+        }
+        
+        const gallopBounce = wave * amplitude;
+        
+        // Create the final offset using primarily the pre-calculated random offsets
+        const offsetDirection = new THREE.Vector3(
+          baseOffset.x + randomX, 
+          baseOffset.y + randomY + gallopBounce, 
+          baseOffset.z + randomZ
+        );
+        
+        // Apply train's rotation to the offset vector
+        offsetDirection.applyQuaternion(worldQuat);
+        
+        // Apply the offset to position the horse
+        horse.position.copy(worldPos).add(offsetDirection);
+        
+        // Match the train's rotation directly (no additional rotation)
+        horse.quaternion.copy(train.quaternion);
+      });
+    } else {
+      // Fallback: If trainWagonFloor isn't available
+      window.horses.forEach((horse, index) => {
+        // Base position
+        horse.position.copy(train.position);
+        
+        // Use the stored random offsets for natural positioning
+        const randomX = horse.userData.randomOffsetX || 0;
+        const randomZ = horse.userData.randomOffsetZ || 0;
+        const randomY = horse.userData.randomOffsetY || 0;
+        
+        // Calculate galloping bounce using sine wave with realistic easing
+        const phase = horse.userData.gallopPhase || 0;
+        const frequency = horse.userData.gallopFrequency || 15; 
+        const amplitude = horse.userData.gallopAmplitude || 0.08;
+        
+        // Create realistic horse gallop motion with easing
+        // Horses have quick upward movement and slower downward movement
+        let wave = Math.sin(currentTime * frequency + phase);
+        
+        // Add easing: sharper rise, slower fall
+        // When wave is positive (rising), make it more pronounced
+        // When wave is negative (falling), make it more gradual
+        if (wave > 0) {
+            // Fast rise (make positive values more pronounced)
+            wave = Math.pow(wave, 0.7); // Sharper rise with power < 1
+        } else {
+            // Slow fall (make negative values less pronounced)
+            wave = -Math.pow(-wave, 1.3); // More gradual fall with power > 1
+        }
+        
+        const gallopBounce = wave * amplitude;
+        
+        // Apply offsets to position the horse
+        horse.position.x += 6 + randomX;  // Base offset from train + random variation
+        horse.position.z += 2 + randomZ;  // Base offset from train + random variation
+        horse.position.y += randomY + gallopBounce;  // Height variation + gallop bounce
+        
+        // Match the train's rotation directly
+        horse.quaternion.copy(train.quaternion);
+      });
+    }
+    
+    // Update dust particle effect if initialized
+    if (dustParticleEffect) {
+      dustParticleEffect.update(deltaTime);
+    }
   }
 }
 
@@ -1011,14 +1112,22 @@ export function updateTrainState(data) {
  * @param {number} deltaTime - Time since last frame in seconds.
  */
 export function updateFPS(renderer, camera, deltaTime) {
-  // Safely rotate the sky part of the skybox if it exists
-  if (skyMesh && skyMesh.rotation) {
-    skyMesh.rotation.y += SKYBOX_ROTATION_SPEED * deltaTime * 1000; // Convert to milliseconds
-  } else if (!skyMesh && !texturesLoaded.skyLoaded) {
-    // If skyMesh doesn't exist but should be loaded, attempt recovery
-    if (texturesLoaded.skyAttempts < 4) {
-      console.warn("Sky mesh missing in animation loop, attempting recovery");
+  // Keep the ground mesh following the camera horizontally if it exists
+  if (groundMesh && camera) {
+    groundMesh.position.x = camera.position.x;
+    groundMesh.position.z = camera.position.z;
+    groundMesh.position.y = 20; // Maintain the height offset
+  }
+  
+  // Removed skybox rotation code
+  
+  // If skybox is missing, try to recover (but only once per second)
+  if (!texturesLoaded.skyLoaded && texturesLoaded.skyAttempts < 4) {
+    // Only attempt recovery every 60 frames (approximately once per second)
+    if (fpsUpdateCounter % 60 === 0) {
+      console.warn("Skybox missing in animation loop, attempting recovery");
       loadTwoPartSkybox();
+      texturesLoaded.skyAttempts++;
     }
   }
   
@@ -1033,11 +1142,19 @@ export function updateFPS(renderer, camera, deltaTime) {
       }
       fpsUpdateCounter = 0;
     }
+  } else {
+    // Still increment counter for skybox recovery timing
+    fpsUpdateCounter++;
   }
   
   // Update tumbleweed positions if manager exists
   if (tumbleweedManager) {
     tumbleweedManager.update(deltaTime);
+  }
+  
+  // Update grass system if it exists
+  if (grassSystem) {
+    grassSystem.update(deltaTime, camera.position);
   }
   
   // Update train position
@@ -1062,6 +1179,9 @@ function createDesertTerrain() {
     
     // Initialize tumbleweed manager after terrain is created
     initializeTumbleweedManager();
+    
+    // Initialize grass system after terrain is created
+    initializeGrassSystem();
   } else {
     // If town dimensions aren't available yet, wait for them
     console.log("Waiting for town dimensions before creating desert terrain...");
@@ -1076,6 +1196,9 @@ function createDesertTerrain() {
         
         // Initialize tumbleweed manager after terrain is created
         initializeTumbleweedManager();
+        
+        // Initialize grass system after terrain is created
+        initializeGrassSystem();
         
         clearInterval(checkInterval);
       }
@@ -1103,6 +1226,37 @@ function initializeTumbleweedManager() {
 }
 
 /**
+ * Initializes the grass system
+ */
+function initializeGrassSystem() {
+  // Skip grass initialization on mobile devices for better performance
+  if (window.isMobile) {
+    console.log("Skipping grass system initialization on mobile device for performance");
+    return;
+  }
+
+  if (window.renderer && window.renderer.camera) {
+    console.log("Initializing grass system...");
+    
+    // Dispose of the previous system if it exists
+    if (grassSystem) {
+      grassSystem.dispose();
+    }
+    
+    // Create new grass system
+    grassSystem = new GrassSystem(scene, window.renderer.camera);
+    
+    // Store grass system instance for potential access later
+    window.grassSystem = grassSystem;
+  } else {
+    console.warn("Camera not available, delaying grass system initialization");
+    
+    // Try again in a moment when the camera should be available
+    setTimeout(initializeGrassSystem, 500);
+  }
+}
+
+/**
  * Cleans up resources when switching scene or closing
  */
 export function cleanupScene() {
@@ -1114,5 +1268,138 @@ export function cleanupScene() {
     tumbleweedManager = null;
   }
   
+  // Dispose of grass system
+  if (grassSystem) {
+    grassSystem.dispose();
+    grassSystem = null;
+  }
+  
   // Clean up other resources as needed
+}
+
+/**
+ * Loads and sets up the horse models that run alongside the train
+ */
+function loadHorseModel() {
+  const loader = new THREE.GLTFLoader();
+  
+  // Array to store all horse objects
+  window.horses = [];
+  window.horseMixers = [];
+  
+  // Horse model files
+  const horseModels = [
+    'models/horse1.glb',
+    'models/horse2.glb'
+  ];
+  
+  // Create 6 horses alternating between the two models
+  for (let i = 0; i < 6; i++) {
+    // Get model index (0, 1, 0, 1, 0, 1)
+    const modelIndex = i % horseModels.length;
+    const modelPath = horseModels[modelIndex];
+    
+    // Store random offsets for consistent positioning with more variation
+    // Create zigzag pattern with increased spacing
+    const positions = [
+      { x: -5.0 + (Math.random() - 0.5) * 3, z: 1.0 + Math.random() * 3.0 },  // 0: front left
+      { x: 0.0 + (Math.random() - 0.5) * 3, z: 7.0 + Math.random() * 3.0 },   // 1: middle-back
+      { x: 5.0 + (Math.random() - 0.5) * 3, z: 12.0 + Math.random() * 3.0 },  // 2: far back right
+      { x: -3.0 + (Math.random() - 0.5) * 3, z: 4.0 + Math.random() * 3.0 },  // 3: middle left
+      { x: 4.0 + (Math.random() - 0.5) * 3, z: 3.0 + Math.random() * 3.0 },   // 4: front right
+      { x: 1.0 + (Math.random() - 0.5) * 3, z: 9.0 + Math.random() * 3.0 }    // 5: back middle
+    ];
+    
+    // Load the horse model
+    loader.load(
+      modelPath,
+      (gltf) => {
+        const horse = gltf.scene;
+        
+        // Scale and adjust the horse as needed
+        horse.scale.set(2, 2, 2);
+        
+        // Add shadows
+        horse.traverse((node) => {
+          if (node.isMesh) {
+            node.castShadow = true;
+            node.receiveShadow = true;
+          }
+        });
+        
+        // Store positioning data
+        horse.userData = horse.userData || {};
+        horse.userData.randomOffsetX = positions[i].x;
+        horse.userData.randomOffsetZ = positions[i].z;
+        horse.userData.randomOffsetY = (Math.random() - 0.5) * 0.3; // Small height variation
+        
+        // Add galloping bounce parameters
+        horse.userData.gallopPhase = Math.random() * Math.PI * 2; // Random starting phase
+        horse.userData.gallopFrequency = 15 + Math.random() * 3; // Faster bounce frequency (15-18 Hz)
+        horse.userData.gallopAmplitude = 0.08 + Math.random() * 0.04; // Much smaller bounce height (0.08-0.12)
+        
+        // Set up animation
+        const mixer = new THREE.AnimationMixer(horse);
+        const animations = gltf.animations;
+        
+        // Find and play the "Gallop" animation
+        const gallopAnim = animations.find(animation => animation.name === "Gallop");
+        if (gallopAnim) {
+          const action = mixer.clipAction(gallopAnim);
+          
+          // Moderate animation speed for more natural galloping
+          const speedVariation = 1.1 + Math.random() * 0.2; // 1.1 to 1.3 speed variation
+          action.timeScale = speedVariation;
+          
+          // Store the timeScale in userData for reference
+          horse.userData.animationSpeed = speedVariation;
+          
+          action.play();
+          action.setLoop(THREE.LoopRepeat);
+        } else {
+          console.warn("Gallop animation not found in horse model");
+        }
+        
+        // Find the toe bone for dust effects and attach dust system
+        let toeBone = null;
+        horse.traverse((node) => {
+          // Look for the E_toeR bone
+          if (node.isBone && node.name === "E_toeR") {
+            toeBone = node;
+          }
+        });
+        
+        // Add to scene
+        scene.add(horse);
+        
+        // Store references for animation updates
+        window.horses.push(horse);
+        window.horseMixers.push(mixer);
+        
+        // If we found the toe bone and dust effect is initialized, attach dust
+        if (toeBone && dustParticleEffect) {
+          dustParticleEffect.createForHorse(toeBone, "horse_" + i);
+        }
+      },
+      (xhr) => {
+        console.log(`Loading horse model ${modelPath}: ${(xhr.loaded / xhr.total) * 100}% loaded`);
+      },
+      (error) => {
+        console.error(`Error loading horse model ${modelPath}:`, error);
+      }
+    );
+  }
+  
+  console.log('Horse models loading initiated');
+}
+
+/**
+ * Initialize visual effects systems
+ */
+function initEffects() {
+  // Initialize smoke ring effect for guns (preload to avoid stuttering)
+  window.smokeRingEffect = new SmokeRingEffect(scene).preload();
+  
+  // Initialize dust particle effect for horses
+  dustParticleEffect = new DustParticleEffect(scene).preload();
 }

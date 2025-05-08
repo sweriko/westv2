@@ -1,13 +1,18 @@
 <goal>
-I want to fully remove any npc/bot logic, please list me all the filenames that contain related logic so that I know exactly what to cleanup.
+ 
 </goal>
 
+<output_requirements>
+- Don't be lazy, provide thorough, high-quality code.
+- Provide complete file contents for any modified or new files.
+- Write clean, well-documented code with appropriate error handling.
+- Never use ellipsis (...) or placeholder comments, as an excuse to omit code for brewity.
+</output_requirements>
 
 <context>
     <codebase>
 Directory structure:
 └── /./
-    ├── LICENSE
     ├── package.json
     ├── public/
     │   ├── css/
@@ -19,13 +24,13 @@ Directory structure:
     │   │   ├── chat.js
     │   │   ├── desertTerrain.js
     │   │   ├── effects.js
+    │   │   ├── grassSystem.js
     │   │   ├── input.js
     │   │   ├── logger.js
     │   │   ├── main.js
     │   │   ├── multiplayerManager.js
     │   │   ├── network.js
     │   │   ├── networkManager.js
-    │   │   ├── npcManager.js
     │   │   ├── phantom-wallet.js
     │   │   ├── physics.js
     │   │   ├── player.js
@@ -43,684 +48,42 @@ Directory structure:
     │   │   ├── bartender.glb
     │   │   ├── eagle.glb
     │   │   ├── playermodel.glb
+    │   │   ├── scatter/
+    │   │   │   ├── rock1.glb
+    │   │   │   ├── rock2.glb
+    │   │   │   ├── rock3.glb
+    │   │   │   ├── rock4.glb
+    │   │   │   ├── rock5.glb
+    │   │   │   ├── rock6.glb
+    │   │   │   ├── rock7.glb
+    │   │   │   ├── rock8.glb
+    │   │   │   ├── rock9.glb
+    │   │   │   ├── scrub1.glb
+    │   │   │   ├── scrub2.glb
+    │   │   │   ├── scrub3.glb
+    │   │   │   ├── scrub4.glb
+    │   │   │   ├── shrub1.glb
+    │   │   │   ├── shrub2.glb
+    │   │   │   ├── shrub3.glb
+    │   │   │   ├── shrub4.glb
+    │   │   │   └── shrub5.glb
     │   │   ├── sheriff.glb
     │   │   ├── textures/
     │   │   ├── town.glb
+    │   │   ├── towndoubleold.glb
+    │   │   ├── towndriblle.glb
     │   │   ├── townold2.glb
+    │   │   ├── townoldimoldy.glb
     │   │   ├── train.glb
+    │   │   ├── traincabin.glb
+    │   │   ├── trainold.glb
+    │   │   ├── trainold2.glb
     │   │   ├── tumbleweed.glb
     │   │   ├── viewmodel.glb
     │   │   └── viewmodelold.glb
     │   ├── sounds/
     │   └── wallet-demo.html
-    ├── readme.md
     └── server.js
-
-================================================
-File: /LICENSE
-================================================
-                    GNU AFFERO GENERAL PUBLIC LICENSE
-                       Version 3, 19 November 2007
-
- Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
- Everyone is permitted to copy and distribute verbatim copies
- of this license document, but changing it is not allowed.
-
-                            Preamble
-
-  The GNU Affero General Public License is a free, copyleft license for
-software and other kinds of works, specifically designed to ensure
-cooperation with the community in the case of network server software.
-
-  The licenses for most software and other practical works are designed
-to take away your freedom to share and change the works.  By contrast,
-our General Public Licenses are intended to guarantee your freedom to
-share and change all versions of a program--to make sure it remains free
-software for all its users.
-
-  When we speak of free software, we are referring to freedom, not
-price.  Our General Public Licenses are designed to make sure that you
-have the freedom to distribute copies of free software (and charge for
-them if you wish), that you receive source code or can get it if you
-want it, that you can change the software or use pieces of it in new
-free programs, and that you know you can do these things.
-
-  Developers that use our General Public Licenses protect your rights
-with two steps: (1) assert copyright on the software, and (2) offer
-you this License which gives you legal permission to copy, distribute
-and/or modify the software.
-
-  A secondary benefit of defending all users' freedom is that
-improvements made in alternate versions of the program, if they
-receive widespread use, become available for other developers to
-incorporate.  Many developers of free software are heartened and
-encouraged by the resulting cooperation.  However, in the case of
-software used on network servers, this result may fail to come about.
-The GNU General Public License permits making a modified version and
-letting the public access it on a server without ever releasing its
-source code to the public.
-
-  The GNU Affero General Public License is designed specifically to
-ensure that, in such cases, the modified source code becomes available
-to the community.  It requires the operator of a network server to
-provide the source code of the modified version running there to the
-users of that server.  Therefore, public use of a modified version, on
-a publicly accessible server, gives the public access to the source
-code of the modified version.
-
-  An older license, called the Affero General Public License and
-published by Affero, was designed to accomplish similar goals.  This is
-a different license, not a version of the Affero GPL, but Affero has
-released a new version of the Affero GPL which permits relicensing under
-this license.
-
-  The precise terms and conditions for copying, distribution and
-modification follow.
-
-                       TERMS AND CONDITIONS
-
-  0. Definitions.
-
-  "This License" refers to version 3 of the GNU Affero General Public License.
-
-  "Copyright" also means copyright-like laws that apply to other kinds of
-works, such as semiconductor masks.
-
-  "The Program" refers to any copyrightable work licensed under this
-License.  Each licensee is addressed as "you".  "Licensees" and
-"recipients" may be individuals or organizations.
-
-  To "modify" a work means to copy from or adapt all or part of the work
-in a fashion requiring copyright permission, other than the making of an
-exact copy.  The resulting work is called a "modified version" of the
-earlier work or a work "based on" the earlier work.
-
-  A "covered work" means either the unmodified Program or a work based
-on the Program.
-
-  To "propagate" a work means to do anything with it that, without
-permission, would make you directly or secondarily liable for
-infringement under applicable copyright law, except executing it on a
-computer or modifying a private copy.  Propagation includes copying,
-distribution (with or without modification), making available to the
-public, and in some countries other activities as well.
-
-  To "convey" a work means any kind of propagation that enables other
-parties to make or receive copies.  Mere interaction with a user through
-a computer network, with no transfer of a copy, is not conveying.
-
-  An interactive user interface displays "Appropriate Legal Notices"
-to the extent that it includes a convenient and prominently visible
-feature that (1) displays an appropriate copyright notice, and (2)
-tells the user that there is no warranty for the work (except to the
-extent that warranties are provided), that licensees may convey the
-work under this License, and how to view a copy of this License.  If
-the interface presents a list of user commands or options, such as a
-menu, a prominent item in the list meets this criterion.
-
-  1. Source Code.
-
-  The "source code" for a work means the preferred form of the work
-for making modifications to it.  "Object code" means any non-source
-form of a work.
-
-  A "Standard Interface" means an interface that either is an official
-standard defined by a recognized standards body, or, in the case of
-interfaces specified for a particular programming language, one that
-is widely used among developers working in that language.
-
-  The "System Libraries" of an executable work include anything, other
-than the work as a whole, that (a) is included in the normal form of
-packaging a Major Component, but which is not part of that Major
-Component, and (b) serves only to enable use of the work with that
-Major Component, or to implement a Standard Interface for which an
-implementation is available to the public in source code form.  A
-"Major Component", in this context, means a major essential component
-(kernel, window system, and so on) of the specific operating system
-(if any) on which the executable work runs, or a compiler used to
-produce the work, or an object code interpreter used to run it.
-
-  The "Corresponding Source" for a work in object code form means all
-the source code needed to generate, install, and (for an executable
-work) run the object code and to modify the work, including scripts to
-control those activities.  However, it does not include the work's
-System Libraries, or general-purpose tools or generally available free
-programs which are used unmodified in performing those activities but
-which are not part of the work.  For example, Corresponding Source
-includes interface definition files associated with source files for
-the work, and the source code for shared libraries and dynamically
-linked subprograms that the work is specifically designed to require,
-such as by intimate data communication or control flow between those
-subprograms and other parts of the work.
-
-  The Corresponding Source need not include anything that users
-can regenerate automatically from other parts of the Corresponding
-Source.
-
-  The Corresponding Source for a work in source code form is that
-same work.
-
-  2. Basic Permissions.
-
-  All rights granted under this License are granted for the term of
-copyright on the Program, and are irrevocable provided the stated
-conditions are met.  This License explicitly affirms your unlimited
-permission to run the unmodified Program.  The output from running a
-covered work is covered by this License only if the output, given its
-content, constitutes a covered work.  This License acknowledges your
-rights of fair use or other equivalent, as provided by copyright law.
-
-  You may make, run and propagate covered works that you do not
-convey, without conditions so long as your license otherwise remains
-in force.  You may convey covered works to others for the sole purpose
-of having them make modifications exclusively for you, or provide you
-with facilities for running those works, provided that you comply with
-the terms of this License in conveying all material for which you do
-not control copyright.  Those thus making or running the covered works
-for you must do so exclusively on your behalf, under your direction
-and control, on terms that prohibit them from making any copies of
-your copyrighted material outside their relationship with you.
-
-  Conveying under any other circumstances is permitted solely under
-the conditions stated below.  Sublicensing is not allowed; section 10
-makes it unnecessary.
-
-  3. Protecting Users' Legal Rights From Anti-Circumvention Law.
-
-  No covered work shall be deemed part of an effective technological
-measure under any applicable law fulfilling obligations under article
-11 of the WIPO copyright treaty adopted on 20 December 1996, or
-similar laws prohibiting or restricting circumvention of such
-measures.
-
-  When you convey a covered work, you waive any legal power to forbid
-circumvention of technological measures to the extent such circumvention
-is effected by exercising rights under this License with respect to
-the covered work, and you disclaim any intention to limit operation or
-modification of the work as a means of enforcing, against the work's
-users, your or third parties' legal rights to forbid circumvention of
-technological measures.
-
-  4. Conveying Verbatim Copies.
-
-  You may convey verbatim copies of the Program's source code as you
-receive it, in any medium, provided that you conspicuously and
-appropriately publish on each copy an appropriate copyright notice;
-keep intact all notices stating that this License and any
-non-permissive terms added in accord with section 7 apply to the code;
-keep intact all notices of the absence of any warranty; and give all
-recipients a copy of this License along with the Program.
-
-  You may charge any price or no price for each copy that you convey,
-and you may offer support or warranty protection for a fee.
-
-  5. Conveying Modified Source Versions.
-
-  You may convey a work based on the Program, or the modifications to
-produce it from the Program, in the form of source code under the
-terms of section 4, provided that you also meet all of these conditions:
-
-    a) The work must carry prominent notices stating that you modified
-    it, and giving a relevant date.
-
-    b) The work must carry prominent notices stating that it is
-    released under this License and any conditions added under section
-    7.  This requirement modifies the requirement in section 4 to
-    "keep intact all notices".
-
-    c) You must license the entire work, as a whole, under this
-    License to anyone who comes into possession of a copy.  This
-    License will therefore apply, along with any applicable section 7
-    additional terms, to the whole of the work, and all its parts,
-    regardless of how they are packaged.  This License gives no
-    permission to license the work in any other way, but it does not
-    invalidate such permission if you have separately received it.
-
-    d) If the work has interactive user interfaces, each must display
-    Appropriate Legal Notices; however, if the Program has interactive
-    interfaces that do not display Appropriate Legal Notices, your
-    work need not make them do so.
-
-  A compilation of a covered work with other separate and independent
-works, which are not by their nature extensions of the covered work,
-and which are not combined with it such as to form a larger program,
-in or on a volume of a storage or distribution medium, is called an
-"aggregate" if the compilation and its resulting copyright are not
-used to limit the access or legal rights of the compilation's users
-beyond what the individual works permit.  Inclusion of a covered work
-in an aggregate does not cause this License to apply to the other
-parts of the aggregate.
-
-  6. Conveying Non-Source Forms.
-
-  You may convey a covered work in object code form under the terms
-of sections 4 and 5, provided that you also convey the
-machine-readable Corresponding Source under the terms of this License,
-in one of these ways:
-
-    a) Convey the object code in, or embodied in, a physical product
-    (including a physical distribution medium), accompanied by the
-    Corresponding Source fixed on a durable physical medium
-    customarily used for software interchange.
-
-    b) Convey the object code in, or embodied in, a physical product
-    (including a physical distribution medium), accompanied by a
-    written offer, valid for at least three years and valid for as
-    long as you offer spare parts or customer support for that product
-    model, to give anyone who possesses the object code either (1) a
-    copy of the Corresponding Source for all the software in the
-    product that is covered by this License, on a durable physical
-    medium customarily used for software interchange, for a price no
-    more than your reasonable cost of physically performing this
-    conveying of source, or (2) access to copy the
-    Corresponding Source from a network server at no charge.
-
-    c) Convey individual copies of the object code with a copy of the
-    written offer to provide the Corresponding Source.  This
-    alternative is allowed only occasionally and noncommercially, and
-    only if you received the object code with such an offer, in accord
-    with subsection 6b.
-
-    d) Convey the object code by offering access from a designated
-    place (gratis or for a charge), and offer equivalent access to the
-    Corresponding Source in the same way through the same place at no
-    further charge.  You need not require recipients to copy the
-    Corresponding Source along with the object code.  If the place to
-    copy the object code is a network server, the Corresponding Source
-    may be on a different server (operated by you or a third party)
-    that supports equivalent copying facilities, provided you maintain
-    clear directions next to the object code saying where to find the
-    Corresponding Source.  Regardless of what server hosts the
-    Corresponding Source, you remain obligated to ensure that it is
-    available for as long as needed to satisfy these requirements.
-
-    e) Convey the object code using peer-to-peer transmission, provided
-    you inform other peers where the object code and Corresponding
-    Source of the work are being offered to the general public at no
-    charge under subsection 6d.
-
-  A separable portion of the object code, whose source code is excluded
-from the Corresponding Source as a System Library, need not be
-included in conveying the object code work.
-
-  A "User Product" is either (1) a "consumer product", which means any
-tangible personal property which is normally used for personal, family,
-or household purposes, or (2) anything designed or sold for incorporation
-into a dwelling.  In determining whether a product is a consumer product,
-doubtful cases shall be resolved in favor of coverage.  For a particular
-product received by a particular user, "normally used" refers to a
-typical or common use of that class of product, regardless of the status
-of the particular user or of the way in which the particular user
-actually uses, or expects or is expected to use, the product.  A product
-is a consumer product regardless of whether the product has substantial
-commercial, industrial or non-consumer uses, unless such uses represent
-the only significant mode of use of the product.
-
-  "Installation Information" for a User Product means any methods,
-procedures, authorization keys, or other information required to install
-and execute modified versions of a covered work in that User Product from
-a modified version of its Corresponding Source.  The information must
-suffice to ensure that the continued functioning of the modified object
-code is in no case prevented or interfered with solely because
-modification has been made.
-
-  If you convey an object code work under this section in, or with, or
-specifically for use in, a User Product, and the conveying occurs as
-part of a transaction in which the right of possession and use of the
-User Product is transferred to the recipient in perpetuity or for a
-fixed term (regardless of how the transaction is characterized), the
-Corresponding Source conveyed under this section must be accompanied
-by the Installation Information.  But this requirement does not apply
-if neither you nor any third party retains the ability to install
-modified object code on the User Product (for example, the work has
-been installed in ROM).
-
-  The requirement to provide Installation Information does not include a
-requirement to continue to provide support service, warranty, or updates
-for a work that has been modified or installed by the recipient, or for
-the User Product in which it has been modified or installed.  Access to a
-network may be denied when the modification itself materially and
-adversely affects the operation of the network or violates the rules and
-protocols for communication across the network.
-
-  Corresponding Source conveyed, and Installation Information provided,
-in accord with this section must be in a format that is publicly
-documented (and with an implementation available to the public in
-source code form), and must require no special password or key for
-unpacking, reading or copying.
-
-  7. Additional Terms.
-
-  "Additional permissions" are terms that supplement the terms of this
-License by making exceptions from one or more of its conditions.
-Additional permissions that are applicable to the entire Program shall
-be treated as though they were included in this License, to the extent
-that they are valid under applicable law.  If additional permissions
-apply only to part of the Program, that part may be used separately
-under those permissions, but the entire Program remains governed by
-this License without regard to the additional permissions.
-
-  When you convey a copy of a covered work, you may at your option
-remove any additional permissions from that copy, or from any part of
-it.  (Additional permissions may be written to require their own
-removal in certain cases when you modify the work.)  You may place
-additional permissions on material, added by you to a covered work,
-for which you have or can give appropriate copyright permission.
-
-  Notwithstanding any other provision of this License, for material you
-add to a covered work, you may (if authorized by the copyright holders of
-that material) supplement the terms of this License with terms:
-
-    a) Disclaiming warranty or limiting liability differently from the
-    terms of sections 15 and 16 of this License; or
-
-    b) Requiring preservation of specified reasonable legal notices or
-    author attributions in that material or in the Appropriate Legal
-    Notices displayed by works containing it; or
-
-    c) Prohibiting misrepresentation of the origin of that material, or
-    requiring that modified versions of such material be marked in
-    reasonable ways as different from the original version; or
-
-    d) Limiting the use for publicity purposes of names of licensors or
-    authors of the material; or
-
-    e) Declining to grant rights under trademark law for use of some
-    trade names, trademarks, or service marks; or
-
-    f) Requiring indemnification of licensors and authors of that
-    material by anyone who conveys the material (or modified versions of
-    it) with contractual assumptions of liability to the recipient, for
-    any liability that these contractual assumptions directly impose on
-    those licensors and authors.
-
-  All other non-permissive additional terms are considered "further
-restrictions" within the meaning of section 10.  If the Program as you
-received it, or any part of it, contains a notice stating that it is
-governed by this License along with a term that is a further
-restriction, you may remove that term.  If a license document contains
-a further restriction but permits relicensing or conveying under this
-License, you may add to a covered work material governed by the terms
-of that license document, provided that the further restriction does
-not survive such relicensing or conveying.
-
-  If you add terms to a covered work in accord with this section, you
-must place, in the relevant source files, a statement of the
-additional terms that apply to those files, or a notice indicating
-where to find the applicable terms.
-
-  Additional terms, permissive or non-permissive, may be stated in the
-form of a separately written license, or stated as exceptions;
-the above requirements apply either way.
-
-  8. Termination.
-
-  You may not propagate or modify a covered work except as expressly
-provided under this License.  Any attempt otherwise to propagate or
-modify it is void, and will automatically terminate your rights under
-this License (including any patent licenses granted under the third
-paragraph of section 11).
-
-  However, if you cease all violation of this License, then your
-license from a particular copyright holder is reinstated (a)
-provisionally, unless and until the copyright holder explicitly and
-finally terminates your license, and (b) permanently, if the copyright
-holder fails to notify you of the violation by some reasonable means
-prior to 60 days after the cessation.
-
-  Moreover, your license from a particular copyright holder is
-reinstated permanently if the copyright holder notifies you of the
-violation by some reasonable means, this is the first time you have
-received notice of violation of this License (for any work) from that
-copyright holder, and you cure the violation prior to 30 days after
-your receipt of the notice.
-
-  Termination of your rights under this section does not terminate the
-licenses of parties who have received copies or rights from you under
-this License.  If your rights have been terminated and not permanently
-reinstated, you do not qualify to receive new licenses for the same
-material under section 10.
-
-  9. Acceptance Not Required for Having Copies.
-
-  You are not required to accept this License in order to receive or
-run a copy of the Program.  Ancillary propagation of a covered work
-occurring solely as a consequence of using peer-to-peer transmission
-to receive a copy likewise does not require acceptance.  However,
-nothing other than this License grants you permission to propagate or
-modify any covered work.  These actions infringe copyright if you do
-not accept this License.  Therefore, by modifying or propagating a
-covered work, you indicate your acceptance of this License to do so.
-
-  10. Automatic Licensing of Downstream Recipients.
-
-  Each time you convey a covered work, the recipient automatically
-receives a license from the original licensors, to run, modify and
-propagate that work, subject to this License.  You are not responsible
-for enforcing compliance by third parties with this License.
-
-  An "entity transaction" is a transaction transferring control of an
-organization, or substantially all assets of one, or subdividing an
-organization, or merging organizations.  If propagation of a covered
-work results from an entity transaction, each party to that
-transaction who receives a copy of the work also receives whatever
-licenses to the work the party's predecessor in interest had or could
-give under the previous paragraph, plus a right to possession of the
-Corresponding Source of the work from the predecessor in interest, if
-the predecessor has it or can get it with reasonable efforts.
-
-  You may not impose any further restrictions on the exercise of the
-rights granted or affirmed under this License.  For example, you may
-not impose a license fee, royalty, or other charge for exercise of
-rights granted under this License, and you may not initiate litigation
-(including a cross-claim or counterclaim in a lawsuit) alleging that
-any patent claim is infringed by making, using, selling, offering for
-sale, or importing the Program or any portion of it.
-
-  11. Patents.
-
-  A "contributor" is a copyright holder who authorizes use under this
-License of the Program or a work on which the Program is based.  The
-work thus licensed is called the contributor's "contributor version".
-
-  A contributor's "essential patent claims" are all patent claims
-owned or controlled by the contributor, whether already acquired or
-hereafter acquired, that would be infringed by some manner, permitted
-by this License, of making, using, or selling its contributor version,
-but do not include claims that would be infringed only as a
-consequence of further modification of the contributor version.  For
-purposes of this definition, "control" includes the right to grant
-patent sublicenses in a manner consistent with the requirements of
-this License.
-
-  Each contributor grants you a non-exclusive, worldwide, royalty-free
-patent license under the contributor's essential patent claims, to
-make, use, sell, offer for sale, import and otherwise run, modify and
-propagate the contents of its contributor version.
-
-  In the following three paragraphs, a "patent license" is any express
-agreement or commitment, however denominated, not to enforce a patent
-(such as an express permission to practice a patent or covenant not to
-sue for patent infringement).  To "grant" such a patent license to a
-party means to make such an agreement or commitment not to enforce a
-patent against the party.
-
-  If you convey a covered work, knowingly relying on a patent license,
-and the Corresponding Source of the work is not available for anyone
-to copy, free of charge and under the terms of this License, through a
-publicly available network server or other readily accessible means,
-then you must either (1) cause the Corresponding Source to be so
-available, or (2) arrange to deprive yourself of the benefit of the
-patent license for this particular work, or (3) arrange, in a manner
-consistent with the requirements of this License, to extend the patent
-license to downstream recipients.  "Knowingly relying" means you have
-actual knowledge that, but for the patent license, your conveying the
-covered work in a country, or your recipient's use of the covered work
-in a country, would infringe one or more identifiable patents in that
-country that you have reason to believe are valid.
-
-  If, pursuant to or in connection with a single transaction or
-arrangement, you convey, or propagate by procuring conveyance of, a
-covered work, and grant a patent license to some of the parties
-receiving the covered work authorizing them to use, propagate, modify
-or convey a specific copy of the covered work, then the patent license
-you grant is automatically extended to all recipients of the covered
-work and works based on it.
-
-  A patent license is "discriminatory" if it does not include within
-the scope of its coverage, prohibits the exercise of, or is
-conditioned on the non-exercise of one or more of the rights that are
-specifically granted under this License.  You may not convey a covered
-work if you are a party to an arrangement with a third party that is
-in the business of distributing software, under which you make payment
-to the third party based on the extent of your activity of conveying
-the work, and under which the third party grants, to any of the
-parties who would receive the covered work from you, a discriminatory
-patent license (a) in connection with copies of the covered work
-conveyed by you (or copies made from those copies), or (b) primarily
-for and in connection with specific products or compilations that
-contain the covered work, unless you entered into that arrangement,
-or that patent license was granted, prior to 28 March 2007.
-
-  Nothing in this License shall be construed as excluding or limiting
-any implied license or other defenses to infringement that may
-otherwise be available to you under applicable patent law.
-
-  12. No Surrender of Others' Freedom.
-
-  If conditions are imposed on you (whether by court order, agreement or
-otherwise) that contradict the conditions of this License, they do not
-excuse you from the conditions of this License.  If you cannot convey a
-covered work so as to satisfy simultaneously your obligations under this
-License and any other pertinent obligations, then as a consequence you may
-not convey it at all.  For example, if you agree to terms that obligate you
-to collect a royalty for further conveying from those to whom you convey
-the Program, the only way you could satisfy both those terms and this
-License would be to refrain entirely from conveying the Program.
-
-  13. Remote Network Interaction; Use with the GNU General Public License.
-
-  Notwithstanding any other provision of this License, if you modify the
-Program, your modified version must prominently offer all users
-interacting with it remotely through a computer network (if your version
-supports such interaction) an opportunity to receive the Corresponding
-Source of your version by providing access to the Corresponding Source
-from a network server at no charge, through some standard or customary
-means of facilitating copying of software.  This Corresponding Source
-shall include the Corresponding Source for any work covered by version 3
-of the GNU General Public License that is incorporated pursuant to the
-following paragraph.
-
-  Notwithstanding any other provision of this License, you have
-permission to link or combine any covered work with a work licensed
-under version 3 of the GNU General Public License into a single
-combined work, and to convey the resulting work.  The terms of this
-License will continue to apply to the part which is the covered work,
-but the work with which it is combined will remain governed by version
-3 of the GNU General Public License.
-
-  14. Revised Versions of this License.
-
-  The Free Software Foundation may publish revised and/or new versions of
-the GNU Affero General Public License from time to time.  Such new versions
-will be similar in spirit to the present version, but may differ in detail to
-address new problems or concerns.
-
-  Each version is given a distinguishing version number.  If the
-Program specifies that a certain numbered version of the GNU Affero General
-Public License "or any later version" applies to it, you have the
-option of following the terms and conditions either of that numbered
-version or of any later version published by the Free Software
-Foundation.  If the Program does not specify a version number of the
-GNU Affero General Public License, you may choose any version ever published
-by the Free Software Foundation.
-
-  If the Program specifies that a proxy can decide which future
-versions of the GNU Affero General Public License can be used, that proxy's
-public statement of acceptance of a version permanently authorizes you
-to choose that version for the Program.
-
-  Later license versions may give you additional or different
-permissions.  However, no additional obligations are imposed on any
-author or copyright holder as a result of your choosing to follow a
-later version.
-
-  15. Disclaimer of Warranty.
-
-  THERE IS NO WARRANTY FOR THE PROGRAM, TO THE EXTENT PERMITTED BY
-APPLICABLE LAW.  EXCEPT WHEN OTHERWISE STATED IN WRITING THE COPYRIGHT
-HOLDERS AND/OR OTHER PARTIES PROVIDE THE PROGRAM "AS IS" WITHOUT WARRANTY
-OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO,
-THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-PURPOSE.  THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE PROGRAM
-IS WITH YOU.  SHOULD THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF
-ALL NECESSARY SERVICING, REPAIR OR CORRECTION.
-
-  16. Limitation of Liability.
-
-  IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN WRITING
-WILL ANY COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO MODIFIES AND/OR CONVEYS
-THE PROGRAM AS PERMITTED ABOVE, BE LIABLE TO YOU FOR DAMAGES, INCLUDING ANY
-GENERAL, SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES ARISING OUT OF THE
-USE OR INABILITY TO USE THE PROGRAM (INCLUDING BUT NOT LIMITED TO LOSS OF
-DATA OR DATA BEING RENDERED INACCURATE OR LOSSES SUSTAINED BY YOU OR THIRD
-PARTIES OR A FAILURE OF THE PROGRAM TO OPERATE WITH ANY OTHER PROGRAMS),
-EVEN IF SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF
-SUCH DAMAGES.
-
-  17. Interpretation of Sections 15 and 16.
-
-  If the disclaimer of warranty and limitation of liability provided
-above cannot be given local legal effect according to their terms,
-reviewing courts shall apply local law that most closely approximates
-an absolute waiver of all civil liability in connection with the
-Program, unless a warranty or assumption of liability accompanies a
-copy of the Program in return for a fee.
-
-                     END OF TERMS AND CONDITIONS
-
-            How to Apply These Terms to Your New Programs
-
-  If you develop a new program, and you want it to be of the greatest
-possible use to the public, the best way to achieve this is to make it
-free software which everyone can redistribute and change under these terms.
-
-  To do so, attach the following notices to the program.  It is safest
-to attach them to the start of each source file to most effectively
-state the exclusion of warranty; and each file should have at least
-the "copyright" line and a pointer to where the full notice is found.
-
-    <one line to give the program's name and a brief idea of what it does.>
-    Copyright (C) <year>  <name of author>
-
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as published
-    by the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
-
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-Also add information on how to contact you by electronic and paper mail.
-
-  If your software can interact with users remotely through a computer
-network, you should also make sure that it provides a way for users to
-get its source.  For example, if your program is a web application, its
-interface could display a "Source" link that leads users to an archive
-of the code.  There are many ways you could offer source, and different
-solutions will be better for different programs; see section 13 for the
-specific requirements.
-
-  You should also get your employer (if you work as a programmer) or school,
-if any, to sign a "copyright disclaimer" for the program, if necessary.
-For more information on this, and how to apply and follow the GNU AGPL, see
-<https://www.gnu.org/licenses/>.
-
 
 ================================================
 File: /package.json
@@ -2372,10 +1735,10 @@ export class Bullet {
   }
 
   /**
-   * Updates the bullet's movement & handles collisions with NPC or players.
+   * Updates the bullet's movement & handles collisions with players.
    * Uses client-side prediction with server authority.
    * @param {number} deltaTime
-   * @param {THREE.Group} npc
+   * @param {THREE.Object3D|null} npc - NPC object (null after cleanup)
    * @param {THREE.Scene} scene
    * @param {Map<number, object>} allPlayers - Map of local + remote players.
    * @returns {Object} - Result of the update containing active state and hit info.
@@ -2449,128 +1812,167 @@ export class Bullet {
     // Anti-cheat: For local bullets, collision detection is only client-side prediction
     // For remote bullets, we rely on client-side collision for visual effects
     
-    // 1) Check collision with NPC
-    if (npc) {
-      const npcBox = new THREE.Box3().setFromObject(npc);
-      npcBox.expandByScalar(0.2);
-      if (npcBox.containsPoint(endPos)) {
-        createImpactEffect(endPos, this.direction, scene, 'npc');
-        return { active: false, hit: { type: 'npc', target: npc } };
-      }
-    }
-
-    // 2) Check collision with players
+    // Check collision with players
     if (allPlayers) {
-      for (const [playerId, playerObj] of allPlayers.entries()) {
+      // First create an array of [playerId, playerObj] pairs to iterate through
+      const playerEntries = [];
+      
+      // Check if allPlayers is a Map
+      if (allPlayers instanceof Map) {
+        // Use Map entries directly
+        playerEntries.push(...allPlayers.entries());
+      } 
+      // Check if it has a working entries function
+      else if (typeof allPlayers.entries === 'function') {
+        try {
+          playerEntries.push(...allPlayers.entries());
+        } catch (e) {
+          // If entries() fails, fall back to Object.entries
+          playerEntries.push(...Object.entries(allPlayers));
+        }
+      } 
+      // Fallback to treating as a regular object
+      else {
+        playerEntries.push(...Object.entries(allPlayers));
+      }
+      
+      // Now process all players
+      for (const [playerId, playerObj] of playerEntries) {
         // Skip bullet's owner by converting both IDs to numbers
-        if (Number(playerId) === Number(this.sourcePlayerId)) continue;
-        if (!playerObj || !playerObj.group) continue;
+        if (this.sourcePlayerId !== null && Number(playerId) === Number(this.sourcePlayerId)) {
+          continue;
+        }
         
-        // Detect which hit zone was hit (head, body, limbs)
-        const hitResult = this.checkPlayerHitZones(playerObj, endPos);
+        // Check if player has a valid model
+        if (!playerObj || !playerObj.group) {
+          continue;
+        }
         
-        if (hitResult.hit) {
-          // Check that this isn't a hit on the local player's own model
-          const isHitOnLocalPlayer = window.localPlayer && 
-                                   Number(window.localPlayer.id) === Number(playerId);
+        // Check bullet-player collision using precise hit zones
+        const hitZoneResult = this.checkPlayerHitZones(playerObj, endPos);
+        
+        if (hitZoneResult.hit) {
+          // First, create impact effect to give visual feedback
+          createImpactEffect(endPos, this.direction, scene, 'player');
           
-          if (!isHitOnLocalPlayer) {
-            // Create the impact effect
-            createImpactEffect(endPos, this.direction, scene, 'player');
-            
-            // Only play sounds and show hitmarker if this is the local player's bullet
-            if (this.isLocalBullet && window.localPlayer && window.localPlayer.soundManager) {
-              // Show hitmarker image for 100ms
-              this.showHitMarker(endPos);
-              
-              // Play sound with 300ms delay
-              if (hitResult.zone === 'head') {
-                // For headshots, only play headshotmarker (not both sounds)
-                setTimeout(() => {
-                  window.localPlayer.soundManager.playSound("headshotmarker", 100);
-                }, 300);
-              } else {
-                // For body/limb hits, play regular hitmarker sound
-                setTimeout(() => {
-                  window.localPlayer.soundManager.playSound("hitmarker", 100);
-                }, 300);
-              }
-            }
-          } else {
-            console.log("Prevented impact effect on local player's own model");
+          // Store the hit zone (head, body, limbs) for damage feedback
+          if (this.setLastHitZone) {
+            this.setLastHitZone(hitZoneResult.zone);
           }
           
-          // Anti-cheat: For local bullets, send hit to server and let server decide
-          if (this.isLocalBullet && window.networkManager) {
-            // Track recent hits to prevent accidentally sending multiple hit notifications
-            if (!window.hitDebounce) {
-              window.hitDebounce = new Map();
-            }
-            
-            // Generate a unique key for this hit (player ID + hit zone + approximate position)
-            const hitKey = `${playerId}_${hitResult.zone}_${Math.round(endPos.x)}_${Math.round(endPos.y)}_${Math.round(endPos.z)}`;
-            const now = performance.now();
-            const lastHitTime = window.hitDebounce.get(hitKey) || 0;
-            
-            // Use a shorter debounce time for shotgun pellets to allow multiple pellets to register hits
-            const debounceTime = this.isShotgunPellet ? 50 : 500; // 50ms for shotgun, 500ms for regular bullets
-            
-            if (now - lastHitTime < debounceTime) {
-              // Use logger for debug logs
-              if (window.logger) {
-                window.logger.debug(`Debouncing duplicate hit detection: ${hitKey}`);
-              }
-              return { 
-                active: false, 
-                hit: { 
-                  type: 'player', 
-                  playerId, 
-                  bulletId: this.bulletId,
-                  zone: hitResult.zone,
-                  damage: hitResult.damage,
-                  debounced: true
-                } 
-              };
-            }
-            
-            // Update the last hit time for this target
-            window.hitDebounce.set(hitKey, now);
-            
-            window.networkManager.sendPlayerHit(playerId, {
-              position: { x: endPos.x, y: endPos.y, z: endPos.z },
-              sourcePlayerId: this.sourcePlayerId,
-              hitZone: hitResult.zone, // Send the hit zone to the server
-              damage: hitResult.damage, // Send the damage amount to the server
-              isShotgunPellet: this.isShotgunPellet // Send information about shotgun pellets
-            }, this.bulletId);
+          // Show hit marker (for local bullets only)
+          if (this.isLocalBullet) {
+            this.showHitMarker(endPos);
           }
           
+          // Show hit marker for client-side feedback (even for remote bullets)
           return { 
             active: false, 
             hit: { 
               type: 'player', 
-              playerId, 
-              bulletId: this.bulletId,
-              zone: hitResult.zone,
-              damage: hitResult.damage
+              playerId: playerId,
+              position: endPos,
+              zone: hitZoneResult.zone 
             } 
           };
         }
       }
     }
 
-    // 3) Check collision with ground
-    if (this.mesh.position.y <= 0.1) {
-      // Skip creating ground impact effect
-      return { active: false, hit: { type: 'ground', position: endPos } };
+    // Check for collision with terrain
+    const terrain = window.terrain;
+    if (terrain && terrain.checkRayCollision) {
+      const collision = terrain.checkRayCollision(this.lastPosition, this.direction, displacement.length());
+      if (collision.hit) {
+        // Create impact effect
+        createImpactEffect(collision.position, this.direction, scene, 'ground');
+        
+        // Return hit info
+        return { 
+          active: false, 
+          hit: { 
+            type: 'terrain', 
+            position: collision.position 
+          } 
+        };
+      }
     }
 
-    // 4) If bullet exceeded max distance, remove it.
-    if (this.distanceTraveled >= this.maxDistance) {
+    // Check for ground collision (if no terrain system exists)
+    if (!terrain && endPos.y <= 0.05) {
+      // Create impact effect on ground
+      const impactPosition = new THREE.Vector3(endPos.x, 0, endPos.z);
+      createImpactEffect(impactPosition, this.direction, scene, 'ground');
+      
+      // Return hit info
+      return { 
+        active: false, 
+        hit: { 
+          type: 'ground', 
+          position: impactPosition 
+        } 
+      };
+    }
+
+    // Check for train collision
+    if (window.trainManager && window.trainManager.checkBulletCollision) {
+      const trainCollision = window.trainManager.checkBulletCollision(this.lastPosition, endPos);
+      if (trainCollision.hit) {
+        // Create impact effect
+        createImpactEffect(trainCollision.position, this.direction, scene, 'train');
+        
+        // Return hit info
+        return { 
+          active: false, 
+          hit: { 
+            type: 'train', 
+            position: trainCollision.position 
+          } 
+        };
+      }
+    }
+
+    // Check for scene object collisions (buildings, props)
+    if (window.objectColliders) {
+      for (const collider of window.objectColliders) {
+        // Skip if collider is invalid
+        if (!collider || !collider.type) continue;
+        
+        let intersection = null;
+        
+        // Different intersection tests based on collider type
+        if (collider.type === 'sphere') {
+          // Sphere collision
+          intersection = raycaster.ray.intersectSphere(collider.sphere, new THREE.Vector3());
+        } else if (collider.type === 'box') {
+          // Box collision
+          raycaster.set(this.lastPosition, this.direction);
+          const intersections = raycaster.intersectBox(collider.box, new THREE.Vector3());
+          intersection = intersections.length > 0 ? intersections[0] : null;
+        }
+        
+        if (intersection) {
+          // Create impact effect
+          createImpactEffect(intersection, this.direction, scene, 'object');
+          
+          // Return hit info
+          return { 
+            active: false, 
+            hit: { 
+              type: 'object', 
+              position: intersection,
+              collider: collider
+            } 
+          };
+        }
+      }
+    }
+
+    // Check for max distance
+    if (this.distanceTraveled > this.maxDistance) {
       return { active: false, hit: null };
     }
 
-    // Still active
     return { active: true, hit: null };
   }
   
@@ -3803,33 +3205,35 @@ export class DesertTerrain {
         
         // Calculate optimal terrain size based on town dimensions
         const townSize = Math.max(townDimensions.width, townDimensions.length);
-        const desertSize = Math.max(5000, townSize * 25); // At least 25x larger than town
+        // Use skybox radius but extend terrain slightly beyond it to prevent horizon gap
+        const skyboxRadius = 900;
+        // Extend terrain 10% beyond skybox to ensure proper horizon blending
+        const desertSize = skyboxRadius * 2 * 1.1;
         
         // Setup with appropriate settings
         this.config = {
-            size: desertSize, // Size based on town dimensions
-            resolution: 196, // Resolution of the terrain (vertices per side)
-            cactiCount: 120, // Number of cacti to place (increased from 60)
+            size: desertSize, // Size to extend slightly beyond skybox
+            resolution: 128, // Reduced from 196 for better performance with smaller terrain
             noiseScale: {
-                base: 0.0003,
-                dunes: 0.0008,
-                secondaryDunes: 0.0015,
-                ridges: 0.003,
-                detail: 0.01,
-                flat: 0.0003,
+                base: 0.0004, // Slightly increased for more detail in smaller terrain
+                dunes: 0.001, // Slightly increased for more visible features
+                secondaryDunes: 0.0018,
+                ridges: 0.0035,
+                detail: 0.012,
+                flat: 0.0004,
                 // Enhanced micro-detail scales for more prominent sand ripples
-                microRipples: 0.04, // Adjusted for better groove definition
+                microRipples: 0.045, // Slightly increased for better visibility
                 sandGrains: 0.3
             },
             heightScale: {
-                base: 15,
-                dunes: 40, // Reduced from 70 for lower dune heights
-                secondaryDunes: 20, // Reduced from 30
-                ridges: 10, // Reduced from 15
-                detail: 8,
-                // Increased height adjustments for more pronounced micro-detail
-                microRipples: 2.0, // Increased for more visible grooves
-                sandGrains: 0.3  // Slightly increased from 0.2
+                base: 5, // Reduced from 15 for much flatter base terrain
+                dunes: 10, // Drastically reduced from 40 for very low dune heights
+                secondaryDunes: 5, // Reduced from 20 for flatter secondary dunes
+                ridges: 2, // Significantly reduced from 10 for minimal ridges
+                detail: 2, // Reduced from 8 for less dramatic detail
+                // Keeping micro-detail adjustments as they're already small
+                microRipples: 2.0,
+                sandGrains: 0.3
             },
             duneDirection: Math.PI * 0.25, // Wind direction
             sandColors: [
@@ -3841,22 +3245,28 @@ export class DesertTerrain {
             ],
             distanceBlur: {
                 enabled: true,
-                startDistance: desertSize * 0.35, // Start blurring at 35% distance from center
-                endDistance: desertSize * 0.5,    // Maximum blur at edge
+                startDistance: skyboxRadius * 0.85, // Adjusted to match skybox edge
+                endDistance: skyboxRadius * 0.98,  // Almost to the skybox edge
                 skyboxColor: new THREE.Color(0xaad6f5), // Light blue to match skybox horizon
                 atmosphericHaze: true,            // Enable atmospheric haze on dunes
-                hazeStartDistance: desertSize * 0.15, // Start atmospheric effect closer
-                hazeFactor: 0.6                  // Strength of the atmospheric effect
+                hazeStartDistance: skyboxRadius * 0.6, // Start haze closer to improve blending
+                hazeFactor: 0.65                  // Increased for better skybox blending
             },
             dunes: {
                 smoothing: true,          // Enable dune edge smoothing
                 smoothingFactor: 0.7,     // How much to smooth dune edges (0-1)
                 ridgeSharpness: 0.4       // Reduced ridge sharpness (0-1)
             },
-            townBuffer: townSize * 1.2 // Buffer distance around town where terrain is flat
+            townBuffer: townSize * 1.2, // Buffer distance around town where terrain is flat
+            edgeFix: {
+                enabled: true,              // Enable special edge treatment
+                heightAtEdge: 5.0,          // Height at the very edge to connect with skybox
+                startDistance: skyboxRadius * 0.85, // Start raising terrain at same point as blur
+                endSharpness: 0.2           // Sharp transition at the very edge
+            }
         };
         
-        console.log(`Creating desert terrain with size ${desertSize} around town of size ${townSize}`);
+        console.log(`Creating optimized desert terrain: size ${desertSize}, extends ${Math.round((desertSize/2) - skyboxRadius)} units beyond skybox`);
         
         // Create noise generators
         this.baseNoise = new PerlinNoise(Math.random());
@@ -3918,11 +3328,37 @@ export class DesertTerrain {
     
     // Check if a point is near the train track
     isNearTrainTrack(x, z) {
+        // Access global train path if available from scene.js
+        if (window.trainPath) {
+            // Width of the flattened area on each side of the track
+            const trackWidth = 1.5; // Slightly wider to ensure the track is fully flattened
+            
+            // Create a vector for the current point
+            const pointVector = new THREE.Vector3(x, 0, z);
+            
+            // Find the closest point on the curve to our point
+            // Get enough points from the curve for accuracy
+            const curvePoints = window.trainPath.getPoints(200);
+            let closestDist = Infinity;
+            
+            // Find the closest point on the curve
+            for (let i = 0; i < curvePoints.length; i++) {
+                const dist = pointVector.distanceTo(curvePoints[i]);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                }
+            }
+            
+            // Check if the point is within track width
+            return closestDist <= trackWidth;
+        }
+        
+        // Fallback to the old method if trainPath is not available
         // Access global train track constants
         const trackStart = window.TRAIN_TRACK_START || new THREE.Vector3(0, 0, -1000);
         const trackEnd = window.TRAIN_TRACK_END || new THREE.Vector3(0, 0, 1000);
         
-        // Width of the flattened area on each side of the track (1m as requested)
+        // Width of the flattened area on each side of the track
         const trackWidth = 1.0;
         
         // Create a line segment representing the track
@@ -3994,12 +3430,9 @@ export class DesertTerrain {
         // Create vertex colors array
         const colors = new Float32Array(vertices.length);
         
-        // Edge fade values
-        const edgeFadeStart = this.config.size * 0.4; // Start fading at 40% from center
-        const edgeFadeEnd = this.config.size * 0.5;   // Complete fade at edge
-        
-        // Create buffer for vertex height adjustments (for sand waves)
-        const heightAtEdge = this.config.size * 0.03;  // Raise edges slightly to blend with sky better
+        // Edge fade values - optimized for smaller terrain
+        const edgeFadeStart = this.config.distanceBlur.startDistance;
+        const edgeFadeEnd = this.config.distanceBlur.endDistance;
         
         // Apply noise to create terrain
         for (let i = 0; i < vertices.length; i += 3) {
@@ -4070,10 +3503,18 @@ export class DesertTerrain {
                 height *= 0.2;
             }
             
-            // Apply edge blending - gradually reduce height near edges
-            if (distFromCenter > edgeFadeStart) {
-                const edgeFactor = 1.0 - Math.min(1, (distFromCenter - edgeFadeStart) / (edgeFadeEnd - edgeFadeStart));
-                height *= edgeFactor;
+            // EDGE FIX - Improved edge handling for horizon blending
+            if (this.config.edgeFix.enabled && distFromCenter > this.config.edgeFix.startDistance) {
+                // Calculate how far we are toward the edge (0 = at start, 1 = at very edge)
+                const edgeProgress = Math.min(1.0, (distFromCenter - this.config.edgeFix.startDistance) / 
+                                     (this.config.size/2 - this.config.edgeFix.startDistance));
+                
+                // Use a curve that rises sharply at the end
+                const raiseFactor = Math.pow(edgeProgress, 1.0 + this.config.edgeFix.endSharpness * 5.0);
+                
+                // As we approach the very edge, terrain height becomes less important
+                // and the fixed edge height becomes more important
+                height = height * (1.0 - raiseFactor) + this.config.edgeFix.heightAtEdge * raiseFactor;
             }
             
             // Apply height to vertex
@@ -4168,12 +3609,6 @@ export class DesertTerrain {
                 colors[colorIdx] = colors[colorIdx] * (1 - blurFactor) + this.config.distanceBlur.skyboxColor.r * blurFactor;
                 colors[colorIdx + 1] = colors[colorIdx + 1] * (1 - blurFactor) + this.config.distanceBlur.skyboxColor.g * blurFactor;
                 colors[colorIdx + 2] = colors[colorIdx + 2] * (1 - blurFactor) + this.config.distanceBlur.skyboxColor.b * blurFactor;
-                
-                // Gradually raise the terrain at edges to create a smooth blend with sky
-                if (distFromCenter > this.config.distanceBlur.startDistance) {
-                    const heightBlendFactor = Math.pow(blurFactor, 2.0); // Stronger curve for height adjustment
-                    vertices[i + 1] += heightAtEdge * heightBlendFactor;
-                }
             }
         }
         
@@ -4277,7 +3712,7 @@ export class DesertTerrain {
         const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
         texture.wrapS = THREE.RepeatWrapping;
         texture.wrapT = THREE.RepeatWrapping;
-        texture.repeat.set(15, 15); // Reduced from 20 to make patterns larger
+        texture.repeat.set(10, 10); // Reduced from 15 for smaller terrain size
         texture.needsUpdate = true;
         
         return texture;
@@ -4324,152 +3759,235 @@ export class DesertTerrain {
         const texture = new THREE.DataTexture(data, size, size, THREE.RedFormat);
         texture.wrapS = THREE.RepeatWrapping;
         texture.wrapT = THREE.RepeatWrapping;
-        texture.repeat.set(20, 20);
+        texture.repeat.set(12, 12); // Reduced from 20 for smaller terrain size
         texture.needsUpdate = true;
         
         return texture;
     }
     
-    // Add cacti to the scene
-    addCacti() {
-        // Create cactus materials
-        const cactusMaterial = new THREE.MeshStandardMaterial({
-            color: 0x2d5c2d,
-            roughness: 0.8,
-            metalness: 0.2,
-        });
-        
-        // Cactus segments to be instanced
-        const segmentGeometries = [
-            // Main trunk (shorter now)
-            this.createCactusTrunk(2.5, 4, 20, 8),
-            // Arm segment (horizontal part)
-            this.createCactusArm(1.8, 2.2, 8, 8),
-            // Arm tip (vertical part) 
-            this.createCactusTrunk(1.5, 1.8, 12, 8),
-        ];
-        
-        // Create instanced mesh for each geometry type
-        const cactusCount = this.config.cactiCount;
-        const instancedSegments = [];
-        
-        // Create instanced mesh for each segment type
-        for (let i = 0; i < segmentGeometries.length; i++) {
-            const instancedMesh = new THREE.InstancedMesh(
-                segmentGeometries[i],
-                cactusMaterial,
-                cactusCount * (i === 0 ? 1 : 2) // One trunk per cactus, two arms per cactus
-            );
-            instancedMesh.castShadow = true;
-            instancedMesh.receiveShadow = true;
-            instancedSegments.push(instancedMesh);
-        }
-        
-        // Helper matrices and vectors
-        const matrix = new THREE.Matrix4();
+    // Add shrubs to the scene using the shrub1.glb model
+    addShrubs() {
+        // Increased count for better coverage
+        const scatterCount = 300; 
+        const scatterInstances = [];
+        const scatterMatrix = new THREE.Matrix4();
         const position = new THREE.Vector3();
         const rotation = new THREE.Euler();
         const quaternion = new THREE.Quaternion();
         const scale = new THREE.Vector3();
         
-        // Create cacti in a ring pattern around the town
-        for (let i = 0; i < cactusCount; i++) {
-            // Random position avoiding town center area using a ring distribution
-            let x, z, townBlend;
-            const angle = Math.random() * Math.PI * 2; // Random angle around circle
-            const minRadius = Math.max(this.townDimensions.width, this.townDimensions.length) + 150; // Min distance from town center
-            const maxRadius = this.config.size * 0.3; // Max distance from town center
-            
-            // Calculate position in a ring around the town
-            const radius = minRadius + Math.random() * (maxRadius - minRadius);
-            x = Math.cos(angle) * radius;
-            z = Math.sin(angle) * radius;
-            
-            // Verify this position is in the desert part of the terrain
-            townBlend = this.getTownBlendFactor(x, z);
-            
-            // If not in desert, try again with a larger radius
-            if (townBlend < 0.9) {
-                const adjustedRadius = minRadius * 1.2;
-                x = Math.cos(angle) * adjustedRadius;
-                z = Math.sin(angle) * adjustedRadius;
-                townBlend = this.getTownBlendFactor(x, z);
-            }
-            
-            // Calculate height based on terrain
-            const baseHeight = this.baseNoise.noise(x * this.config.noiseScale.base, z * this.config.noiseScale.base) 
-                * this.config.heightScale.base;
-            const duneHeight = this.getDirectionalDuneHeight(x, z);
-            const y = baseHeight + duneHeight;
-            
-            // Random scale and rotation
-            const cactusScale = 0.3 + Math.random() * 0.5; // Slightly smaller scale range
-            const trunkRotation = Math.random() * Math.PI * 2;
-            
-            // Position and orient the trunk
-            position.set(x, y, z);
-            rotation.set(0, trunkRotation, 0);
-            quaternion.setFromEuler(rotation);
-            scale.set(cactusScale, cactusScale, cactusScale);
-            
-            matrix.compose(position, quaternion, scale);
-            instancedSegments[0].setMatrixAt(i, matrix);
-            
-            // Add arms to the cactus with varying heights and angles
-            for (let arm = 0; arm < 2; arm++) {
-                // Calculate arm position on the trunk
-                const armHeight = 5 + Math.random() * 8; // Lower arm position
-                const armAngle = arm * Math.PI + (Math.random() * 0.5 - 0.25);
-                const armLength = 4 + Math.random() * 3;
-                
-                // Horizontal arm segment
-                const armX = x + Math.cos(trunkRotation + armAngle) * 2 * cactusScale;
-                const armZ = z + Math.sin(trunkRotation + armAngle) * 2 * cactusScale;
-                const armY = y + armHeight * cactusScale;
-                
-                position.set(armX, armY, armZ);
-                rotation.set(Math.PI/2, trunkRotation + armAngle + Math.PI/2, 0);
-                quaternion.setFromEuler(rotation);
-                
-                matrix.compose(position, quaternion, scale);
-                instancedSegments[1].setMatrixAt(i * 2 + arm, matrix);
-                
-                // Vertical arm tip
-                const tipX = armX + Math.cos(trunkRotation + armAngle) * armLength * cactusScale;
-                const tipZ = armZ + Math.sin(trunkRotation + armAngle) * armLength * cactusScale;
-                const tipY = armY;
-                
-                position.set(tipX, tipY, tipZ);
-                rotation.set(0, trunkRotation, 0);
-                quaternion.setFromEuler(rotation);
-                
-                matrix.compose(position, quaternion, scale);
-                instancedSegments[2].setMatrixAt(i * 2 + arm, matrix);
+        // Calculate skybox radius for object placement (don't place beyond skybox)
+        const skyboxRadius = 900 * 0.95;
+        
+        // Town concentration radius (100m around town center)
+        const townConcentrationRadius = 100;
+        
+        // Flatten all models into a single array for random selection
+        const allScatterModels = [
+            // Shrubs
+            'shrub1.glb', 'shrub2.glb', 'shrub3.glb', 'shrub4.glb', 'shrub5.glb',
+            // Cacti
+            'cactus1.glb', 'cactus2.glb', 'cactus3.glb', 'cactus4.glb', 'cactus5.glb',
+            // Rocks
+            'rock1.glb', 'rock2.glb', 'rock3.glb', 'rock4.glb', 'rock5.glb', 'rock6.glb', 'rock7.glb', 'rock8.glb'
+        ];
+        
+        // OPTIMIZATION: Pre-calculate height map for common positions
+        // This avoids expensive raycasting for every object
+        console.time('Height map generation');
+        const heightMap = {};
+        const heightMapResolution = 5; // meters between sample points
+        const heightMapRadius = skyboxRadius;
+        
+        // Only create a partial heightmap for major areas to save initialization time
+        for (let x = -heightMapRadius; x <= heightMapRadius; x += heightMapResolution) {
+            for (let z = -heightMapRadius; z <= heightMapRadius; z += heightMapResolution) {
+                // Only calculate heights for points within our radius
+                const distFromCenter = Math.sqrt(x * x + z * z);
+                if (distFromCenter <= heightMapRadius) {
+                    // Use the terrain height function which is much faster than raycasting
+                    const y = this.getHeightAt(x, z);
+                    const key = `${Math.round(x)},${Math.round(z)}`;
+                    heightMap[key] = y;
+                }
             }
         }
+        console.timeEnd('Height map generation');
         
-        // Update matrices and add to scene
-        for (const instancedMesh of instancedSegments) {
-            instancedMesh.instanceMatrix.needsUpdate = true;
-            this.scene.add(instancedMesh);
-        }
+        // Function to get height at a position (using heightmap for speed)
+        const getHeightAtPosition = (x, z) => {
+            // Round to nearest point in our grid
+            const gridX = Math.round(x / heightMapResolution) * heightMapResolution;
+            const gridZ = Math.round(z / heightMapResolution) * heightMapResolution;
+            const key = `${Math.round(gridX)},${Math.round(gridZ)}`;
+            
+            if (heightMap[key] !== undefined) {
+                return heightMap[key];
+            }
+            
+            // Fallback to analytic height function if the point isn't in our map
+            return this.getHeightAt(x, z);
+        };
         
-        return instancedSegments;
-    }
-    
-    // Create a cactus trunk segment
-    createCactusTrunk(topRadius, bottomRadius, height, segments) {
-        const geometry = new THREE.CylinderGeometry(topRadius, bottomRadius, height, segments);
-        geometry.translate(0, height/2, 0);
-        return geometry;
-    }
-    
-    // Create a cactus arm segment (horizontal part)
-    createCactusArm(topRadius, bottomRadius, length, segments) {
-        const geometry = new THREE.CylinderGeometry(topRadius, bottomRadius, length, segments);
-        geometry.rotateZ(Math.PI/2);
-        geometry.translate(length/2, 0, 0);
-        return geometry;
+        const loader = new THREE.GLTFLoader();
+        
+        // For each model, create a random number of instances
+        allScatterModels.forEach(modelFile => {
+            const modelPath = `models/scatter/${modelFile}`;
+            
+            // Increase stone/rock spawning by giving them a higher instance count
+            let instanceCount;
+            if (modelFile.startsWith('rock')) {
+                // Significantly more rocks (3-4x more than other objects)
+                instanceCount = Math.floor((scatterCount / allScatterModels.length) * 3.5) + Math.floor(Math.random() * 10);
+            } else {
+                // Normal amount for other objects
+                instanceCount = Math.floor(scatterCount / allScatterModels.length) + Math.floor(Math.random() * 5);
+            }
+            
+            loader.load(modelPath, (gltf) => {
+                console.log(`Loaded scatter model: ${modelPath}`, gltf);
+                
+                // Find the first mesh in the model
+                let scatterMesh = null;
+                gltf.scene.traverse((child) => {
+                    if (!scatterMesh && child.isMesh) {
+                        scatterMesh = child;
+                    }
+                });
+                
+                if (!scatterMesh) {
+                    console.error(`Could not find mesh in model: ${modelPath}`);
+                    return;
+                }
+                
+                // Create instanced mesh for the scatter object
+                const instancedScatter = new THREE.InstancedMesh(
+                    scatterMesh.geometry,
+                    scatterMesh.material,
+                    instanceCount
+                );
+                instancedScatter.castShadow = true;
+                instancedScatter.receiveShadow = true;
+                
+                // Create scatter objects throughout the terrain
+                let instancesPlaced = 0;
+                
+                // How many to place in the town area (higher percentage for rocks)
+                const townConcentrationPercentage = modelFile.startsWith('rock') ? 0.7 : 0.3;
+                const townInstanceCount = Math.floor(instanceCount * townConcentrationPercentage);
+                const outsideInstanceCount = instanceCount - townInstanceCount;
+                
+                // 1. First place objects in and around town
+                for (let i = 0; i < townInstanceCount * 3 && instancesPlaced < townInstanceCount; i++) {
+                    // Random position in or around town center
+                    const angle = Math.random() * Math.PI * 2;
+                    // Concentrate in town and 100m around it
+                    const radius = Math.random() * townConcentrationRadius;
+                    const x = Math.cos(angle) * radius;
+                    const z = Math.sin(angle) * radius;
+                    
+                    // Skip if near train track
+                    if (this.isNearTrainTrack(x, z)) {
+                        continue;
+                    }
+                    
+                    // OPTIMIZED: Use pre-calculated height map instead of raycasting
+                    const y = getHeightAtPosition(x, z);
+                    
+                    // Random scale based on model type
+                    let objectScale;
+                    let yOffset = 0; // Default no offset
+                    
+                    // Apply appropriate scale and y-offset based on model type
+                    if (modelFile.startsWith('shrub')) {
+                        objectScale = 0.05 + Math.random() * 0.15;
+                    } else if (modelFile.startsWith('cactus')) {
+                        objectScale = 0.08 + Math.random() * 0.12;
+                    } else if (modelFile.startsWith('rock')) {
+                        objectScale = 0.03 + Math.random() * 0.10;
+                        // Apply negative y-offset to rocks to partially embed them in the ground
+                        yOffset = -0.5 * objectScale;
+                    }
+                    
+                    // Random rotation
+                    const objectRotation = Math.random() * Math.PI * 2;
+                    
+                    // Position and orient the object precisely on terrain with any needed offset
+                    position.set(x, y + yOffset, z);
+                    rotation.set(0, objectRotation, 0);
+                    quaternion.setFromEuler(rotation);
+                    scale.set(objectScale, objectScale, objectScale);
+                    
+                    scatterMatrix.compose(position, quaternion, scale);
+                    instancedScatter.setMatrixAt(instancesPlaced, scatterMatrix);
+                    instancesPlaced++;
+                }
+                
+                // 2. Then place remaining objects outside town
+                for (let i = 0; i < outsideInstanceCount * 3 && instancesPlaced < instanceCount; i++) {
+                    // Random position in the terrain but outside town radius
+                    const angle = Math.random() * Math.PI * 2;
+                    // Place between town radius and skybox
+                    const radius = townConcentrationRadius + Math.random() * (skyboxRadius - townConcentrationRadius);
+                    const x = Math.cos(angle) * radius;
+                    const z = Math.sin(angle) * radius;
+                    
+                    // Skip if near train track
+                    if (this.isNearTrainTrack(x, z)) {
+                        continue;
+                    }
+                    
+                    // OPTIMIZED: Use pre-calculated height map instead of raycasting
+                    const y = getHeightAtPosition(x, z);
+                    
+                    // Random scale based on model type
+                    let objectScale;
+                    let yOffset = 0; // Default no offset
+                    
+                    // Apply appropriate scale and y-offset based on model type
+                    if (modelFile.startsWith('shrub')) {
+                        objectScale = 0.05 + Math.random() * 0.15;
+                    } else if (modelFile.startsWith('cactus')) {
+                        objectScale = 0.08 + Math.random() * 0.12;
+                    } else if (modelFile.startsWith('rock')) {
+                        objectScale = 0.03 + Math.random() * 0.10;
+                        // Apply negative y-offset to rocks to partially embed them in the ground
+                        yOffset = -0.5 * objectScale;
+                    }
+                    
+                    // Random rotation
+                    const objectRotation = Math.random() * Math.PI * 2;
+                    
+                    // Position and orient the object precisely on terrain with any needed offset
+                    position.set(x, y + yOffset, z);
+                    rotation.set(0, objectRotation, 0);
+                    quaternion.setFromEuler(rotation);
+                    scale.set(objectScale, objectScale, objectScale);
+                    
+                    scatterMatrix.compose(position, quaternion, scale);
+                    instancedScatter.setMatrixAt(instancesPlaced, scatterMatrix);
+                    instancesPlaced++;
+                }
+                
+                // Update matrices and add to scene
+                instancedScatter.instanceMatrix.needsUpdate = true;
+                this.scene.add(instancedScatter);
+                scatterInstances.push(instancedScatter);
+                
+                console.log(`Added ${instancesPlaced} ${modelFile} objects to terrain`);
+            }, 
+            // Add progress handler
+            (xhr) => {
+                console.log(`${modelPath}: ${(xhr.loaded / xhr.total * 100)}% loaded`);
+            },
+            // Add error handler
+            (error) => {
+                console.error(`Error loading model ${modelPath}:`, error);
+            });
+        });
+        
+        return scatterInstances;
     }
     
     // Generate the entire desert environment
@@ -4479,10 +3997,63 @@ export class DesertTerrain {
         // Generate terrain mesh
         this.generateTerrain();
         
-        // Add cacti
-        this.addCacti();
+        // Add shrubs
+        this.addShrubs();
         
         console.log("Desert terrain generation complete");
+    }
+    
+    // Fast, analytic height query – matches exactly what we used in generateTerrain()
+    getHeightAt(x, z) {
+        // Get blend factor for town area
+        const townBlend = this.getTownBlendFactor(x, z);
+        
+        // Base terrain height
+        let height = this.baseNoise.noise(
+            x * this.config.noiseScale.base,
+            z * this.config.noiseScale.base
+        ) * this.config.heightScale.base;
+        
+        // Add directional dune height
+        const duneHeight = this.getDirectionalDuneHeight(x, z);
+        height += duneHeight * townBlend;
+        
+        // Add detail height
+        const detailHeight = this.detailNoise.noise(
+            x * this.config.noiseScale.detail,
+            z * this.config.noiseScale.detail
+        ) * this.config.heightScale.detail;
+        
+        height += detailHeight * Math.min(1, duneHeight / 20) * townBlend;
+        
+        // Add micro ripples for sand texture
+        const microRipples = this.microRipplesNoise.noise(
+            x * this.config.noiseScale.microRipples,
+            z * this.config.noiseScale.microRipples
+        ) * this.config.heightScale.microRipples;
+        
+        height += microRipples * 0.3 * townBlend;
+        
+        // Apply edge fix if enabled
+        if (this.config.edgeFix && this.config.edgeFix.enabled) {
+            const worldEdge = this.config.size / 2;
+            const distToEdgeX = worldEdge - Math.abs(x);
+            const distToEdgeZ = worldEdge - Math.abs(z);
+            const distToEdge = Math.min(distToEdgeX, distToEdgeZ);
+            
+            if (distToEdge < this.config.edgeFix.startDistance) {
+                const edgeBlend = 1.0 - (distToEdge / this.config.edgeFix.startDistance);
+                const edgeWeight = Math.pow(edgeBlend, this.config.edgeFix.endSharpness);
+                height = THREE.MathUtils.lerp(height, this.config.edgeFix.heightAtEdge, edgeWeight);
+            }
+        }
+        
+        // Flatten areas near train tracks
+        if (this.isNearTrainTrack(x, z)) {
+            height = 0.1; // Flat height for train tracks
+        }
+        
+        return height;
     }
 } 
 
@@ -6042,6 +5613,921 @@ export class DrunkennessEffect {
 }
 
 ================================================
+File: /public/js/grassSystem.js
+================================================
+/**
+ * GrassSystem.js
+ * Implements the stylized procedural grass system for desert terrain.
+ * Based on the Ghost of Tsushima grass rendering technique.
+ */
+
+// Constants for grass rendering - updated to match reference
+const NUM_GRASS = (32 * 32) * 3;
+const GRASS_SEGMENTS_LOW = 1;
+const GRASS_SEGMENTS_HIGH = 6;
+const GRASS_VERTICES_LOW = (GRASS_SEGMENTS_LOW + 1) * 2;
+const GRASS_VERTICES_HIGH = (GRASS_SEGMENTS_HIGH + 1) * 2;
+const GRASS_LOD_DIST = 25;
+const GRASS_MAX_DIST = 300; // Increased from 180 to cover more ground
+const GRASS_PATCH_SIZE = 5 * 2; // Adjusted to match reference
+const GRASS_WIDTH = 0.1;
+const GRASS_HEIGHT = 1.5;
+// Define a limit for the maximum number of patches to avoid excessive memory usage
+const MAX_PATCHES = 2000; // Adjust based on performance
+// Calculate a larger radius for full ground coverage
+const GRASS_GROUND_RADIUS = 1000; // Set to a large value to cover the entire ground
+const LANDSCAPE_SIZE = 2000; // Define the total landscape square size
+
+export class GrassSystem {
+  constructor(scene, camera) {
+    console.log("Initializing grass system...");
+    this.scene = scene;
+    this.camera = camera;
+    this.meshesLow = [];
+    this.meshesHigh = [];
+    this.group = new THREE.Group();
+    this.group.name = "DESERT_GRASS";
+    this.totalTime = 0;
+    this.lastCameraPosition = new THREE.Vector3();
+    
+    // Store reference to terrain for height sampling
+    this.desertTerrain = window.desertTerrain;
+    
+    // Initialize seed for consistent random numbers
+    this.setSeed(0); // Set to 0 to match reference
+    
+    // Load grass texture - try both potential paths
+    console.log("Loading grass texture...");
+    
+    // Check if texture exists at either path
+    const textureLoader = new THREE.TextureLoader();
+    this.grassTexture = textureLoader.load(
+      'models/textures/grassblade.png',
+      (texture) => {
+        console.log("Grass texture loaded successfully");
+        this.onTextureLoaded(texture);
+      },
+      undefined,
+      (error) => {
+        console.warn("Failed to load grassblade.png from models/textures directory, trying other paths...", error);
+        
+        // Try alternative path
+        this.grassTexture = textureLoader.load(
+          'textures/grassblade.png',
+          (texture) => {
+            console.log("Grass texture loaded from textures directory");
+            this.onTextureLoaded(texture);
+          },
+          undefined,
+          (error) => {
+            console.warn("Failed to load from textures directory, trying models directory...", error);
+            
+            // Try third path
+            this.grassTexture = textureLoader.load(
+              'models/grassblade.png',
+              (texture) => {
+                console.log("Grass texture loaded from models directory");
+                this.onTextureLoaded(texture);
+              },
+              undefined,
+              (error) => {
+                console.error("Failed to load grass texture from all paths:", error);
+                // Create a fallback texture - green square with transparency
+                this.createFallbackTexture();
+              }
+            );
+          }
+        );
+      }
+    );
+    
+    // Add group to scene now
+    this.scene.add(this.group);
+    
+    // Track all grass patches
+    this.patches = [];
+    
+    // Track all patch positions for faster lookups
+    this.patchPositions = new Set();
+    
+    // Last update time for patch cleanup
+    this.lastCleanupTime = 0;
+    
+    console.log("Grass system initialized - waiting for texture to load");
+  }
+  
+  // Handle texture loading
+  onTextureLoaded(texture) {
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = true;
+    texture.anisotropy = 16; // Improves appearance at angles
+    
+    // Create materials now that texture is loaded
+    this.grassMaterialLow = this.createGrassMaterial(true);
+    this.grassMaterialHigh = this.createGrassMaterial(false);
+    
+    // Create grass geometries
+    this.geometryLow = this.createGrassGeometry(GRASS_SEGMENTS_LOW);
+    this.geometryHigh = this.createGrassGeometry(GRASS_SEGMENTS_HIGH);
+    
+    // Initial update to position grass around starting position
+    if (this.camera) {
+      console.log("Creating initial grass patches...");
+      this.lastCameraPosition.copy(this.camera.position);
+      this.updatePatches();
+    }
+  }
+  
+  // Create a fallback texture if loading fails
+  createFallbackTexture() {
+    console.log("Creating fallback grass texture");
+    
+    // Create a canvas-based texture
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    
+    // Fill with transparent
+    ctx.fillStyle = 'rgba(0,0,0,0)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw a simple grass blade shape
+    ctx.fillStyle = 'rgba(0,200,0,0.9)';
+    ctx.beginPath();
+    ctx.moveTo(32, 0);        // Top point
+    ctx.lineTo(64, 128);      // Bottom right
+    ctx.lineTo(0, 128);       // Bottom left
+    ctx.closePath();
+    ctx.fill();
+    
+    // Create texture from canvas
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    
+    this.grassTexture = texture;
+    
+    // Create materials with the fallback texture
+    this.grassMaterialLow = this.createGrassMaterial(true);
+    this.grassMaterialHigh = this.createGrassMaterial(false);
+    
+    // Create grass geometries
+    this.geometryLow = this.createGrassGeometry(GRASS_SEGMENTS_LOW);
+    this.geometryHigh = this.createGrassGeometry(GRASS_SEGMENTS_HIGH);
+    
+    // Initial update to position grass around starting position
+    if (this.camera) {
+      console.log("Creating initial grass patches with fallback texture...");
+      this.lastCameraPosition.copy(this.camera.position);
+      this.updatePatches();
+    }
+  }
+  
+  // Create a single grass material with appropriate detail level
+  createGrassMaterial(isLowDetail) {
+    const vertexShader = `
+      uniform vec2 grassSize;
+      uniform vec4 grassParams;
+      uniform vec4 grassDraw;
+      uniform float time;
+      uniform vec3 playerPos;
+      uniform mat4 viewMatrixInverse;
+      uniform vec3 patchOrigin;
+
+      attribute float vertIndex;
+
+      varying vec4 vGrassParams;
+      varying vec3 vNormal;
+      varying vec3 vPosition;
+      varying vec3 vWorldPosition;
+      varying vec2 vUv;
+      varying float vEdgeFade;
+
+      // Math utility functions
+      float saturate(float x) {
+        return clamp(x, 0.0, 1.0);
+      }
+
+      float linearstep(float minValue, float maxValue, float v) {
+        return clamp((v - minValue) / (maxValue - minValue), 0.0, 1.0);
+      }
+
+      float easeOut(float x, float t) {
+        return 1.0 - pow(1.0 - x, t);
+      }
+
+      float easeIn(float x, float t) {
+        return pow(x, t);
+      }
+
+      // Hash functions
+      vec2 hash22(vec2 p) {
+        p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+        return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
+      }
+
+      vec4 hash42(vec2 p) {
+        vec4 p4 = fract(vec4(p.xyxy) * vec4(0.1031, 0.1030, 0.0973, 0.1099));
+        p4 += dot(p4, p4.wzxy + 33.33);
+        return fract((p4.xxyz + p4.yzzw) * p4.zywx) * 2.0 - 1.0;
+      }
+
+      // Noise function for wind
+      float noise12(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        
+        // Smooth interpolation
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        
+        // Hash corners
+        float a = dot(hash22(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0));
+        float b = dot(hash22(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0));
+        float c = dot(hash22(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0));
+        float d = dot(hash22(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0));
+        
+        // Mix
+        return mix(mix(a, b, u.x), mix(c, d, u.x), u.y) * 0.5 + 0.5;
+      }
+
+      // Matrix utility functions
+      mat3 rotateX(float theta) {
+        float c = cos(theta);
+        float s = sin(theta);
+        return mat3(
+          vec3(1.0, 0.0, 0.0),
+          vec3(0.0, c, -s),
+          vec3(0.0, s, c)
+        );
+      }
+
+      mat3 rotateY(float theta) {
+        float c = cos(theta);
+        float s = sin(theta);
+        return mat3(
+          vec3(c, 0.0, s),
+          vec3(0.0, 1.0, 0.0),
+          vec3(-s, 0.0, c)
+        );
+      }
+
+      mat3 rotateAxis(vec3 axis, float angle) {
+        axis = normalize(axis);
+        float s = sin(angle);
+        float c = cos(angle);
+        float oc = 1.0 - c;
+        
+        return mat3(
+          oc * axis.x * axis.x + c,           oc * axis.x * axis.y - axis.z * s,  oc * axis.z * axis.x + axis.y * s,
+          oc * axis.x * axis.y + axis.z * s,  oc * axis.y * axis.y + c,           oc * axis.y * axis.z - axis.x * s,
+          oc * axis.z * axis.x - axis.y * s,  oc * axis.y * axis.z + axis.x * s,  oc * axis.z * axis.z + c
+        );
+      }
+
+      void main() {
+        vec3 grassOffset = vec3(position.x, position.y, position.z);
+
+        // Calculate absolute world position of this blade
+        vec3 grassBladeWorldPos = vec3(
+          patchOrigin.x + grassOffset.x,
+          patchOrigin.y + grassOffset.y,
+          patchOrigin.z + grassOffset.z
+        );
+
+        // Edge fade based on distance from patch center
+        float distFromCenter = length(vec2(grassOffset.x, grassOffset.z));
+        vEdgeFade = smoothstep(grassParams.z, grassParams.w, distFromCenter);
+
+        float heightmapSample = 0.0;
+        float heightmapSampleHeight = 1.0;
+
+        vec4 hashVal1 = hash42(vec2(grassBladeWorldPos.x, grassBladeWorldPos.z));
+
+        float highLODOut = smoothstep(grassDraw.x * 0.5, grassDraw.x, distance(cameraPosition, grassBladeWorldPos));
+        float lodFadeIn = smoothstep(grassDraw.x, grassDraw.y, distance(cameraPosition, grassBladeWorldPos));
+
+        // REMOVED: Check for terrain type and allowed grass areas
+        // All areas now allow grass growth
+        
+        float randomAngle = hashVal1.x * 2.0 * 3.14159;
+        float randomShade = clamp(hashVal1.y * 0.5 + 0.5, 0.5, 1.0);
+        float randomHeight = mix(0.75, 1.5, hashVal1.z * 0.5 + 0.5) * mix(1.0, 0.0, lodFadeIn) * heightmapSampleHeight;
+        float randomWidth = heightmapSampleHeight;
+        float randomLean = mix(0.1, 0.4, hashVal1.w * 0.5 + 0.5);
+
+        vec2 hashGrassColour = hash22(vec2(grassBladeWorldPos.x, grassBladeWorldPos.z)) * 0.5 + 0.5;
+        float leanAnimation = (noise12(vec2(time * 0.35) + grassBladeWorldPos.xz * 137.423) * 2.0 - 1.0) * 0.1;
+
+        float GRASS_SEGMENTS = grassParams.x;
+        float GRASS_VERTICES = grassParams.y;
+
+        // Figure out vertex id
+        float vertID = mod(float(vertIndex), GRASS_VERTICES);
+
+        // 1 = front, -1 = back
+        float zSide = -(floor(vertIndex / GRASS_VERTICES) * 2.0 - 1.0);
+
+        // 0 = left, 1 = right
+        float xSide = mod(vertID, 2.0);
+
+        float heightPercent = (vertID - xSide) / (GRASS_SEGMENTS * 2.0);
+
+        // Select grass blade variation (0-4 for 5 variations)
+        float bladeVariation = floor(hashVal1.x * 5.0);
+
+        float grassTotalHeight = grassSize.y * randomHeight;
+        float grassTotalWidthHigh = easeOut(1.0 - heightPercent, 2.0);
+        float grassTotalWidthLow = 1.0 - heightPercent;
+        float grassTotalWidth = grassSize.x * mix(grassTotalWidthHigh, grassTotalWidthLow, highLODOut) * randomWidth;
+
+        // Shift verts
+        float x = (xSide - 0.5) * grassTotalWidth;
+        float y = heightPercent * grassTotalHeight;
+
+        float windDir = noise12(grassBladeWorldPos.xz * 0.05 + 0.05 * time) * 6.28318;
+        float windNoiseSample = noise12(grassBladeWorldPos.xz * 0.25 + time * 1.0) * 2.0 - 1.0;
+        float windLeanAngle = mix(0.25, 1.0, clamp(windNoiseSample * 0.5 + 0.5, 0.0, 1.0));
+        windLeanAngle = easeIn(windLeanAngle, 2.0) * 1.25;
+        vec3 windAxis = vec3(cos(windDir), 0.0, sin(windDir));
+
+        windLeanAngle *= heightPercent;
+
+        float distToPlayer = distance(grassBladeWorldPos.xz, playerPos.xz);
+        float playerFalloff = smoothstep(2.5, 1.0, distToPlayer);
+        float playerLeanAngle = mix(0.0, 0.2, playerFalloff * linearstep(0.5, 0.0, windLeanAngle));
+        vec3 grassToPlayer = normalize(vec3(playerPos.x, 0.0, playerPos.z) - vec3(grassBladeWorldPos.x, 0.0, grassBladeWorldPos.z));
+        vec3 playerLeanAxis = vec3(grassToPlayer.z, 0, -grassToPlayer.x);
+
+        randomLean += leanAnimation;
+
+        float easedHeight = mix(easeIn(heightPercent, 2.0), 1.0, highLODOut);
+        float curveAmount = -randomLean * easedHeight;
+
+        float ncurve1 = -randomLean * easedHeight;
+        vec3 n1 = vec3(0.0, (heightPercent + 0.01), 0.0);
+        n1 = rotateX(ncurve1) * n1;
+
+        float ncurve2 = -randomLean * easedHeight * 0.9;
+        vec3 n2 = vec3(0.0, (heightPercent + 0.01) * 0.9, 0.0);
+        n2 = rotateX(ncurve2) * n2;
+
+        vec3 ncurve = normalize(n1 - n2);
+
+        mat3 grassMat = rotateAxis(playerLeanAxis, playerLeanAngle) * rotateAxis(windAxis, windLeanAngle) * rotateY(randomAngle);
+
+        vec3 grassFaceNormal = vec3(0.0, 0.0, 1.0);
+        grassFaceNormal = grassMat * grassFaceNormal;
+        grassFaceNormal *= zSide;
+
+        vec3 grassVertexNormal = vec3(0.0, -ncurve.z, ncurve.y);
+        vec3 grassVertexNormal1 = rotateY(3.14159 * 0.3 * zSide) * grassVertexNormal;
+
+        grassVertexNormal1 = grassMat * grassVertexNormal1;
+        grassVertexNormal1 *= zSide;
+
+        vec3 grassVertexPosition = vec3(x, y, 0.0);
+        grassVertexPosition = rotateX(curveAmount) * grassVertexPosition;
+        grassVertexPosition = grassMat * grassVertexPosition;
+
+        grassVertexPosition += grassOffset;
+
+        vGrassParams = vec4(heightPercent, grassBladeWorldPos.y, highLODOut, xSide);
+        
+        const float SKY_RATIO = 0.15;
+        vec3 UP = vec3(0.0, 1.0, 0.0);
+        float skyFadeIn = (1.0 - highLODOut) * SKY_RATIO;
+        vNormal = normalize(mix(UP, grassVertexNormal1, skyFadeIn));
+
+        vec3 pos = grassVertexPosition;
+
+        vec3 viewDir = normalize(cameraPosition - grassBladeWorldPos);
+        vec3 viewDirXZ = normalize(vec3(viewDir.x, 0.0, viewDir.z));
+        vec3 grassFaceNormalXZ = normalize(vec3(grassFaceNormal.x, 0.0, grassFaceNormal.z));
+
+        float viewDotNormal = saturate(dot(grassFaceNormal, viewDirXZ));
+        float viewSpaceThickenFactor = easeOut(1.0 - viewDotNormal, 4.0) * smoothstep(0.0, 0.2, viewDotNormal);
+
+        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+        
+        // Thicken effect for better visibility
+        mvPosition.x += viewSpaceThickenFactor * (xSide - 0.5) * grassTotalWidth * 0.5 * zSide;
+        
+        gl_Position = projectionMatrix * mvPosition;
+        
+        vPosition = pos;
+        vWorldPosition = (modelMatrix * vec4(pos, 1.0)).xyz;
+        
+        // Map UV to select one of the 5 blade variations
+        // Each blade is 1/5 of the total width
+        float uvX = (xSide * 0.2) + (bladeVariation * 0.2);
+        vUv = vec2(uvX, heightPercent);
+      }
+    `;
+    
+    const fragmentShader = `
+      uniform vec3 diffuse;
+      uniform vec3 specular;
+      uniform float shininess;
+      uniform float opacity;
+      uniform float time;
+      uniform sampler2D grassTexture;
+      
+      varying vec4 vGrassParams;
+      varying vec3 vNormal;
+      varying vec3 vPosition;
+      varying vec3 vWorldPosition;
+      varying vec2 vUv;
+      varying float vEdgeFade;
+      
+      // Light data (mimic Three.js directional light)
+      struct DirectionalLight {
+        vec3 direction;
+        vec3 color;
+      };
+      
+      const DirectionalLight directionalLight = DirectionalLight(
+        normalize(vec3(-0.5, 0.8, 0.5)),
+        vec3(1.0, 1.0, 1.0)
+      );
+      
+      // Utility functions
+      float saturate(float x) {
+        return clamp(x, 0.0, 1.0);
+      }
+      
+      float easeIn(float x, float t) {
+        return pow(x, t);
+      }
+      
+      vec3 calculateLighting(vec3 normal, vec3 viewDir, vec3 baseColor) {
+        // Ambient term
+        vec3 ambient = vec3(0.3) * baseColor;
+        
+        // Diffuse term with wrapped lighting for softer look
+        float wrap = 0.5;
+        float NdotL = saturate((dot(normal, directionalLight.direction) + wrap) / (1.0 + wrap));
+        vec3 diffuseLight = NdotL * directionalLight.color * baseColor;
+        
+        // Simple specular for highlights
+        vec3 halfVector = normalize(directionalLight.direction + viewDir);
+        float NdotH = max(0.0, dot(normal, halfVector));
+        vec3 specularLight = pow(NdotH, shininess) * specular * directionalLight.color;
+        
+        // Back-lighting for translucency effect
+        float backLight = saturate((dot(viewDir, -directionalLight.direction) + wrap) / (1.0 + wrap));
+        float backFalloff = 0.5;
+        vec3 backScatter = directionalLight.color * pow(backLight, 1.0) * backFalloff * baseColor * (1.0 - vGrassParams.z);
+        
+        return ambient + diffuseLight + specularLight + backScatter;
+      }
+      
+      void main() {
+        // Grass color processing
+        float heightPercent = vGrassParams.x;
+        float lodFadeIn = vGrassParams.z;
+        
+        // Sample the grass texture
+        vec4 texSample = texture2D(grassTexture, vUv);
+        
+        // Use texture color directly
+        vec3 baseColor = texSample.rgb;
+        
+        // Apply ambient occlusion at the base for natural grounding
+        float ao = mix(0.25, 1.0, easeIn(heightPercent, 2.0));
+        baseColor *= ao;
+        
+        // Lighting calculation
+        vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+        vec3 litColor = calculateLighting(normalize(vNormal), viewDir, baseColor);
+        
+        // Use alpha from texture if available, and apply edge fade
+        float alpha = texSample.a * (1.0 - vEdgeFade);
+        if (alpha < 0.5) discard; // Discard pixels with low alpha
+        
+        gl_FragColor = vec4(litColor, alpha);
+      }
+    `;
+    
+    // Set up the uniforms
+    const uniforms = {
+      grassSize: { value: new THREE.Vector2(GRASS_WIDTH, GRASS_HEIGHT) },
+      grassParams: { value: new THREE.Vector4(
+        isLowDetail ? GRASS_SEGMENTS_LOW : GRASS_SEGMENTS_HIGH,
+        isLowDetail ? GRASS_VERTICES_LOW : GRASS_VERTICES_HIGH,
+        GRASS_PATCH_SIZE * 0.45, // Edge fade start distance
+        GRASS_PATCH_SIZE * 0.5   // Edge fade end distance
+      )},
+      grassDraw: { value: new THREE.Vector4(GRASS_LOD_DIST, GRASS_MAX_DIST, 0, 0) },
+      time: { value: 0.0 },
+      playerPos: { value: new THREE.Vector3(0, 0, 0) },
+      viewMatrixInverse: { value: new THREE.Matrix4() },
+      diffuse: { value: new THREE.Color(0xffffff) },
+      specular: { value: new THREE.Color(0x111111) },
+      shininess: { value: 30 },
+      grassTexture: { value: this.grassTexture },
+      patchOrigin: { value: new THREE.Vector3(0, 0, 0) }
+    };
+    
+    return new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      uniforms,
+      transparent: true,
+      alphaTest: 0.5,
+      side: THREE.DoubleSide
+    });
+  }
+  
+  createGrassGeometry(segments) {
+    this.setSeed(0); // Set seed to 0 to match reference
+
+    const VERTICES = (segments + 1) * 2;
+
+    // Create indices
+    const indices = [];
+    for (let i = 0; i < segments; ++i) {
+      const vi = i * 2;
+      indices[i*12+0] = vi + 0;
+      indices[i*12+1] = vi + 1;
+      indices[i*12+2] = vi + 2;
+
+      indices[i*12+3] = vi + 2;
+      indices[i*12+4] = vi + 1;
+      indices[i*12+5] = vi + 3;
+
+      const fi = VERTICES + vi;
+      indices[i*12+6] = fi + 2;
+      indices[i*12+7] = fi + 1;
+      indices[i*12+8] = fi + 0;
+
+      indices[i*12+9]  = fi + 3;
+      indices[i*12+10] = fi + 1;
+      indices[i*12+11] = fi + 2;
+    }
+
+    // Create offsets with individual heights
+    const offsets = [];
+    for (let i = 0; i < NUM_GRASS; ++i) {
+      const ox = this.randRange(-GRASS_PATCH_SIZE * 0.5, GRASS_PATCH_SIZE * 0.5);
+      const oz = this.randRange(-GRASS_PATCH_SIZE * 0.5, GRASS_PATCH_SIZE * 0.5);
+      // Note: Height (oy) will be set during rendering based on the patch origin
+      // We just need to store the local offsets
+      offsets.push(ox);
+      offsets.push(0); // Y offset will be determined by terrain
+      offsets.push(oz);
+    }
+
+    // Create vertex IDs
+    const vertID = new Uint8Array(VERTICES*2);
+    for (let i = 0; i < VERTICES*2; ++i) {
+      vertID[i] = i;
+    }
+
+    // Create instanced geometry
+    const geo = new THREE.InstancedBufferGeometry();
+    geo.instanceCount = NUM_GRASS;
+    geo.setAttribute('vertIndex', new THREE.Uint8BufferAttribute(vertID, 1));
+    geo.setAttribute('position', new THREE.InstancedBufferAttribute(new Float32Array(offsets), 3));
+    geo.setIndex(indices);
+    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 1 + GRASS_PATCH_SIZE * 2);
+
+    return geo;
+  }
+  
+  createGrassPatch(position) {
+    if (!this.grassMaterialLow || !this.grassMaterialHigh || 
+        !this.geometryLow || !this.geometryHigh) {
+      console.warn("Cannot create grass patch - materials or geometries not initialized");
+      return null;
+    }
+    
+    // Get the terrain height at this position
+    if (this.desertTerrain) {
+      const terrainHeight = this.desertTerrain.getHeightAt(position.x, position.z);
+      position.y = terrainHeight + 0.05; // Small offset to prevent z-fighting
+    }
+    
+    // Calculate distance to camera
+    const distToCamera = position.distanceTo(this.camera.position);
+    
+    // Use low detail mesh for far away patches, high detail for close ones
+    const isLowDetail = distToCamera > GRASS_LOD_DIST;
+    const geometry = isLowDetail ? this.geometryLow : this.geometryHigh;
+    const material = isLowDetail ? this.grassMaterialLow : this.grassMaterialHigh;
+    
+    // Create a mesh for this patch
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.frustumCulled = true;
+    mesh.position.copy(position);
+    this.group.add(mesh);
+    
+    // Save reference to type of mesh
+    if (isLowDetail) {
+      this.meshesLow.push(mesh);
+    } else {
+      this.meshesHigh.push(mesh);
+    }
+    
+    // Create patch data
+    const patch = {
+      position: position.clone(),
+      isLowDetail: isLowDetail,
+      mesh: mesh,
+      lastSeen: performance.now() // Track when this patch was last seen
+    };
+    
+    // Add to patches array and track position
+    this.patches.push(patch);
+    
+    // Use a more precise position key to avoid duplicate patches
+    const posKey = `${position.x.toFixed(1)},${position.z.toFixed(1)}`;
+    this.patchPositions.add(posKey);
+    
+    return patch;
+  }
+  
+  // Update grass patches as the player moves
+  updatePatches() {
+    if (!this.camera) {
+      console.warn("Cannot update grass patches - camera is undefined");
+      return;
+    }
+    
+    if (!this.grassMaterialLow || !this.grassMaterialHigh || 
+        !this.geometryLow || !this.geometryHigh) {
+      console.warn("Cannot update grass patches - materials or geometries not initialized");
+      return;
+    }
+    
+    const now = performance.now();
+    console.log(`Updating grass patches around camera at ${this.camera.position.x.toFixed(1)}, ${this.camera.position.z.toFixed(1)}`);
+    
+    // Calculate base position (center of the grid)
+    const basePos = new THREE.Vector3().copy(this.camera.position);
+    basePos.y = 0; // Keep grass at ground level
+    
+    // Calculate base cell coordinates
+    const baseCellX = Math.floor(basePos.x / GRASS_PATCH_SIZE);
+    const baseCellZ = Math.floor(basePos.z / GRASS_PATCH_SIZE);
+    
+    // Determine coverage radius (how many patches in each direction)
+    const visibleRadius = Math.floor(GRASS_MAX_DIST / GRASS_PATCH_SIZE);
+    
+    // For debugging
+    let patchesCreated = 0;
+    
+    // Create frustum for culling
+    const frustum = new THREE.Frustum();
+    const projScreenMatrix = new THREE.Matrix4();
+    projScreenMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+    frustum.setFromProjectionMatrix(projScreenMatrix);
+    
+    // Only create new patches if we haven't exceeded the maximum
+    if (this.patches.length < MAX_PATCHES) {
+      // Create a dense grid of patches around the player for proper coverage
+      for (let x = -visibleRadius; x <= visibleRadius; x++) {
+        for (let z = -visibleRadius; z <= visibleRadius; z++) {
+          // Add jitter to cell positions to break the grid pattern
+          const jitter = GRASS_PATCH_SIZE * 0.5;
+          const cellX = (baseCellX + x) * GRASS_PATCH_SIZE + this.randRange(-jitter, jitter);
+          const cellZ = (baseCellZ + z) * GRASS_PATCH_SIZE + this.randRange(-jitter, jitter);
+          
+          // Skip if this position is too far from camera (squared distance check for performance)
+          const distSq = (cellX - basePos.x) * (cellX - basePos.x) + (cellZ - basePos.z) * (cellZ - basePos.z);
+          if (distSq > GRASS_MAX_DIST * GRASS_MAX_DIST) {
+            continue;
+          }
+          
+          // Position key for lookup
+          const posKey = `${cellX.toFixed(1)},${cellZ.toFixed(1)}`;
+          
+          // Skip if this patch already exists
+          if (this.patchPositions.has(posKey)) {
+            // Update the last seen time for this patch
+            const patch = this.patches.find(p => 
+              Math.abs(p.position.x - cellX) < 0.1 && 
+              Math.abs(p.position.z - cellZ) < 0.1);
+            
+            if (patch) {
+              patch.lastSeen = now;
+            }
+            continue;
+          }
+          
+          // Create cell position
+          const cellPos = new THREE.Vector3(cellX, 0, cellZ);
+          
+          // Create AABB for frustum culling
+          const aabb = new THREE.Box3().setFromCenterAndSize(
+            cellPos,
+            new THREE.Vector3(GRASS_PATCH_SIZE, 1000, GRASS_PATCH_SIZE)
+          );
+          
+          // Create new patch (the height will be set in createGrassPatch)
+          const patch = this.createGrassPatch(new THREE.Vector3(cellX, 0, cellZ));
+          if (patch) {
+            patchesCreated++;
+            patch.lastSeen = now;
+          }
+        }
+      }
+    } else {
+      console.warn(`Maximum patch count reached (${MAX_PATCHES}), skipping new patch creation`);
+    }
+    
+    console.log(`Created ${patchesCreated} new grass patches, total patches: ${this.patches.length}`);
+    
+    // Update all patches and clean up old ones
+    this.updatePatchesVisibility(now);
+    
+    // Periodically clean up distant/unused patches
+    if (now - this.lastCleanupTime > 10000) { // Every 10 seconds
+      this.cleanupDistantPatches(now);
+      this.lastCleanupTime = now;
+    }
+  }
+  
+  // Separate method to update patch visibility
+  updatePatchesVisibility(now) {
+    // Update visibility of all patches based on distance
+    for (const patch of this.patches) {
+      const distToCamera = patch.position.distanceTo(this.camera.position);
+      
+      // Check if this patch is still needed (inside max distance)
+      if (distToCamera < GRASS_MAX_DIST) {
+        patch.mesh.visible = true;
+        patch.lastSeen = now; // Update last seen time
+        
+        // Update LOD if needed
+        const shouldBeLowDetail = distToCamera > GRASS_LOD_DIST;
+        if (patch.isLowDetail !== shouldBeLowDetail) {
+          // Switch LOD level
+          patch.isLowDetail = shouldBeLowDetail;
+          const newGeometry = shouldBeLowDetail ? this.geometryLow : this.geometryHigh;
+          const newMaterial = shouldBeLowDetail ? this.grassMaterialLow : this.grassMaterialHigh;
+          patch.mesh.geometry = newGeometry;
+          patch.mesh.material = newMaterial;
+          
+          // Update mesh references
+          if (shouldBeLowDetail) {
+            // Remove from high detail list, add to low detail
+            const index = this.meshesHigh.indexOf(patch.mesh);
+            if (index !== -1) this.meshesHigh.splice(index, 1);
+            this.meshesLow.push(patch.mesh);
+          } else {
+            // Remove from low detail list, add to high detail
+            const index = this.meshesLow.indexOf(patch.mesh);
+            if (index !== -1) this.meshesLow.splice(index, 1);
+            this.meshesHigh.push(patch.mesh);
+          }
+        }
+      } else {
+        // Patch is too far away, hide it
+        patch.mesh.visible = false;
+      }
+    }
+  }
+  
+  // Clean up distant patches to prevent memory issues
+  cleanupDistantPatches(now) {
+    const maxPatchAge = 20000; // Remove patches that haven't been seen in 20 seconds
+    const patchesToRemove = [];
+    
+    // Find all patches that haven't been seen recently
+    for (let i = 0; i < this.patches.length; i++) {
+      const patch = this.patches[i];
+      const patchAge = now - patch.lastSeen;
+      
+      if (patchAge > maxPatchAge) {
+        patchesToRemove.push(i);
+      }
+    }
+    
+    // Remove patches in reverse order to maintain correct indices
+    for (let i = patchesToRemove.length - 1; i >= 0; i--) {
+      const index = patchesToRemove[i];
+      const patch = this.patches[index];
+      
+      // Remove from position tracking
+      this.patchPositions.delete(`${patch.position.x.toFixed(1)},${patch.position.z.toFixed(1)}`);
+      
+      // Remove from scene
+      this.group.remove(patch.mesh);
+      
+      // Remove from appropriate mesh array
+      if (patch.isLowDetail) {
+        const meshIndex = this.meshesLow.indexOf(patch.mesh);
+        if (meshIndex !== -1) this.meshesLow.splice(meshIndex, 1);
+      } else {
+        const meshIndex = this.meshesHigh.indexOf(patch.mesh);
+        if (meshIndex !== -1) this.meshesHigh.splice(meshIndex, 1);
+      }
+      
+      // Remove from patches array
+      this.patches.splice(index, 1);
+    }
+    
+    if (patchesToRemove.length > 0) {
+      console.log(`Cleaned up ${patchesToRemove.length} distant/unused grass patches`);
+    }
+  }
+  
+  // Update grass system
+  update(deltaTime, playerPosition) {
+    if (!this.camera) {
+      console.warn("Cannot update grass system - camera is undefined");
+      return;
+    }
+    
+    if (!this.grassMaterialLow || !this.grassMaterialHigh) {
+      // Materials not yet loaded, skip update
+      return;
+    }
+    
+    // Update time
+    this.totalTime += deltaTime;
+    
+    // Update materials
+    this.grassMaterialLow.uniforms.time.value = this.totalTime;
+    this.grassMaterialHigh.uniforms.time.value = this.totalTime;
+    
+    if (playerPosition) {
+      this.grassMaterialLow.uniforms.playerPos.value.copy(playerPosition);
+      this.grassMaterialHigh.uniforms.playerPos.value.copy(playerPosition);
+    }
+    
+    // Update viewMatrixInverse for billboarding (if needed)
+    if (this.camera) {
+      this.grassMaterialLow.uniforms.viewMatrixInverse.value.copy(this.camera.matrixWorld);
+      this.grassMaterialHigh.uniforms.viewMatrixInverse.value.copy(this.camera.matrixWorld);
+      
+      // Update grass patches if player has moved significantly
+      if (this.camera.position.distanceTo(this.lastCameraPosition) > GRASS_PATCH_SIZE / 4) {
+        this.lastCameraPosition.copy(this.camera.position);
+        this.updatePatches();
+      }
+    }
+    
+    // Update patch origin uniforms to enable per-blade height sampling
+    for (const mesh of this.meshesLow.concat(this.meshesHigh)) {
+      if (mesh.material.uniforms && mesh.material.uniforms.patchOrigin) {
+        mesh.material.uniforms.patchOrigin.value.copy(mesh.position);
+      }
+    }
+  }
+  
+  // Clean up resources
+  dispose() {
+    console.log("Disposing grass system...");
+    
+    // Remove grass group from scene
+    this.scene.remove(this.group);
+    
+    // Dispose of geometries and materials
+    if (this.geometryLow) this.geometryLow.dispose();
+    if (this.geometryHigh) this.geometryHigh.dispose();
+    if (this.grassMaterialLow) this.grassMaterialLow.dispose();
+    if (this.grassMaterialHigh) this.grassMaterialHigh.dispose();
+    if (this.grassTexture) this.grassTexture.dispose();
+    
+    // Clear arrays
+    this.meshesLow = [];
+    this.meshesHigh = [];
+    this.patches = [];
+  }
+  
+  // These methods are now just placeholders - they always return false to allow grass everywhere
+  isInTownArea(x, z) {
+    // Now always return false to allow grass in town area
+    return false;
+  }
+  
+  // Check if position is near train track
+  isNearTrainTrack(x, z) {
+    // Now always return false to allow grass near train tracks
+    return false;
+  }
+  
+  // Simple random number utility with seed
+  setSeed(seed) {
+    this.seed = seed || 0;
+  }
+  
+  randRange(min, max) {
+    // Simple deterministic random function
+    this.seed = (this.seed * 9301 + 49297) % 233280;
+    const random = this.seed / 233280;
+    return min + random * (max - min);
+  }
+} 
+
+================================================
 File: /public/js/input.js
 ================================================
 /**
@@ -6101,19 +6587,6 @@ export function initInput(renderer, player, soundManager) {
   document.addEventListener('keydown', (event) => {
     // Skip game input if chat is active
     if (isChatInputActive()) return;
-    
-    // Check for NPC interaction first
-    if (event.code === 'KeyE') {
-      // Try to handle NPC interaction first - highest priority
-      if (window.npcManager && window.npcManager.instance) {
-        // Check if there's a bartender or other NPC nearby
-        if (window.npcManager.instance.isBartenderNearby || window.npcManager.instance.nearbyNpc) {
-          // Handle the interaction with the NPC
-          window.npcManager.instance.handleInteraction(event, player);
-          return;
-        }
-      }
-    }
     
     // Weapon switching with number keys
     if (event.code === 'Digit1') {
@@ -7507,8 +7980,6 @@ import { initPlayerIdentity, verifyIdentityWithServer } from './playerIdentity.j
 import logger from './logger.js';
 // Removed FlyingEagle import
 import { initChat, handleChatMessage, addSystemMessage } from './chat.js';
-import { initNpcManager, npcManager } from './npcManager.js';
-console.log("NPC Manager module loaded");
 import './viewmodel-config.js';
 
 // Check if device is mobile
@@ -7578,12 +8049,6 @@ async function init() {
     const sceneSetup = initScene();
     camera = sceneSetup.camera;
     renderer = sceneSetup.renderer;
-    
-    // Initialize NPC manager with the scene
-    const npcManagerInstance = initNpcManager(scene);
-    
-    // Make NPC manager globally accessible
-    window.npcManager = npcManager;
     
     // Set up global renderer access for camera switching
     window.renderer.instance = renderer;
@@ -7828,9 +8293,11 @@ async function init() {
     // Anti-cheat: Listen for server-initiated respawn
     networkManager.onRespawn = (position, health, bullets) => {
       if (localPlayer) {
-        // Set position
-        localPlayer.group.position.copy(position);
-        localPlayer.previousPosition.copy(position);
+        // Set position directly without ground offset adjustment
+        if (position) {
+          localPlayer.group.position.copy(position);
+          localPlayer.previousPosition.copy(position);
+        }
         
         // Update health and bullets
         localPlayer.health = health || 100;
@@ -7840,6 +8307,10 @@ async function init() {
         localPlayer.isReloading = false;
         localPlayer.isAiming = false;
         localPlayer.velocity.y = 0;
+        
+        // Reset movement flags - critical for allowing movement after respawn
+        localPlayer.canMove = true;
+        localPlayer.forceLockMovement = false;
         localPlayer.canAim = true;
         
         // Update UI
@@ -8044,11 +8515,6 @@ async function init() {
       if (event.code === 'KeyR') {
         localPlayer.startReload();
       }
-      
-      // No longer spawn bots with the B key as NPCs are now server-controlled
-      if (event.code === 'KeyB' && !event.ctrlKey && !event.shiftKey) {
-        console.log("NPCs are now server-controlled and cannot be spawned from the client");
-      }
     });
 
     // Make Bullet constructor globally available for hit zone debug creation
@@ -8238,11 +8704,6 @@ function animate(time) {
   // Update local player
   localPlayer.update(deltaTime);
   
-  // Update nearby NPCs for interaction
-  if (npcManager && npcManager.instance) {
-    npcManager.instance.updateNearbyNpcs(localPlayer);
-  }
-  
   // Update remote players (animations, movement interpolation, etc.)
   multiplayerManager.update(deltaTime);
   
@@ -8272,6 +8733,28 @@ function animate(time) {
         if (bullet.bulletId !== null && result.hit.zone) {
           bullet.setLastHitZone(result.hit.zone);
         }
+        
+        // CRITICAL: Notify server about the player hit
+        if (bullet.sourcePlayerId === localPlayer.id) {
+          // Only send hit events for bullets fired by the local player
+          networkManager.sendPlayerHit(
+            result.hit.playerId, // The ID of the player who was hit
+            {
+              position: {
+                x: result.hit.position.x,
+                y: result.hit.position.y,
+                z: result.hit.position.z
+              },
+              zone: result.hit.zone || 'body',
+              damage: result.hit.damage || 40
+            },
+            bullet.bulletId // Pass the bullet ID for server validation
+          );
+          
+          if (window.logger) {
+            window.logger.info(`Sent hit event to server: player ${result.hit.playerId} hit in ${result.hit.zone} by bullet ${bullet.bulletId}`);
+          }
+        }
       }
       scene.remove(bullet.mesh);
       bullets.splice(i, 1);
@@ -8285,11 +8768,6 @@ function animate(time) {
 
   // Update FPS display
   updateFPS(renderer, camera, deltaTime);
-
-  // Update NPCs through npc manager
-  if (window.npcManager) {
-    // NPC manager handles its own internal updates
-  }
 
   // Use the window.renderer camera
   let renderCamera;
@@ -9153,7 +9631,7 @@ export class MultiplayerManager {
 
     networkManager.onPlayerJoined = (playerData) => {
       if (playerData && playerData.id !== this.localPlayerId) {
-        console.log(`Player joined: ${playerData.id}${playerData.isNpc ? ' (NPC)' : (playerData.isBot ? ' (BOT)' : '')}`);
+        console.log(`Player joined: ${playerData.id}`);
         this.addPlayer(playerData.id, playerData);
         this.notifyPlayersUpdated();
       }
@@ -9217,33 +9695,6 @@ export class MultiplayerManager {
       
       // Normal update
       if (playerModel) {
-        // For NPCs/Bots, cache the latest network data to use in the animation update
-        if (updatedData && (playerModel.isBot || playerModel.isNpc || (updatedData.isNpc || updatedData.isBot))) {
-          // Cache the network data for use in the animation update
-          playerModel._cachedNetworkData = {
-            ...updatedData,
-            isNpc: updatedData.isNpc || playerModel.isNpc,
-            isBot: updatedData.isBot || playerModel.isBot
-          };
-          
-          // Ensure isNpc/isBot flags are set on the model
-          playerModel.isNpc = playerModel._cachedNetworkData.isNpc;
-          playerModel.isBot = playerModel._cachedNetworkData.isBot;
-          
-          // If the NPC is walking, direct to walking animation immediately
-          if (updatedData.isWalking && !playerModel.isWalking) {
-            playerModel.isWalking = true;
-            if (playerModel.directToWalking) {
-              playerModel.directToWalking(false);
-            }
-          } else if (!updatedData.isWalking && playerModel.isWalking) {
-            playerModel.isWalking = false;
-            if (playerModel.directToIdle) {
-              playerModel.directToIdle();
-            }
-          }
-        }
-        
         playerModel.update(updatedData);
       } else if (updatedData) {
         // If we don't have this model yet, create it
@@ -9306,8 +9757,20 @@ export class MultiplayerManager {
     };
 
     // Anti-cheat: Broadcast that some player was hit (server validated)
-    networkManager.onPlayerHitBroadcast = (targetId, sourceId, hitPos, newHealth, hitZone) => {
-      console.log(`Player ${targetId} was hit by ${sourceId} in the ${hitZone || 'body'}`);
+    networkManager.onPlayerHitBroadcast = (hitData) => {
+      // Make sure we have valid data
+      if (!hitData || !hitData.targetId) {
+        console.warn("Invalid hit broadcast data received");
+        return;
+      }
+      
+      const targetId = hitData.targetId;
+      const sourceId = hitData.sourceId;
+      const hitPos = hitData.position;
+      const newHealth = hitData.health;
+      const hitZone = hitData.zone || 'body';
+      
+      console.log(`Player ${targetId} was hit by ${sourceId} in the ${hitZone}`);
       
       // Convert targetId to integer if it's a string
       const playerId = typeof targetId === 'string' ? parseInt(targetId, 10) : targetId;
@@ -9478,27 +9941,8 @@ export class MultiplayerManager {
     
     console.log(`Adding remote player ${playerId} to scene`);
     
-    let playerModel;
-    
-    // Check if this is an NPC or bot
-    const isNpc = initialData.isNpc || false;
-    const isBot = initialData.isBot || false;
-    
-    // Use specialized NPC models for NPCs
-    if (isNpc && window.npcManager && window.npcManager.instance) {
-      // Let the NPC manager handle creating the appropriate model
-      playerModel = window.npcManager.instance.createOrUpdateNpc(playerId, initialData);
-    } else {
-      // Create standard player model for regular players and bots
-      playerModel = new ThirdPersonModel(this.scene, playerId);
-    }
-    
-    // Set bot/NPC flag if this is not a human player
-    playerModel.isBot = isBot;
-    playerModel.isNpc = isNpc;
-    
-    // Track if this is an AI-controlled character
-    const isAiControlled = playerModel.isBot || playerModel.isNpc;
+    // Create standard player model
+    const playerModel = new ThirdPersonModel(this.scene, playerId);
     
     // Add to tracking map - used by main.js for bullet hit detection
     this.remotePlayers.set(playerId, playerModel);
@@ -9519,8 +9963,8 @@ export class MultiplayerManager {
       playerModel.group.rotation.y = initialData.rotation.y;
     }
     
-    // Apply skin information if provided and not an NPC/bot
-    if (!isNpc && !isBot && initialData.skins) {
+    // Apply skin information if provided
+    if (initialData.skins) {
       console.log(`Applying initial skin data for player ${playerId}:`, initialData.skins);
       
       // Update skin permissions
@@ -9555,26 +9999,8 @@ export class MultiplayerManager {
       }
     }
     
-    // For NPCs/Bots, ensure model is prepared correctly and animation is initialized
-    if (isAiControlled) {
-      // Store the network data for future updates
-      playerModel._cachedNetworkData = { ...initialData };
-      
-      // Ensure animations load and initialize correctly
-      setTimeout(() => {
-        // Set initial animation state based on data
-        if (initialData.isWalking && playerModel.directToWalking) {
-          playerModel.isWalking = true;
-          playerModel.directToWalking(false);
-        } else if (playerModel.directToIdle) {
-          playerModel.isWalking = false;
-          playerModel.directToIdle();
-        }
-      }, 500); // Delay slightly to ensure model is loaded
-    }
-    
     // Create username label
-    this.createPlayerLabel(playerId, initialData.username || `Player_${playerId}`, isAiControlled);
+    this.createPlayerLabel(playerId, initialData.username || `Player_${playerId}`, false);
     
     return playerModel;
   }
@@ -9606,15 +10032,9 @@ export class MultiplayerManager {
     div.style.userSelect = 'none';
     div.style.zIndex = '10';
     
-    // Add special styling for AI-controlled characters
-    if (isAiControlled) {
-      div.classList.add('ai-controlled');
-      div.style.backgroundColor = 'rgba(50, 150, 255, 0.5)'; // Blue background for NPCs
-      div.textContent = username; // Remove robot emoji, just use the name
-    } else {
-      div.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'; // Regular background for players
-      div.textContent = username;
-    }
+    // Regular styling for players
+    div.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'; // Regular background for players
+    div.textContent = username;
     
     // Add to DOM
     this.labelContainer.appendChild(div);
@@ -9674,32 +10094,12 @@ export class MultiplayerManager {
         
         // Also call the general update method if it exists
         if (playerModel.update) {
-          // For NPCs/Bots, make sure we're passing the animation state correctly
-          if (playerModel.isBot || playerModel.isNpc) {
-            // Check for cached data that was received in onPlayerUpdate
-            const cachedData = playerModel._cachedNetworkData;
-            if (cachedData) {
-              // Clone the data to avoid permanent modifications to cached data
-              const clonedData = { ...cachedData };
-              
-              // Only include skin data on initial update or when it has actually changed
-              if (!playerModel._initialSkinApplied) {
-                playerModel._initialSkinApplied = true;
-              } else {
-                // Remove skin data from subsequent updates to prevent constant reapplication
-                delete clonedData.skins;
-              }
-              
-              playerModel.update(clonedData);
-            }
+          // DON'T pass deltaTime to update when the player is in a frozen aim pose
+          // This prevents animation mixer from resetting the animation each frame
+          if (playerModel.isAiming && !playerModel.isShooting && !playerModel.isJumping) {
+            // Skip sending deltaTime update which would reset the animation
           } else {
-            // DON'T pass deltaTime to update when the player is in a frozen aim pose
-            // This prevents animation mixer from resetting the animation each frame
-            if (playerModel.isAiming && !playerModel.isShooting && !playerModel.isJumping) {
-              // Skip sending deltaTime update which would reset the animation
-            } else {
-              playerModel.update(deltaTime);
-            }
+            playerModel.update(deltaTime);
           }
         }
       }
@@ -10027,7 +10427,7 @@ export class NetworkManager {
 
       // Another player joined
       case 'playerJoined':
-        console.log(`Player ${message.id} joined${message.isNpc ? ' (NPC)' : (message.isBot ? ' (BOT)' : '')}`);
+        console.log(`Player ${message.id} joined`);
         
         // Skip if this is our own ID
         if (message.id === this.playerId) {
@@ -10045,8 +10445,6 @@ export class NetworkManager {
           isAiming: false,
           isShooting: false,
           isReloading: false,
-          isBot: message.isBot || false, // Legacy bot flag
-          isNpc: message.isNpc || false, // New NPC flag
           username: message.username || `Player_${message.id}`,
           skins: message.skins || { bananaSkin: false } // Include skin information
         });
@@ -10084,10 +10482,6 @@ export class NetworkManager {
               message.health !== undefined ? message.health : existing.health;
             existing.isDying =
               message.isDying !== undefined ? message.isDying : existing.isDying;
-            existing.isBot =
-              message.isBot !== undefined ? message.isBot : existing.isBot;
-            existing.isNpc =
-              message.isNpc !== undefined ? message.isNpc : existing.isNpc;
             existing.isWalking =
               message.isWalking !== undefined ? message.isWalking : existing.isWalking;
             
@@ -10107,8 +10501,6 @@ export class NetworkManager {
                 isReloading: message.isReloading || false, 
                 health: message.health || 100,
                 isDying: message.isDying || false,
-                isBot: message.isBot || false,
-                isNpc: message.isNpc || false,
                 isWalking: message.isWalking || false,
                 username: message.username || `Player_${message.id}`,
                 skins: message.skins || { bananaSkin: false } // Include skin information
@@ -10146,7 +10538,7 @@ export class NetworkManager {
       case 'hit':
         console.log(`I was hit by player ${message.sourceId} in the ${message.hitZone || 'body'} for ${message.hitData?.damage || 20} damage`);
         
-        // Add damage to hitData if it's missing (for NPC hits)
+        // Add damage to hitData if it's missing
         let damage = 40; // Default body shot damage
         if (message.hitZone === 'head') {
           damage = 100;
@@ -10154,7 +10546,7 @@ export class NetworkManager {
           damage = 20;
         }
         
-        // If hitData is missing (from NPC), create it
+        // If hitData is missing, create it
         if (!message.hitData) {
           message.hitData = {
             damage: damage,
@@ -10602,249 +10994,6 @@ export class NetworkManager {
     }
   }
 } 
-
-================================================
-File: /public/js/npcManager.js
-================================================
-import { ThirdPersonModel } from './playerModel.js';
-
-/**
- * NPC Manager - Responsible for handling server-controlled NPCs
- * The actual NPC logic is now controlled by the server
- */
-export class NpcManager {
-  /**
-   * Initialize the NPC Manager
-   * @param {THREE.Scene} scene - The scene to add NPCs to
-   */
-  constructor(scene) {
-    this.scene = scene;
-    this.npcs = new Map(); // npcId -> NPC instances
-    
-    // NPC interaction system
-    this.interactionPrompt = null;
-    this.proximityRadius = 3.5; // How close the player needs to be to interact
-    this.nearbyNpc = null; // Current NPC the player is near
-    this.isBartenderNearby = false; // Specifically tracking if near the bartender
-    
-    console.log("NPC Manager initialized - NPCs are now server-controlled");
-    
-    // Create interaction prompt
-    this.createInteractionUI();
-  }
-
-  /**
-   * Get an NPC by ID
-   * @param {string} npcId - The ID of the NPC to get
-   * @returns {Object|null} The NPC instance or null if not found
-   */
-  getNpc(npcId) {
-    return this.npcs.get(npcId);
-  }
-
-  /**
-   * Check if an entity is an NPC
-   * @param {string} entityId - The ID to check
-   * @returns {boolean} True if the entity is an NPC
-   */
-  isNpc(entityId) {
-    return typeof entityId === 'string' && (
-      entityId.startsWith('npc_') || // New server-controlled NPC format
-      entityId.startsWith('bot_')     // Legacy bot format for backward compatibility
-    );
-  }
-  
-  /**
-   * Creates or updates a specific type of NPC based on username
-   * @param {string} npcId - The NPC's ID
-   * @param {Object} npcData - NPC data including username and position
-   * @returns {ThirdPersonModel} - The created or updated NPC model
-   */
-  createOrUpdateNpc(npcId, npcData) {
-    // Check if we already have this NPC
-    let npcModel = this.npcs.get(npcId);
-    
-    // If we already have it, just return it
-    if (npcModel) {
-      return npcModel;
-    }
-    
-    // Create a specialized ID for sheriff or bartender to help with model loading
-    let specializedId = npcId;
-    
-    // Check if this is the sheriff or bartender based on username
-    if (npcData && npcData.username) {
-      if (npcData.username.toLowerCase().includes('sheriff')) {
-        specializedId = `Sheriff_${npcId}`;
-      } else if (npcData.username.toLowerCase().includes('bartender')) {
-        specializedId = `Bartender_${npcId}`;
-      }
-    }
-    
-    // Create the NPC model with specialized ID to trigger proper model loading
-    npcModel = new ThirdPersonModel(this.scene, specializedId);
-    npcModel.isNpc = true;
-    
-    // Add to our tracking map
-    this.npcs.set(npcId, npcModel);
-    
-    console.log(`Created NPC model for ${npcData.username || 'Unknown NPC'}`);
-    return npcModel;
-  }
-  
-  /**
-   * Creates UI elements for NPC interaction
-   */
-  createInteractionUI() {
-    // Create interaction prompt
-    this.interactionPrompt = document.createElement('div');
-    this.interactionPrompt.id = 'npc-interaction-prompt';
-    this.interactionPrompt.style.position = 'absolute';
-    this.interactionPrompt.style.bottom = '20%';
-    this.interactionPrompt.style.left = '50%';
-    this.interactionPrompt.style.transform = 'translate(-50%, 0) rotate(-2deg)';
-    this.interactionPrompt.style.width = '350px';
-    this.interactionPrompt.style.height = '100px';
-    this.interactionPrompt.style.background = 'url("/textures/wooden_sign.png") no-repeat center center';
-    this.interactionPrompt.style.backgroundSize = 'contain';
-    this.interactionPrompt.style.display = 'flex';
-    this.interactionPrompt.style.alignItems = 'center';
-    this.interactionPrompt.style.justifyContent = 'center';
-    this.interactionPrompt.style.zIndex = '1000';
-    
-    // Create text element
-    this.promptText = document.createElement('div');
-    this.promptText.style.fontFamily = 'Western, "Wanted M54", serif';
-    this.promptText.style.fontSize = '28px';
-    this.promptText.style.fontWeight = 'bold';
-    this.promptText.style.color = '#FFD700';
-    this.promptText.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
-    
-    this.interactionPrompt.appendChild(this.promptText);
-    document.getElementById('game-container').appendChild(this.interactionPrompt);
-    this.interactionPrompt.style.display = 'none'; // Hide initially
-    
-    // Add gentle swing animation
-    const promptAnimation = document.createElement('style');
-    promptAnimation.textContent = `
-      @keyframes swingSign {
-        0% { transform: translate(-50%, 0) rotate(-2deg); }
-        50% { transform: translate(-50%, 0) rotate(2deg); }
-        100% { transform: translate(-50%, 0) rotate(-2deg); }
-      }
-      #npc-interaction-prompt {
-        animation: swingSign 3s ease-in-out infinite;
-      }
-    `;
-    document.head.appendChild(promptAnimation);
-  }
-  
-  /**
-   * Updates the list of nearby NPCs for interaction
-   * @param {Player} player - The local player
-   */
-  updateNearbyNpcs(player) {
-    if (!player) return;
-    
-    const playerPos = player.group.position.clone();
-    this.nearbyNpc = null;
-    this.isBartenderNearby = false;
-    
-    let closestDistance = this.proximityRadius;
-    
-    // Check each NPC for proximity
-    for (const [npcId, npcModel] of this.npcs) {
-      if (!npcModel.group) continue;
-      
-      // Get NPC position
-      const npcPos = npcModel.group.position.clone();
-      
-      // Calculate distance to player
-      const distance = playerPos.distanceTo(npcPos);
-      
-      // If within proximity radius and closer than any previous NPC
-      if (distance <= closestDistance) {
-        closestDistance = distance;
-        this.nearbyNpc = npcModel;
-        
-        // Check if it's the bartender specifically
-        if (npcId.includes('Bartender') || 
-            (npcModel.playerId && npcModel.playerId.includes('Bartender'))) {
-          this.isBartenderNearby = true;
-          console.log('Near bartender, can get drunk!');
-        }
-      }
-    }
-    
-    // Update UI based on nearby NPCs
-    this.updateInteractionUI();
-  }
-  
-  /**
-   * Updates the interaction UI based on nearby NPCs
-   */
-  updateInteractionUI() {
-    if (this.nearbyNpc && this.isBartenderNearby) {
-      // Show bartender interaction prompt
-      this.promptText.textContent = 'Press E to get drunk';
-      this.interactionPrompt.style.display = 'flex';
-      
-      // Check if we're on mobile and show mobile bartender button if available
-      if (window.mobileControls && typeof window.mobileControls.showBartenderButton === 'function') {
-        window.mobileControls.showBartenderButton();
-      }
-    } else {
-      // Hide interaction prompt
-      this.interactionPrompt.style.display = 'none';
-      
-      // Hide mobile bartender button if available
-      if (window.mobileControls && typeof window.mobileControls.hideBartenderButton === 'function') {
-        window.mobileControls.hideBartenderButton();
-      }
-    }
-  }
-  
-  /**
-   * Handle interaction with NPCs
-   * @param {KeyboardEvent|null} event - The keyboard event (null if triggered directly by mobile)
-   * @param {Player} player - The local player
-   * @returns {boolean} True if interaction was handled
-   */
-  handleInteraction(event, player) {
-    // For keyboard events, only proceed if it's the E key
-    if (event && event.code !== 'KeyE') return false;
-    
-    // Check if player is near the bartender
-    if (this.isBartenderNearby) {
-      console.log('Interacting with bartender - getting drunk!');
-      
-      // Trigger drunkenness effect
-      if (window.drunkennessEffect) {
-        window.drunkennessEffect.activate();
-      }
-      
-      return true;
-    }
-    
-    return false;
-  }
-}
-
-// Create a simple placeholder that will be initialized properly in main.js
-let npcManagerInstance = null;
-
-export function initNpcManager(scene) {
-  if (!npcManagerInstance) {
-    npcManagerInstance = new NpcManager(scene);
-  }
-  return npcManagerInstance;
-}
-
-export const npcManager = {
-  get instance() {
-    return npcManagerInstance;
-  }
-}; 
 
 ================================================
 File: /public/js/phantom-wallet.js
@@ -11673,6 +11822,9 @@ export class Player {
 
     this.group = new THREE.Group();
     
+    // Initialize previousPosition BEFORE calling spawnPlayerRandomly
+    this.previousPosition = new THREE.Vector3();
+    
     // Start at a random spawn point in the town street
     this.spawnPlayerRandomly();
     
@@ -11785,9 +11937,6 @@ export class Player {
     // Flag to control when aiming is allowed (used by various game systems)
     this.canAim = true;
     
-    // Store previous position to detect collision with arena boundary
-    this.previousPosition = new THREE.Vector3();
-    
     // Anti-cheat: Server reconciliation
     this.serverPosition = new THREE.Vector3();
     this.isReconciling = false;
@@ -11830,7 +11979,7 @@ export class Player {
     while (!validSpawn && attempts < maxAttempts) {
       // Random position within the main street
       spawnX = (Math.random() - 0.5) * 10; // Random X between -5 and 5 (main street)
-      spawnY = 2.72; // Eye level
+      spawnY = 2.72; // Eye level, no adjustment needed here - we set camera height directly
       spawnZ = (Math.random() - 0.5) * 40; // Random Z between -20 and 20
       
       // Check if this position is valid (not colliding with anything)
@@ -11843,16 +11992,19 @@ export class Player {
     if (!validSpawn) {
       console.warn(`Could not find valid spawn position after ${maxAttempts} attempts. Using fallback.`);
       spawnX = 0;
-      spawnY = 2.72; // Consistent eye level
+      spawnY = 2.72; // Consistent eye level, no adjustment needed
       spawnZ = 0;
     }
 
     this.group.position.set(spawnX, spawnY, spawnZ);
     
+    // Store the position for collision reference
+    this.previousPosition.copy(this.group.position);
+    
     // Random rotation (facing any direction)
     this.group.rotation.y = Math.random() * Math.PI * 2;
     
-    console.log(`Player spawned at: X=${spawnX.toFixed(2)}, Z=${spawnZ.toFixed(2)}`);
+    console.log(`Player spawned at: X=${spawnX.toFixed(2)}, Y=${spawnY.toFixed(2)}, Z=${spawnZ.toFixed(2)}`);
   }
 
   /**
@@ -11880,9 +12032,11 @@ export class Player {
     networkManager.onRespawn = (position, health, bullets, maxBullets, activeWeapon) => {
       console.log("Server-initiated respawn");
       
-      // Set position
-      this.group.position.copy(position);
-      this.previousPosition.copy(position);
+      // Set position directly without ground offset adjustment
+      if (position) {
+        this.group.position.copy(position);
+        this.previousPosition.copy(position);
+      }
       
       // Update health
       this.health = health || 100;
@@ -11922,13 +12076,20 @@ export class Player {
       this.isAiming = false;
       this.velocity.y = 0;
       
+      // Reset movement flags - critical for allowing movement after respawn
+      this.canMove = true;
+      this.forceLockMovement = false;
+      this.canAim = true;
+      
       // Make sure UI is updated
       updateAmmoUI(this);
+      updateHealthUI(this);
       
       // Reset vertical velocity
       this.velocity.y = 0;
       
-      console.log('Player respawned');
+      console.log('Player respawned from server');
+      console.log(`Position: X=${this.group.position.x.toFixed(2)}, Y=${this.group.position.y.toFixed(2)}, Z=${this.group.position.z.toFixed(2)}`);
       console.log(`Weapon ammo reset - Revolver: ${this.weaponAmmo.revolver}, Shotgun: ${this.weaponAmmo.shotgun}`);
     };
   }
@@ -12669,6 +12830,11 @@ export class Player {
     this.isAiming = false;
     this.velocity.y = 0;
     
+    // Reset movement flags - critical for allowing movement after respawn
+    this.canMove = true;
+    this.forceLockMovement = false;
+    this.canAim = true;
+    
     // Make sure UI is updated
     updateAmmoUI(this);
     
@@ -12676,6 +12842,7 @@ export class Player {
     this.velocity.y = 0;
     
     console.log('Player respawned');
+    console.log(`Position: X=${this.group.position.x.toFixed(2)}, Y=${this.group.position.y.toFixed(2)}, Z=${this.group.position.z.toFixed(2)}`);
     console.log(`Weapon ammo reset - Revolver: ${this.weaponAmmo.revolver}, Shotgun: ${this.weaponAmmo.shotgun}`);
   }
 
@@ -14130,7 +14297,7 @@ export class ThirdPersonModel {
     this.minAnimationCooldown = 0.2; // Reduced from 0.5 seconds
     
     // Position adjustment to prevent sinking
-    this.groundOffset = 0; // Reduced from 0.1 to make feet touch the ground
+    this.groundOffset = -2.72; // Changed from 0 to make model feet touch the ground
     
     // Skin system
     this.activeSkin = null;
@@ -14153,22 +14320,7 @@ export class ThirdPersonModel {
   }
 
   loadPlayerModel() {
-    // Get NPC type from playerId - this identifies specific NPCs like sheriff or bartender
-    const isNpcSheriff = typeof this.playerId === 'string' && this.playerId.includes('Sheriff');
-    const isNpcBartender = typeof this.playerId === 'string' && this.playerId.includes('Bartender');
-    
-    // Check if this is a special NPC that needs a custom model
-    if (isNpcSheriff) {
-      // Load sheriff model
-      this._loadCustomNpcModel('models/sheriff.glb', 'sheriffidle');
-      return;
-    } else if (isNpcBartender) {
-      // Load bartender model
-      this._loadCustomNpcModel('models/bartender.glb', 'bartenderidle');
-      return;
-    }
-
-    // Standard player model loading for all other entities
+    // Standard player model loading for all entities
     // Check if we have a preloaded player model
     if (window.preloadedModels && (window.preloadedModels.playermodel || window.preloadedModels.playermodel_clone)) {
       console.log("Using preloaded playermodel");
@@ -14300,148 +14452,6 @@ export class ThirdPersonModel {
         
         // Add hit zone visualizers even for fallback model
         this.createHitZoneVisualizers();
-      }
-    );
-  }
-
-  /**
-   * Loads a custom NPC model with specific idle animation
-   * @param {string} modelPath - Path to the GLB model file
-   * @param {string} idleAnimationName - Name of the idle animation to play in a loop
-   * @private
-   */
-  _loadCustomNpcModel(modelPath, idleAnimationName) {
-    // Create loader instance
-    const loader = new THREE.GLTFLoader();
-    
-    // Load the custom NPC model
-    loader.load(modelPath, 
-      // Success callback
-      (gltf) => {
-        try {
-          this.playerModel = gltf.scene;
-          
-          // Position at origin with no offset to make feet touch the ground
-          this.playerModel.position.set(0, 0, 0);
-          
-          // Set appropriate scale (may need adjustment per model)
-          this.playerModel.scale.set(1.445, 1.445, 1.445);
-          
-          // Rotate model to face the right direction (might need adjustment per model)
-          this.playerModel.rotation.y = Math.PI; // Rotate 180 degrees
-      
-          // Add the model to the group
-          this.group.add(this.playerModel);
-          
-          // Set up meshes correctly
-          this.playerModel.traverse(child => {
-            if (child.isMesh) {
-              child.castShadow = true;
-              child.receiveShadow = true;
-              child.userData.isPlayerMesh = true;
-              
-              // Ensure materials are set up correctly
-              if (child.material) {
-                child.material.side = THREE.DoubleSide;
-                
-                // If this is a skinned mesh, ensure skinning is enabled
-                if (child.isSkinnedMesh) {
-                  child.material.skinning = true;
-                }
-                
-                child.material.needsUpdate = true;
-              }
-            }
-          });
-          
-          // Set up animations - do this after model is loaded
-          if (gltf.animations && gltf.animations.length > 0) {
-            // Initialize animations immediately
-            this.setupAnimations(gltf.animations);
-            
-            // Play the specific idle animation if it exists (after a small delay to ensure it's loaded)
-            setTimeout(() => {
-              if (this.animations[idleAnimationName]) {
-                // Play the custom idle animation in a loop
-                this.playAnimation(idleAnimationName, 0.5);
-                console.log(`Playing ${idleAnimationName} animation for NPC`);
-              } else {
-                console.warn(`${idleAnimationName} animation not found for NPC`);
-                
-                // Fall back to regular idle animation if specific one not found
-                if (this.animations['idle']) {
-                  this.playAnimation('idle', 0.5);
-                }
-              }
-            }, 100);
-          }
-          
-          // Initialize hit zone visualizers
-          this.createHitZoneVisualizers();
-          
-          console.log(`Custom NPC model ${modelPath} loaded successfully`);
-        } catch (e) {
-          console.error(`Error setting up custom NPC model ${modelPath}:`, e);
-        }
-      }, 
-      // Progress callback - silent
-      () => {},
-      // Error callback
-      (error) => {
-        console.error(`Error loading custom NPC model ${modelPath}:`, error);
-        
-        // Fall back to regular player model if custom model fails to load
-        console.log("Falling back to regular player model for NPC");
-        
-        // Load the regular player model as fallback
-        if (window.preloadedModels && window.preloadedModels.playermodel) {
-          const preloadedModel = window.preloadedModels.playermodel;
-          const gltf = {
-            scene: preloadedModel.scene.clone(),
-            animations: preloadedModel.animations
-          };
-          
-          this.playerModel = gltf.scene;
-          this.group.add(this.playerModel);
-          
-          // Setup player model
-          this.playerModel.position.set(0, 0, 0);
-          this.playerModel.scale.set(1.445, 1.445, 1.445);
-          this.playerModel.rotation.y = Math.PI;
-          
-          // Set up meshes correctly
-          this.playerModel.traverse(child => {
-            if (child.isMesh) {
-              child.castShadow = true;
-              child.receiveShadow = true;
-              child.userData.isPlayerMesh = true;
-              
-              if (child.material) {
-                child.material.side = THREE.DoubleSide;
-                if (child.isSkinnedMesh) child.material.skinning = true;
-                child.material.needsUpdate = true;
-              }
-            }
-          });
-          
-          // Set up animations
-          if (gltf.animations && gltf.animations.length > 0) {
-            this.setupAnimations(gltf.animations);
-          }
-          
-          // Initialize hit zone visualizers
-          this.createHitZoneVisualizers();
-        } else {
-          // Last resort fallback - create a colored cube
-          const geometry = new THREE.BoxGeometry(0.5, 1.8, 0.5);
-          const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-          const cube = new THREE.Mesh(geometry, material);
-          cube.position.set(0, 0.9, 0);
-          this.group.add(cube);
-          
-          // Add hit zone visualizers even for fallback model
-          this.createHitZoneVisualizers();
-        }
       }
     );
   }
@@ -14969,9 +14979,6 @@ export class ThirdPersonModel {
     // Skip animation updates if animations aren't loaded yet
     const animationsLoaded = this.animations && Object.keys(this.animations).length > 0;
     
-    // Check if this is an NPC or Bot
-    const isAIControlled = this.isBot || this.isNpc || playerData.isBot || playerData.isNpc;
-
     // Handle death animation if the player is dying
     if (animationsLoaded && playerData.isDying && !this.isDying) {
       console.log(`Playing death animation for remote player ${this.playerId}`);
@@ -15027,21 +15034,10 @@ export class ThirdPersonModel {
     
     // Update target position from network data
     if (playerData.position) {
-      // Choose the right height adjustment based on entity type
-      let heightAdjustment = 0;
-      
-      if (isAIControlled) {
-        // NPCs/Bots need the same height adjustment as players to prevent floating
-        heightAdjustment = -2.72; // Same as players to keep NPCs grounded
-      } else {
-        // Regular player adjustment to prevent sinking
-        heightAdjustment = -2.72; // Adjusted for 70% taller player model (1.6 * 1.7)
-      }
-      
       // Position the model on the ground, with appropriate height adjustment
       const newPos = new THREE.Vector3(
         playerData.position.x,
-        playerData.position.y + heightAdjustment,
+        playerData.position.y + this.groundOffset,
         playerData.position.z
       );
       
@@ -15057,11 +15053,9 @@ export class ThirdPersonModel {
       // and we're not in a special state (aiming/shooting/jumping)
       if (animationsLoaded && !this.isJumping && !this.isAiming && !this.isShooting) {
         // Check if moving based on position change or explicit walking flag
-        const isMovingNow = isAIControlled ? 
-                          (playerData.isWalking || false) : // Use isWalking flag for AI
-                          (distance > 0.03);               // Reduced threshold for walking (was 0.05)
+        const isMovingNow = distance > 0.03;
         
-        const isRunningNow = distance > 0.2; // Reduced threshold for running (was 0.3)
+        const isRunningNow = distance > 0.2;
         
         // Handle animation state transitions
         if (isMovingNow) {
@@ -15186,10 +15180,32 @@ export class ThirdPersonModel {
   /**
    * Reduces health when hit.
    * @param {number} amount - Damage amount.
+   * @param {string} hitZone - The hit zone ('head', 'body', 'limbs')
    */
-  takeDamage(amount) {
+  takeDamage(amount, hitZone = 'body') {
+    if (typeof amount !== 'number' || isNaN(amount)) {
+      console.error(`Invalid damage amount: ${amount}`);
+      amount = 20; // Default to 20 damage if invalid
+    }
+
+    // Ensure health is initialized before reducing
+    if (typeof this.health !== 'number' || isNaN(this.health)) {
+      this.health = 100;
+    }
+    
+    // Apply damage
     this.health = Math.max(this.health - amount, 0);
-    console.log(`Remote player ${this.playerId} took ${amount} damage. Health: ${this.health}`);
+    
+    // Show hit feedback
+    this.showHitFeedback();
+    
+    console.log(`Remote player ${this.playerId} took ${amount} damage to ${hitZone}. Health: ${this.health}`);
+    
+    // Check for death
+    if (this.health <= 0 && !this.isDying) {
+      console.log(`Remote player ${this.playerId} died from damage`);
+      this.playDeathAnimation();
+    }
   }
 
   /**
@@ -15888,6 +15904,7 @@ File: /public/js/scene.js
 export let scene;
 import { DesertTerrain } from './desertTerrain.js';
 import { TumbleweedManager } from './tumbleweed.js';
+import { GrassSystem } from './grassSystem.js';
 
 // Adding skybox references for animation
 let skyMesh;
@@ -15896,6 +15913,9 @@ const SKYBOX_ROTATION_SPEED = 0.00001; // Much slower rotation speed
 
 // Add tumbleweed manager
 let tumbleweedManager;
+
+// Add grass system
+let grassSystem;
 
 // Add train animation components
 let train;
@@ -15991,7 +16011,7 @@ export function initScene() {
   // Create the desert terrain
   createDesertTerrain();
   
-  // Create circular train track and load train
+  // Create curved train track and load train
   createTrainSystem();
 
   return { camera, renderer };
@@ -16528,22 +16548,48 @@ function createWesternBuilding(x, y, z) {
 }
 
 /**
- * Creates a straight train track and loads the train model
+ * Creates a curved train track (half-circle) around the town area
  */
 function createTrainSystem() {
-  // Create a straight path for the train
-  const numPoints = 2; // Just need two points for a straight line
+  // Create a half-circle path around the town 
+  const numPoints = 50; // More points for a smooth curve
   const points = [];
   const trackElevation = 0.5; // Slightly elevated above ground
 
-  // Add track endpoints
-  points.push(new THREE.Vector3(TRAIN_TRACK_START.x, TRAIN_TRACK_START.y + trackElevation, TRAIN_TRACK_START.z));
-  points.push(new THREE.Vector3(TRAIN_TRACK_END.x, TRAIN_TRACK_END.y + trackElevation, TRAIN_TRACK_END.z));
+  // Use town dimensions to calculate the radius 
+  // Add buffer to ensure the track is outside the town
+  const townRadius = Math.max(window.townDimensions.width, window.townDimensions.length) / 2;
+  const trackRadius = townRadius + 150; // 150 units away from the edge of town
+  
+  // Create half circle arc points
+  for (let i = 0; i < numPoints; i++) {
+    // Generate points for half-circle (180 degrees, from -90 to 90 degrees)
+    const angle = (i / (numPoints - 1)) * Math.PI - (Math.PI / 2);
+    const x = Math.cos(angle) * trackRadius;
+    const z = Math.sin(angle) * trackRadius;
+    points.push(new THREE.Vector3(x, trackElevation, z));
+  }
 
   // Create spline from points
   trainPath = new THREE.CatmullRomCurve3(points);
   trainPath.closed = false; // Open path, not a loop
 
+  // Update global track start and end points for other components
+  TRAIN_TRACK_START.copy(points[0]);
+  TRAIN_TRACK_END.copy(points[points.length - 1]);
+  
+  // Update window globals for terrain and other systems
+  window.TRAIN_TRACK_START = TRAIN_TRACK_START;
+  window.TRAIN_TRACK_END = TRAIN_TRACK_END;
+  window.trainPath = trainPath; // Make trainPath globally accessible
+  
+  // Recalculate track length for timing purposes
+  trainTrackLength = 0;
+  const tempPoints = trainPath.getPoints(200);
+  for (let i = 1; i < tempPoints.length; i++) {
+    trainTrackLength += tempPoints[i].distanceTo(tempPoints[i-1]);
+  }
+  
   // Visualize the path with a line - helps with debugging, can be removed later
   const pathGeometry = new THREE.BufferGeometry().setFromPoints(trainPath.getPoints(200));
   const pathMaterial = new THREE.LineBasicMaterial({ color: 0x888888 });
@@ -16757,7 +16803,7 @@ function getCurrentTrainDirection() {
 }
 
 /**
- * Updates the train position along the straight track
+ * Updates the train position along the curved track
  * @param {number} deltaTime - Time since last frame in seconds
  */
 export function updateTrain(deltaTime) {
@@ -16772,17 +16818,29 @@ export function updateTrain(deltaTime) {
     const position = trainPath.getPointAt(trainProgress);
     train.position.copy(position);
     
-    // Check if we need to update train rotation when changing direction
-    const expectedDirection = getCurrentTrainDirection();
-    if (train.userData.lastDirection !== expectedDirection) {
-      // Direction changed, rotate 180 degrees
-      const currentRotation = train.rotation.y;
-      train.rotation.y = currentRotation + Math.PI;
-      train.userData.lastDirection = expectedDirection;
-      
-      if (trainLogMessages) {
-        console.log(`Train changed direction to ${expectedDirection > 0 ? 'forwards' : 'backwards'}`);
-      }
+    // Orient the train to follow the curved path
+    const tangent = trainPath.getTangentAt(trainProgress).normalize();
+    
+    // Make the train face the direction of travel
+    if (trainDirection > 0) {
+      // Forward direction - directly use the tangent
+      const up = new THREE.Vector3(0, 1, 0);
+      train.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1), // default forward vector
+        tangent
+      );
+    } else {
+      // Backward direction - use the opposite tangent
+      const reverseTangent = tangent.clone().negate();
+      train.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1), // default forward vector
+        reverseTangent
+      );
+    }
+    
+    // Log only if verbose logging is enabled
+    if (trainLogMessages && trainProgress % 0.1 < 0.001) {
+      console.log(`Train at progress=${trainProgress.toFixed(4)}, direction=${trainDirection}`);
     }
   } else {
     // Original client-side train movement (fallback before server sync)
@@ -16793,24 +16851,34 @@ export function updateTrain(deltaTime) {
       // Reached the end, turn around
       trainDirection = -1;
       trainProgress = 1;
-      
-      // Rotate 180 degrees
-      const currentRotation = train.rotation.y;
-      train.rotation.y = currentRotation + Math.PI;
-      
     } else if (trainProgress <= 0) {
       // Reached the start, turn around
       trainDirection = 1;
       trainProgress = 0;
-      
-      // Rotate 180 degrees
-      const currentRotation = train.rotation.y;
-      train.rotation.y = currentRotation + Math.PI;
     }
     
     // Get position on the path
     const position = trainPath.getPointAt(trainProgress);
     train.position.copy(position);
+    
+    // Orient the train to follow the curved path
+    const tangent = trainPath.getTangentAt(trainProgress).normalize();
+    
+    // Make the train face the direction of travel
+    if (trainDirection > 0) {
+      // Forward direction
+      train.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1), // default forward vector
+        tangent
+      );
+    } else {
+      // Backward direction
+      const reverseTangent = tangent.clone().negate();
+      train.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1), // default forward vector
+        reverseTangent
+      );
+    }
   }
 }
 
@@ -16926,6 +16994,11 @@ export function updateFPS(renderer, camera, deltaTime) {
     tumbleweedManager.update(deltaTime);
   }
   
+  // Update grass system if it exists
+  if (grassSystem) {
+    grassSystem.update(deltaTime, camera.position);
+  }
+  
   // Update train position
   updateTrain(deltaTime);
   
@@ -16948,6 +17021,9 @@ function createDesertTerrain() {
     
     // Initialize tumbleweed manager after terrain is created
     initializeTumbleweedManager();
+    
+    // Initialize grass system after terrain is created
+    initializeGrassSystem();
   } else {
     // If town dimensions aren't available yet, wait for them
     console.log("Waiting for town dimensions before creating desert terrain...");
@@ -16962,6 +17038,9 @@ function createDesertTerrain() {
         
         // Initialize tumbleweed manager after terrain is created
         initializeTumbleweedManager();
+        
+        // Initialize grass system after terrain is created
+        initializeGrassSystem();
         
         clearInterval(checkInterval);
       }
@@ -16989,6 +17068,37 @@ function initializeTumbleweedManager() {
 }
 
 /**
+ * Initializes the grass system
+ */
+function initializeGrassSystem() {
+  // Skip grass initialization on mobile devices for better performance
+  if (window.isMobile) {
+    console.log("Skipping grass system initialization on mobile device for performance");
+    return;
+  }
+
+  if (window.renderer && window.renderer.camera) {
+    console.log("Initializing grass system...");
+    
+    // Dispose of the previous system if it exists
+    if (grassSystem) {
+      grassSystem.dispose();
+    }
+    
+    // Create new grass system
+    grassSystem = new GrassSystem(scene, window.renderer.camera);
+    
+    // Store grass system instance for potential access later
+    window.grassSystem = grassSystem;
+  } else {
+    console.warn("Camera not available, delaying grass system initialization");
+    
+    // Try again in a moment when the camera should be available
+    setTimeout(initializeGrassSystem, 500);
+  }
+}
+
+/**
  * Cleans up resources when switching scene or closing
  */
 export function cleanupScene() {
@@ -16998,6 +17108,12 @@ export function cleanupScene() {
   if (tumbleweedManager) {
     tumbleweedManager.dispose();
     tumbleweedManager = null;
+  }
+  
+  // Dispose of grass system
+  if (grassSystem) {
+    grassSystem.dispose();
+    grassSystem = null;
   }
   
   // Clean up other resources as needed
@@ -21318,11 +21434,6 @@ File: /public/wallet-demo.html
 </html> 
 
 ================================================
-File: /readme.md
-================================================
-henlo
-
-================================================
 File: /server.js
 ================================================
 // server.js
@@ -21395,11 +21506,6 @@ console.log("Player tracking variables initialized");
 // Track bot players (new)
 const botPlayers = new Map(); // botId -> { position, rotation, health, ... }
 console.log("Bot player tracking initialized");
-
-// NPC system - Server-controlled NPCs
-const npcs = new Map(); // npcId -> { id, position, rotation, health, isWalking, path, etc. }
-let nextNpcId = 1;
-console.log("Server-controlled NPC system initialized");
 
 // New: Track persistent player identities
 const playerIdentities = new Map(); // clientId -> { username, playerId, token, lastSeen }
@@ -22123,29 +22229,16 @@ function handlePlayerReload(playerId, data) {
 
 // Anti-cheat: Handle player hit validation
 function handlePlayerHit(playerId, targetId, hitData, bulletId) {
-  console.log(`Player ${playerId} claims hit on player/npc ${targetId}`);
+  console.log(`Player ${playerId} claims hit on player ${targetId}`);
   
   // Basic validation
-  const isPlayerTarget = players.has(targetId);
-  const isNpcTarget = npcs.has(targetId);
-  
-  if (!players.has(playerId) || (!isPlayerTarget && !isNpcTarget)) {
+  if (!players.has(playerId) || !players.has(targetId)) {
     console.log(`Hit claim invalid - player ${playerId} or target ${targetId} not found`);
     return;
   }
   
   const player = players.get(playerId);
-  
-  // Get target (player or NPC)
-  let target;
-  let isNpc = false;
-  
-  if (isPlayerTarget) {
-    target = players.get(targetId);
-  } else if (isNpcTarget) {
-    target = npcs.get(targetId);
-    isNpc = true;
-  }
+  const target = players.get(targetId);
   
   // Check if bullet ID is valid, if provided
   if (bulletId && !activeBullets.has(bulletId)) {
@@ -22213,13 +22306,8 @@ function handlePlayerHit(playerId, targetId, hitData, bulletId) {
   // Apply damage to target
   target.health = Math.max(0, target.health - damage);
   
-  // If NPC was hit and survived, make them fight back
-  if (isNpc && target.health > 0) {
-    handleNpcAttacked(targetId, playerId);
-  }
-  
   // Notify both target and shooter
-  if (!isNpc && target.ws && target.ws.readyState === WebSocket.OPEN) {
+  if (target.ws && target.ws.readyState === WebSocket.OPEN) {
     target.ws.send(JSON.stringify({
       type: 'hit',
       sourceId: playerId,
@@ -22237,30 +22325,24 @@ function handlePlayerHit(playerId, targetId, hitData, bulletId) {
       hitPosition: hitData.position,
       health: target.health,
       hitZone: hitData.hitZone,
-      damage: damage,
-      isNpc: isNpc
+      damage: damage
     }));
   }
   
   // Broadcast hit to other players for visual effects
-  broadcastToOthers([playerId, isNpc ? null : targetId], {
+  broadcastToOthers([playerId, targetId], {
     type: 'playerHit',
     targetId: targetId,
     sourceId: playerId,
     hitPosition: hitData.position,
     health: target.health,
     hitZone: hitData.hitZone,
-    damage: damage,
-    isNpc: isNpc
+    damage: damage
   });
   
   // Check if target has been defeated
   if (target.health <= 0) {
-    if (isNpc) {
-      handleNpcDeath(targetId, playerId);
-    } else {
-      handlePlayerDeath(targetId, playerId);
-    }
+    handlePlayerDeath(targetId, playerId);
   }
 }
 
@@ -22578,298 +22660,85 @@ function handleChatMessage(playerId, message) {
 
 // Handle bot player updates
 function handleBotUpdate(data) {
-  // This function is deprecated as NPCs are now server-controlled
-  console.log("Warning: Client attempted to update bot state. Ignoring as NPCs are now server-controlled.");
+  // This function is still used by client-controlled bots
+  // Update the bot player with the provided data
+  if (!data.id || !botPlayers.has(data.id)) {
+    // If bot doesn't exist yet, create it
+    const botId = data.id || `bot_${Date.now()}`;
+    
+    botPlayers.set(botId, {
+      id: botId,
+      position: data.position || { x: 0, y: 1.6, z: 0 },
+      rotation: data.rotation || { y: 0 },
+      isAiming: data.isAiming || false,
+      isShooting: data.isShooting || false,
+      isReloading: data.isReloading || false,
+      health: data.health || 100,
+      username: sanitizeText(data.username || 'Bot')
+    });
+    
+    // Broadcast to all players that a new bot has joined
+    broadcastToAll({
+      type: 'playerJoined',
+      id: botId,
+      position: botPlayers.get(botId).position,
+      rotation: botPlayers.get(botId).rotation,
+      health: botPlayers.get(botId).health,
+      username: botPlayers.get(botId).username,
+      isBot: true
+    });
+    
+    console.log(`Added bot player: ${botId} (${botPlayers.get(botId).username})`);
+    return;
+  }
+  
+  // Update existing bot
+  const bot = botPlayers.get(data.id);
+  
+  // Update bot properties
+  if (data.position) bot.position = data.position;
+  if (data.rotation) bot.rotation = data.rotation;
+  if (data.isAiming !== undefined) bot.isAiming = data.isAiming;
+  if (data.isShooting !== undefined) bot.isShooting = data.isShooting;
+  if (data.isReloading !== undefined) bot.isReloading = data.isReloading;
+  if (data.health !== undefined) bot.health = data.health;
+  
+  // Broadcast updated bot state
+  broadcastToAll({
+    type: 'playerUpdate',
+    id: data.id,
+    position: bot.position,
+    rotation: bot.rotation,
+    isAiming: bot.isAiming,
+    isShooting: bot.isShooting,
+    isReloading: bot.isReloading,
+    health: bot.health,
+    username: bot.username,
+    isBot: true
+  });
 }
 
 // Handle bot player removal
 function handleBotRemove(data) {
-  // This function is deprecated as NPCs are now server-controlled
-  console.log("Warning: Client attempted to remove bot. Ignoring as NPCs are now server-controlled.");
-}
-
-/**
- * Creates a new NPC with the given properties
- * @param {Object} npcData - NPC configuration data
- * @returns {string} The ID of the created NPC
- */
-function createNpc(npcData = {}) {
-  const id = `npc_${nextNpcId++}`;
-  const defaultPosition = { x: 0, y: 2.72, z: 0 };
+  if (!data.id || !botPlayers.has(data.id)) {
+    console.log(`Cannot remove non-existent bot: ${data.id}`);
+    return;
+  }
   
-  // Create NPC data structure
-  const npc = {
-    id: id,
-    username: sanitizeText(npcData.name || 'Town NPC'),
-    position: npcData.position ? {...npcData.position} : {...defaultPosition},
-    // Always store a deep copy of the spawn position
-    originalSpawnPosition: npcData.originalSpawnPosition ? 
-      {...npcData.originalSpawnPosition} : 
-      (npcData.position ? {...npcData.position} : {...defaultPosition}),
-    rotation: npcData.rotation || { y: 0 },
-    health: npcData.health || 100,
-    isWalking: false,
-    isAiming: false,
-    isShooting: false,
-    isIdle: true,
-    walkSpeed: npcData.walkSpeed || 1.5,
-    lastUpdateTime: Date.now(),
-    lastBroadcastTime: 0,
-    
-    // Path configuration
-    path: npcData.path || {
-      points: [
-        { x: -5, y: 2.72, z: 0 },
-        { x: 5, y: 2.72, z: 0 }
-      ],
-      currentTarget: 0,
-      pauseTime: npcData.pauseTime || 2000,
-      lastPauseTime: 0,
-      isPaused: false,
-      pauseTimer: 0
-    }
-  };
+  const botId = data.id;
+  const bot = botPlayers.get(botId);
   
-  // Log spawn position for debugging
-  console.log(`Creating NPC ${id} at position (${npc.position.x}, ${npc.position.y}, ${npc.position.z})`);
-  console.log(`Original spawn position set to (${npc.originalSpawnPosition.x}, ${npc.originalSpawnPosition.y}, ${npc.originalSpawnPosition.z})`);
+  // Remove the bot
+  botPlayers.delete(botId);
   
-  // Store NPC in the collection
-  npcs.set(id, npc);
-  
-  // Broadcast to all clients that a new NPC has joined
-  broadcastToAll({
-    type: 'playerJoined',
-    id: id,
-    username: npc.username,
-    position: npc.position,
-    rotation: npc.rotation,
-    health: npc.health,
-    isWalking: npc.isWalking,
-    isAiming: npc.isAiming,
-    isShooting: npc.isShooting,
-    isNpc: true  // Mark as NPC for clients
-  });
-  
-  console.log(`Created server-controlled NPC: ${id} (${npc.username})`);
-  return id;
-}
-
-/**
- * Update an existing NPC's state
- * @param {string} npcId - The ID of the NPC to update
- * @param {Object} updateData - The data to update
- */
-function updateNpc(npcId, updateData) {
-  const npc = npcs.get(npcId);
-  if (!npc) return;
-  
-  // Update NPC properties
-  Object.keys(updateData).forEach(key => {
-    npc[key] = updateData[key];
-  });
-  
-  // Broadcast the update to all clients
-  broadcastNpcState(npcId);
-}
-
-/**
- * Remove an NPC from the game
- * @param {string} npcId - The ID of the NPC to remove
- */
-function removeNpc(npcId) {
-  if (!npcs.has(npcId)) return;
-  
-  // Remove the NPC from our collection
-  npcs.delete(npcId);
-  
-  // Broadcast to all clients that the NPC has left
+  // Broadcast that the bot has left
   broadcastToAll({
     type: 'playerLeft',
-    id: npcId
+    id: botId
   });
   
-  console.log(`Removed server-controlled NPC: ${npcId}`);
+  console.log(`Removed bot player: ${botId} (${bot.username})`);
 }
-
-/**
- * Broadcast an NPC's current state to all clients
- * @param {string} npcId - The ID of the NPC to broadcast
- */
-function broadcastNpcState(npcId) {
-  const npc = npcs.get(npcId);
-  if (!npc) return;
-  
-  // Only broadcast at a reasonable rate to reduce network traffic
-  const currentTime = Date.now();
-  if (currentTime - npc.lastBroadcastTime < 100) return;
-  npc.lastBroadcastTime = currentTime;
-  
-  // Create the update data packet
-  const updateData = {
-    type: 'playerUpdate',
-    id: npc.id,
-    username: npc.username,
-    position: npc.position,
-    rotation: npc.rotation,
-    health: npc.health,
-    isWalking: npc.isWalking,
-    isAiming: npc.isAiming,
-    isShooting: npc.isShooting,
-    isNpc: true  // Mark as NPC
-  };
-  
-  // Broadcast to all clients
-  broadcastToAll(updateData);
-}
-
-/**
- * Update the walking behavior for an NPC
- * @param {string} npcId - The ID of the NPC to update
- */
-function updateNpcWalkingBehavior(npcId) {
-  const npc = npcs.get(npcId);
-  if (!npc) return;
-  
-  const currentTime = Date.now();
-  const deltaTime = (currentTime - npc.lastUpdateTime) / 1000;
-  npc.lastUpdateTime = currentTime;
-  
-  // Handle paused state
-  if (npc.path.isPaused) {
-    npc.path.pauseTimer += deltaTime * 1000;
-    
-    // Resume walking after pause time
-    if (npc.path.pauseTimer >= npc.path.pauseTime) {
-      npc.path.isPaused = false;
-      npc.path.pauseTimer = 0;
-      npc.isWalking = true;
-      npc.isIdle = false;
-    } else {
-      // Stay in idle state while paused
-      if (!npc.isIdle) {
-        npc.isIdle = true;
-        npc.isWalking = false;
-      }
-      return; // Exit early for paused NPCs - preserves initial rotation
-    }
-  }
-  
-  // Get current target and position
-  const pathPoints = npc.path.points;
-  const currentTargetIndex = npc.path.currentTarget;
-  const targetPoint = pathPoints[currentTargetIndex];
-  
-  // Calculate direction and distance to target
-  const directionX = targetPoint.x - npc.position.x;
-  const directionZ = targetPoint.z - npc.position.z;
-  const distanceSquared = directionX * directionX + directionZ * directionZ;
-  
-  // Check if we've reached the target (within 0.1 units)
-  if (distanceSquared < 0.1) {
-    // We've reached the target point, move to next one
-    npc.path.currentTarget = (currentTargetIndex + 1) % pathPoints.length;
-    
-    // Pause at the target point before moving to next one
-    npc.path.isPaused = true;
-    npc.path.pauseTimer = 0;
-    npc.path.lastPauseTime = currentTime;
-    
-    // Update animation state
-    npc.isWalking = false;
-    npc.isIdle = true;
-  } else {
-    // Normalize direction
-    const distance = Math.sqrt(distanceSquared);
-    const normalizedDirX = directionX / distance;
-    const normalizedDirZ = directionZ / distance;
-    
-    // Move towards the target
-    const moveSpeed = npc.walkSpeed * deltaTime;
-    
-    // Calculate new position
-    npc.position.x += normalizedDirX * moveSpeed;
-    npc.position.z += normalizedDirZ * moveSpeed;
-    
-    // Calculate rotation to face direction of movement (add Math.PI to face forward)
-    npc.rotation.y = Math.atan2(normalizedDirX, normalizedDirZ) + Math.PI;
-    
-    // Ensure walking animation is playing
-    if (!npc.isWalking) {
-      npc.isWalking = true;
-      npc.isIdle = false;
-    }
-  }
-}
-
-/**
- * Spawn a town NPC with a predefined path
- * @param {string} name - NPC name
- * @returns {string} - The created NPC's ID
- */
-function spawnTownNpc(name = "Town Resident") {
-  // Create a realistic path around town
-  const townPath = [
-    { x: -5, y: 2.72, z: -2 },
-    { x: -3, y: 2.72, z: -10 },
-    { x: 3, y: 2.72, z: -10 },
-    { x: 5, y: 2.72, z: -2 },
-    { x: 5, y: 2.72, z: 5 },
-    { x: 0, y: 2.72, z: 8 },
-    { x: -5, y: 2.72, z: 5 }
-  ];
-  
-  // Randomize the starting position along the path
-  const randomStart = Math.floor(Math.random() * townPath.length);
-  const position = {
-    x: townPath[randomStart].x,
-    y: townPath[randomStart].y,
-    z: townPath[randomStart].z
-  };
-  
-  // Create the path configuration
-  const path = {
-    points: townPath,
-    currentTarget: (randomStart + 1) % townPath.length,
-    pauseTime: 2000,
-    isPaused: false,
-    pauseTimer: 0,
-    lastPauseTime: 0
-  };
-  
-  // Create the NPC with slightly randomized walk speed
-  const walkSpeed = 1.2 + (Math.random() * 0.6); // 1.2 to 1.8
-  
-  return createNpc({
-    name: name,
-    position: position,
-    originalSpawnPosition: {...position}, // Explicitly store original spawn position
-    walkSpeed: walkSpeed,
-    path: path
-  });
-}
-
-// Setup NPC update interval
-const NPC_UPDATE_INTERVAL = 16; // ms (approximately 60 fps)
-setInterval(() => {
-  // Update all NPCs
-  npcs.forEach((npc, npcId) => {
-    // If NPC is following a target, update movement to follow the player
-    if (npc.isFollowingTarget && npc.targetPlayer && players.has(npc.targetPlayer)) {
-      updateNpcFollowBehavior(npcId);
-    } 
-    // If NPC is returning to spawn
-    else if (npc.isReturningToSpawn) {
-      updateNpcReturnBehavior(npcId);
-    }
-    // Normal path following
-    else {
-      updateNpcWalkingBehavior(npcId);
-    }
-    
-    broadcastNpcState(npcId);
-  });
-}, NPC_UPDATE_INTERVAL);
 
 /**
  * Convert degrees to radians
@@ -22880,609 +22749,16 @@ function degToRad(degrees) {
   return degrees * (Math.PI / 180);
 }
 
-/**
- * Update the behavior for an NPC that is following and attacking a player
- * @param {string} npcId - The ID of the NPC to update
- */
-function updateNpcFollowBehavior(npcId) {
-  const npc = npcs.get(npcId);
-  if (!npc || !npc.targetPlayer || !players.has(npc.targetPlayer)) return;
-  
-  const currentTime = Date.now();
-  const deltaTime = (currentTime - npc.lastUpdateTime) / 1000;
-  npc.lastUpdateTime = currentTime;
-  
-  // Get target player
-  const targetPlayer = players.get(npc.targetPlayer);
-  
-  // Calculate direction and distance to player
-  const directionX = targetPlayer.position.x - npc.position.x;
-  const directionZ = targetPlayer.position.z - npc.position.z;
-  const distanceSquared = directionX * directionX + directionZ * directionZ;
-  
-  // Only move if we're not too close to the player (keep some distance for shooting)
-  const optimalDistance = 8; // Keep 8 units away for shooting
-  
-  if (distanceSquared > optimalDistance * optimalDistance) {
-    // We're too far, move closer
-    // Normalize direction
-    const distance = Math.sqrt(distanceSquared);
-    const normalizedDirX = directionX / distance;
-    const normalizedDirZ = directionZ / distance;
-    
-    // Move towards the player at increased speed
-    const moveSpeed = (npc.walkSpeed * 3.5) * deltaTime;
-    
-    // Calculate new position
-    npc.position.x += normalizedDirX * moveSpeed;
-    npc.position.z += normalizedDirZ * moveSpeed;
-    
-    // Set walking animation
-    if (!npc.isWalking) {
-      npc.isWalking = true;
-      npc.isIdle = false;
-    }
-  } else if (distanceSquared < (optimalDistance * 0.7) * (optimalDistance * 0.7)) {
-    // We're too close, back up a bit
-    // Normalize direction (away from player)
-    const distance = Math.sqrt(distanceSquared);
-    const normalizedDirX = -directionX / distance;
-    const normalizedDirZ = -directionZ / distance;
-    
-    // Back away from the player at increased speed
-    const moveSpeed = (npc.walkSpeed * 1.2) * deltaTime;
-    
-    // Calculate new position
-    npc.position.x += normalizedDirX * moveSpeed;
-    npc.position.z += normalizedDirZ * moveSpeed;
-    
-    // Set walking animation
-    if (!npc.isWalking) {
-      npc.isWalking = true;
-      npc.isIdle = false;
-    }
-  } else {
-    // We're at a good distance, just stop moving
-    npc.isWalking = false;
-    npc.isIdle = true;
-  }
-  
-  // Always face the player
-  npc.rotation.y = Math.atan2(directionX, directionZ) + Math.PI;
-}
-
-/**
- * Update the behavior for an NPC that is returning to its spawn position
- * @param {string} npcId - The ID of the NPC to update
- */
-function updateNpcReturnBehavior(npcId) {
-  const npc = npcs.get(npcId);
-  if (!npc) return;
-  
-  const currentTime = Date.now();
-  const deltaTime = (currentTime - npc.lastUpdateTime) / 1000;
-  npc.lastUpdateTime = currentTime;
-  
-  // Get spawn position (either stored value or first point in path)
-  const spawnPosition = npc.originalSpawnPosition || 
-    (npc.path && npc.path.points && npc.path.points.length > 0 ? npc.path.points[0] : npc.position);
-  
-  // Calculate direction and distance to spawn
-  const directionX = spawnPosition.x - npc.position.x;
-  const directionZ = spawnPosition.z - npc.position.z;
-  const distanceSquared = directionX * directionX + directionZ * directionZ;
-  
-  // Check if we've reached the spawn point (within 0.5 units)
-  if (distanceSquared < 0.5) {
-    // We've reached the spawn, resume normal path behavior
-    npc.isReturningToSpawn = false;
-    npc.isWalking = false;
-    npc.isIdle = true;
-    
-    // Reset to the first point in the path
-    if (npc.path && npc.path.points && npc.path.points.length > 0) {
-      npc.path.currentTarget = 0;
-      npc.path.isPaused = true;
-      npc.path.pauseTimer = 0;
-    }
-    
-    // Restore original rotation if available
-    if (npc.originalRotation) {
-      npc.rotation = {...npc.originalRotation};
-      console.log(`NPC ${npcId} restored original rotation: y=${npc.rotation.y}`);
-      npc.originalRotation = null;
-    }
-    
-    console.log(`NPC ${npcId} (${npc.username}) reached spawn position`);
-  } else {
-    // Still need to move towards spawn
-    // Normalize direction
-    const distance = Math.sqrt(distanceSquared);
-    const normalizedDirX = directionX / distance;
-    const normalizedDirZ = directionZ / distance;
-    
-    // Move towards the spawn at increased speed
-    const moveSpeed = (npc.walkSpeed * 1.5) * deltaTime;
-    
-    // Calculate new position
-    npc.position.x += normalizedDirX * moveSpeed;
-    npc.position.z += normalizedDirZ * moveSpeed;
-    
-    // Calculate rotation to face direction of movement
-    npc.rotation.y = Math.atan2(normalizedDirX, normalizedDirZ) + Math.PI;
-    
-    // Set walking animation
-    if (!npc.isWalking) {
-      npc.isWalking = true;
-      npc.isIdle = false;
-    }
-  }
-}
-
-/**
- * Handle NPC fighting back when attacked
- * @param {string} npcId - The ID of the NPC that was attacked
- * @param {string} attackerId - The ID of the player who attacked the NPC
- */
-function handleNpcAttacked(npcId, attackerId) {
-  const npc = npcs.get(npcId);
-  const attacker = players.get(attackerId);
-  
-  if (!npc || !attacker) return;
-  
-  // Check if NPC is already targeting a different player
-  if (npc.targetPlayer && npc.targetPlayer !== attackerId) {
-    console.log(`NPC ${npcId} (${npc.username}) switching target from ${npc.targetPlayer} to ${attackerId}`);
-    npc.targetPlayer = attackerId;
-  }
-  // Start fighting the attacker if not already fighting
-  else if (!npc.targetPlayer) {
-    console.log(`NPC ${npcId} (${npc.username}) is now fighting player ${attackerId}`);
-    
-    // Set the attacker as target
-    npc.targetPlayer = attackerId;
-    npc.lastShotTime = 0;
-    
-    // Start aiming at player
-    npc.isAiming = true;
-    
-    // Store original path and rotation to restore when combat ends
-    npc.originalPath = JSON.parse(JSON.stringify(npc.path));
-    npc.originalRotation = {...npc.rotation}; // Store original rotation
-    
-    // Set NPC to follow mode instead of path following
-    npc.isFollowingTarget = true;
-    npc.isWalking = true;
-    npc.isIdle = false;
-    
-    // Broadcast NPC state update to show it's now aiming
-    broadcastNpcState(npcId);
-    
-    // Start shooting interval (store it in the NPC object)
-    npc.shootIntervalId = setInterval(() => {
-      // Check if NPC still exists and is targeting someone
-      if (!npcs.has(npcId) || !npc.targetPlayer) {
-        if (npc.shootIntervalId) {
-          clearInterval(npc.shootIntervalId);
-          npc.shootIntervalId = null;
-        }
-        return;
-      }
-      
-      // Check if target player still exists
-      if (!players.has(npc.targetPlayer)) {
-        // Target player left, stop fighting
-        npc.targetPlayer = null;
-        npc.isAiming = false;
-        npc.isShooting = false;
-        npc.isFollowingTarget = false;
-        
-        // Restore original path
-        if (npc.originalPath) {
-          npc.path = npc.originalPath;
-          npc.originalPath = null;
-        }
-        
-        // Make NPC return to spawn position with original rotation
-        makeNpcReturnToSpawn(npcId);
-        
-        if (npc.shootIntervalId) {
-          clearInterval(npc.shootIntervalId);
-          npc.shootIntervalId = null;
-        }
-        return;
-      }
-      
-      // Shoot at player once per second
-      const now = Date.now();
-      if (now - npc.lastShotTime >= 1000) {
-        npcShootAtPlayer(npcId, npc.targetPlayer);
-        npc.lastShotTime = now;
-      }
-    }, 100); // Check interval faster than shooting rate for responsiveness
-  }
-}
-
-/**
- * Make an NPC shoot at a player
- * @param {string} npcId - The ID of the NPC
- * @param {string} targetPlayerId - The ID of the target player
- */
-function npcShootAtPlayer(npcId, targetPlayerId) {
-  const npc = npcs.get(npcId);
-  const targetPlayer = players.get(targetPlayerId);
-  
-  if (!npc || !targetPlayer) return;
-  
-  // Calculate direction from NPC to player
-  const dirX = targetPlayer.position.x - npc.position.x;
-  const dirY = targetPlayer.position.y - npc.position.y + 0.5; // Aim for upper body
-  const dirZ = targetPlayer.position.z - npc.position.z;
-  
-  // Normalize direction
-  const length = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
-  const normalizedDir = {
-    x: dirX / length,
-    y: dirY / length,
-    z: dirZ / length
-  };
-  
-  // Update NPC rotation to face the player
-  npc.rotation.y = Math.atan2(normalizedDir.x, normalizedDir.z) + Math.PI;
-  
-  // Set NPC as shooting for animation
-  npc.isShooting = true;
-  broadcastNpcState(npcId);
-  
-  // Create bullet data for visual effects
-  const bulletPosition = {
-    x: npc.position.x,
-    y: npc.position.y - 1, // Lower gun height
-    z: npc.position.z
-  };
-  
-  // Create a server-side bullet
-  const bulletId = nextBulletId++;
-  const now = Date.now();
-  
-  const bullet = {
-    id: bulletId,
-    sourcePlayerId: npcId,  // Use NPC ID as source
-    position: bulletPosition,
-    direction: normalizedDir,
-    distanceTraveled: 0,
-    maxDistance: GAME_CONSTANTS.MAX_BULLET_DISTANCE,
-    speed: GAME_CONSTANTS.BULLET_SPEED,
-    timeCreated: now,
-    active: true
-  };
-  
-  // Add to active bullets
-  activeBullets.set(bulletId, bullet);
-  
-  // Broadcast gunshot to all clients for visual and audio effects
-  broadcastToAll({
-    type: 'playerShoot', // Match the player shoot event type exactly
-    id: npcId,
-    bulletId: bulletId,
-    bulletData: {
-      position: bulletPosition,
-      direction: normalizedDir
-    },
-    isNpc: true
-  });
-  
-  // Wait for animation to play, then reset
-  setTimeout(() => {
-    if (npcs.has(npcId)) {
-      npc.isShooting = false;
-      broadcastNpcState(npcId);
-    }
-  }, 300);
-  
-  // Determine if hit (50% chance for body shot)
-  const hitChance = 0.5;
-  const hit = Math.random() < hitChance;
-  
-  if (hit) {
-    // Create hit data
-    const hitData = {
-      hitZone: 'body',
-      position: { 
-        x: targetPlayer.position.x,
-        y: targetPlayer.position.y,
-        z: targetPlayer.position.z
-      }
-    };
-    
-    // Apply damage to player (40 damage for body shot)
-    targetPlayer.health = Math.max(0, targetPlayer.health - 40);
-    
-    // Notify player of hit
-    if (targetPlayer.ws && targetPlayer.ws.readyState === WebSocket.OPEN) {
-      targetPlayer.ws.send(JSON.stringify({
-        type: 'hit',
-        sourceId: npcId,
-        hitData: {
-          position: hitData.position,
-          hitZone: 'body',
-          damage: 40 // Explicitly include damage value
-        },
-        hitZone: 'body',
-        health: targetPlayer.health,
-        isNpc: true,
-        damage: 40 // Include damage at top level for backwards compatibility
-      }));
-    }
-    
-    // Broadcast hit to all players for visual effects
-    broadcastToAll({
-      type: 'playerHit',
-      targetId: targetPlayerId,
-      sourceId: npcId,
-      hitPosition: hitData.position,
-      health: targetPlayer.health,
-      hitZone: 'body',
-      damage: 40,
-      isNpc: true
-    });
-    
-    // Check if player died
-    if (targetPlayer.health <= 0) {
-      handlePlayerDeath(targetPlayerId, npcId);
-      
-      // NPC no longer has a target
-      npc.targetPlayer = null;
-      npc.isAiming = false;
-      
-      // Set NPC to return to original spawn position
-      makeNpcReturnToSpawn(npcId);
-    }
-  }
-}
-
-/**
- * Make an NPC return to its original spawn position
- * @param {string} npcId - The ID of the NPC
- */
-function makeNpcReturnToSpawn(npcId) {
-  const npc = npcs.get(npcId);
-  if (!npc) return;
-  
-  console.log(`NPC ${npcId} (${npc.username}) returning to spawn position`);
-  
-  // Clear any existing combat state
-  npc.targetPlayer = null;
-  npc.isAiming = false;
-  npc.isShooting = false;
-  
-  // Set flag for returning mode
-  npc.isReturningToSpawn = true;
-  npc.isFollowingTarget = false;
-  npc.isWalking = true;
-  npc.isIdle = false;
-  
-  // Restore original path for when we get back to spawn
-  if (npc.originalPath) {
-    npc.path = JSON.parse(JSON.stringify(npc.originalPath));
-    npc.originalPath = null;
-  }
-  
-  // Broadcast state update
-  broadcastNpcState(npcId);
-}
-
-/**
- * Handle NPC death
- * @param {string} npcId - The ID of the NPC that died
- * @param {string} killedById - The ID of the player who killed the NPC
- */
-function handleNpcDeath(npcId, killedById) {
-  const npc = npcs.get(npcId);
-  if (!npc) return;
-  
-  console.log(`NPC ${npcId} (${npc.username}) was killed by player ${killedById}`);
-  
-  // Clean up any shooting interval
-  if (npc.shootIntervalId) {
-    clearInterval(npc.shootIntervalId);
-    npc.shootIntervalId = null;
-  }
-  
-  // Ensure we have the original spawn position
-  // First check explicitly stored original position
-  let spawnPosition;
-  
-  if (npc.originalSpawnPosition) {
-    spawnPosition = {...npc.originalSpawnPosition};
-    console.log(`Using stored originalSpawnPosition: (${spawnPosition.x}, ${spawnPosition.y}, ${spawnPosition.z})`);
-  } 
-  // If not available, check the first point in the original path
-  else if (npc.originalPath && npc.originalPath.points && npc.originalPath.points.length > 0) {
-    spawnPosition = {...npc.originalPath.points[0]};
-    console.log(`Using first point from originalPath: (${spawnPosition.x}, ${spawnPosition.y}, ${spawnPosition.z})`);
-  } 
-  // As a last resort, use the first point in the current path
-  else if (npc.path && npc.path.points && npc.path.points.length > 0) {
-    spawnPosition = {...npc.path.points[0]};
-    console.log(`Using first point from current path: (${spawnPosition.x}, ${spawnPosition.y}, ${spawnPosition.z})`);
-  } 
-  // If all else fails, use current position (shouldn't happen)
-  else {
-    spawnPosition = {...npc.position};
-    console.log(`FALLBACK: Using current position: (${spawnPosition.x}, ${spawnPosition.y}, ${spawnPosition.z})`);
-  }
-  
-  // Get original rotation
-  let originalRotation;
-  
-  if (npc.originalRotation) {
-    originalRotation = {...npc.originalRotation};
-    console.log(`Using stored originalRotation: y=${originalRotation.y}`);
-  } else {
-    originalRotation = {...npc.rotation};
-    console.log(`Using current rotation: y=${originalRotation.y}`);
-  }
-  
-  // Store NPC data for respawning
-  const npcData = {
-    name: npc.username,
-    // Explicitly set both position and originalSpawnPosition
-    position: spawnPosition,
-    originalSpawnPosition: spawnPosition,
-    rotation: originalRotation,
-    originalRotation: originalRotation,
-    walkSpeed: npc.walkSpeed,
-    // If we have an original path, use that instead of the current path
-    path: npc.originalPath ? JSON.parse(JSON.stringify(npc.originalPath)) : JSON.parse(JSON.stringify(npc.path))
-  };
-  
-  console.log(`NPC will respawn at position: (${spawnPosition.x}, ${spawnPosition.y}, ${spawnPosition.z}) with rotation y=${originalRotation.y}`);
-  
-  // Send death notification to all clients
-  broadcastToAll({
-    type: 'playerDeath',
-    id: npcId,
-    killedById: killedById,
-    isNpc: true
-  });
-  
-  // Send kill notification to the killer
-  const killer = players.get(killedById);
-  if (killer && killer.ws && killer.ws.readyState === WebSocket.OPEN) {
-    killer.ws.send(JSON.stringify({
-      type: 'kill',
-      targetId: npcId,
-      isNpc: true
-    }));
-  }
-  
-  // Remove the NPC temporarily
-  removeNpc(npcId);
-  
-  // Respawn the NPC after a delay
-  setTimeout(() => {
-    const newNpcId = createNpc(npcData);
-    console.log(`NPC ${npcId} respawned as ${newNpcId} at position (${npcData.position.x}, ${npcData.position.y}, ${npcData.position.z}) with rotation y=${npcData.rotation.y}`);
-  }, 5000); // 5 second respawn delay
-}
-
-// Spawn initial NPCs when server starts
-setTimeout(() => {
-  try {
-    // Create the sheriff with static position (standing still)
-    const sheriffPosition = { x: 14, y: 2.73, z: 20 }; // Position sheriff somewhere in town
-    createNpc({
-      name: "Sheriff",
-      position: sheriffPosition,
-      originalSpawnPosition: {...sheriffPosition},
-      rotation: { y: degToRad(90) }, // Facing east (90 degrees)
-      path: {
-        points: [sheriffPosition], // Single point path = standing still
-        currentTarget: 0,
-        pauseTime: 1000000, // Very long pause time to keep idle
-        isPaused: true, // Start in paused mode
-        pauseTimer: 0,
-        lastPauseTime: 0
-      }
-    });
-    
-    // Create the bartender with static position (standing still)
-    const bartenderPosition = { x: -33, y: 2.92, z: 15 }; // Position bartender in middle of town
-    createNpc({
-      name: "Bartender",
-      position: bartenderPosition,
-      originalSpawnPosition: {...bartenderPosition},
-      rotation: { y: degToRad(270) }, // Facing south (180 degrees)
-      path: {
-        points: [bartenderPosition], // Single point path = standing still
-        currentTarget: 0,
-        pauseTime: 1000000, // Very long pause time to keep idle
-        isPaused: true, // Start in paused mode
-        pauseTimer: 0,
-        lastPauseTime: 0
-      }
-    });
-    
-    // Create "notabot" NPC with path along the length of the town (rotated 90°)
-    const fixedX = -15; // Center X position in town
-    const startZ = -40; // North end of town
-    const endZ = 40; // South end of town
-    const notabotY = 2.72; // Standard ground level
-    const notabotStartPosition = { x: fixedX, y: notabotY, z: startZ };
-
-    createNpc({
-      name: "notabot",
-      position: notabotStartPosition,
-      originalSpawnPosition: {...notabotStartPosition},
-      rotation: { y: degToRad(0) }, // Initially facing south (along Z axis)
-      walkSpeed: 1.4, // Moderate walking speed
-      path: {
-        points: [
-          { x: fixedX, y: notabotY, z: startZ },
-          { x: fixedX, y: notabotY, z: endZ },
-          { x: fixedX, y: notabotY, z: startZ } // Loop back to start
-        ],
-        currentTarget: 1, // Start by walking south
-        pauseTime: 500, // Very short pause at endpoints
-        isPaused: false,
-        pauseTimer: 0,
-        lastPauseTime: 0
-      }
-    });
-    
-    // Cowboy has been removed per request
-    
-    console.log("Initial NPCs spawned");
-  } catch (error) {
-    console.error("Failed to spawn initial NPCs:", error);
-  }
-}, 5000); // Wait for server to fully initialize
-
-// Anti-cheat: Bullet physics update
-function updateBullets() {
-  const now = Date.now();
-  
-  // Update each active bullet
-  for (const [bulletId, bullet] of activeBullets.entries()) {
-    if (!bullet.active) continue;
-    
-    // Calculate time since last update
-    const deltaTime = (now - bullet.timeCreated) / 1000;
-    
-    // Calculate new position
-    const distanceThisFrame = bullet.speed * deltaTime;
-    bullet.position.x += bullet.direction.x * distanceThisFrame;
-    bullet.position.y += bullet.direction.y * distanceThisFrame;
-    bullet.position.z += bullet.direction.z * distanceThisFrame;
-    
-    // Update total distance traveled
-    bullet.distanceTraveled += distanceThisFrame;
-    
-    // Check if bullet has traveled too far
-    if (bullet.distanceTraveled >= bullet.maxDistance) {
-      bullet.active = false;
-      continue;
-    }
-  }
-  
-  // Clean up inactive bullets
-  for (const [bulletId, bullet] of activeBullets.entries()) {
-    if (!bullet.active) {
-      activeBullets.delete(bulletId);
-    }
-  }
-}
-
 // =============================================
 // Train System - Server Side Implementation
 // =============================================
 
 // Train variables
 const TRAIN_SPEED = 0.0003; // Same speed as client to maintain consistency
-const TRAIN_TRACK_START = { x: 0, y: 0, z: -1000 };
-const TRAIN_TRACK_END = { x: 0, y: 0, z: 1000 };
-const TRAIN_TRACK_LENGTH = 2000; // Total length between start and end
+// Updated track endpoints for half-circle around town
+const TRAIN_TRACK_START = { x: 0, y: 0.5, z: -200 }; // Estimated position from client-side calculation
+const TRAIN_TRACK_END = { x: 0, y: 0.5, z: 200 }; // Estimated position from client-side calculation
+const TRAIN_TRACK_LENGTH = 650; // Approximated arc length of half-circle (PI * radius)
 const TRAIN_CYCLE_TIME = Math.floor(TRAIN_TRACK_LENGTH / (TRAIN_SPEED * 60)); // Time in ms for a full one-way trip
 
 // Time-based tracking
@@ -23601,6 +22877,41 @@ setInterval(() => {
 
 // Anti-cheat: Run physics update loop
 setInterval(updateBullets, GAME_CONSTANTS.PHYSICS_UPDATE_INTERVAL);
+
+// Anti-cheat: Bullet physics update
+function updateBullets() {
+  const now = Date.now();
+  
+  // Update each active bullet
+  for (const [bulletId, bullet] of activeBullets.entries()) {
+    if (!bullet.active) continue;
+    
+    // Calculate time since last update
+    const deltaTime = (now - bullet.timeCreated) / 1000;
+    
+    // Calculate new position
+    const distanceThisFrame = bullet.speed * deltaTime;
+    bullet.position.x += bullet.direction.x * distanceThisFrame;
+    bullet.position.y += bullet.direction.y * distanceThisFrame;
+    bullet.position.z += bullet.direction.z * distanceThisFrame;
+    
+    // Update total distance traveled
+    bullet.distanceTraveled += distanceThisFrame;
+    
+    // Check if bullet has traveled too far
+    if (bullet.distanceTraveled >= bullet.maxDistance) {
+      bullet.active = false;
+      continue;
+    }
+  }
+  
+  // Clean up inactive bullets
+  for (const [bulletId, bullet] of activeBullets.entries()) {
+    if (!bullet.active) {
+      activeBullets.delete(bulletId);
+    }
+  }
+}
 
 // Start server
 server.listen(PORT, () => {
