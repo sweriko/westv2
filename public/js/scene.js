@@ -504,6 +504,8 @@ function createTrainSystem() {
       
       // Store train wagon floor reference for later use
       let trainWagonFloor = null;
+      // Store train smoke spawn reference for smoke effect
+      let trainSmokeSpawn = null;
       
       train.traverse((node) => {
         if (node.isMesh) {
@@ -532,6 +534,15 @@ function createTrainSystem() {
             
             // Hide floor mesh by default (will be toggled by debug mode)
             node.visible = false;
+          }
+          
+          // Check for trainsmokespawn mesh
+          if (node.name.toLowerCase() === 'trainsmokespawn') {
+            trainSmokeSpawn = node;
+            console.log("Found train smoke spawn point:", node.name);
+            
+            // Store the spawn point for later use
+            window.trainSmokeSpawn = node;
           }
         }
       });
@@ -580,6 +591,14 @@ function createTrainSystem() {
       // Expose train to window
       window.train = train;
       exposeTrainToWindow();
+      
+      // Add train smoke effect if we found the smoke spawn point and the dust effect is initialized
+      if (trainSmokeSpawn && dustParticleEffect) {
+        dustParticleEffect.createForTrainSmoke(trainSmokeSpawn, "train_smoke");
+        console.log("Train smoke effect initialized");
+      } else if (!trainSmokeSpawn) {
+        console.warn("No trainsmokespawn mesh found in the train model!");
+      }
       
       // Create a physics body for the train wagon floor after the train is positioned
       if (trainWagonFloor && window.physics) {
