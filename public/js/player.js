@@ -590,18 +590,31 @@ export class Player {
     // Get player position in train's local space
     const playerLocalPos = this.group.position.clone().applyMatrix4(trainWorldMatrixInverse);
     
-    // Check boundaries in local space
+    // Check boundaries in local space with modified dimensions to match collider
     const margin = 0.5;
     const floorWidth = floorMaxX - floorMinX;
     const floorDepth = floorMaxZ - floorMinZ;
-    const halfWidth = floorWidth / 2;
-    const halfDepth = floorDepth / 2;
     
+    // Apply same width reduction and length multiplier used in collider
+    const widthMultiplier = 0.7; // Same as in scene.js for train floor collider
+    const lengthMultiplier = 2.5; // Same as in scene.js for train floor collider
+    
+    // Calculate adjusted dimensions
+    const halfWidth = (floorWidth * widthMultiplier) / 2;
+    // Train is longer in the Z direction
+    const halfDepth = (floorDepth * lengthMultiplier) / 2;
+    
+    // Added z-offset to match the collider being offset toward the back of the train
+    // Approximation of the offset applied in scene.js
+    const zOffset = (floorDepth * (lengthMultiplier - 1) / 3) * -1; // Negative to shift toward back
+    
+    // Check if player is outside the modified boundaries
     const isOffTrain = 
       playerLocalPos.x < -halfWidth - margin ||
       playerLocalPos.x > halfWidth + margin ||
-      playerLocalPos.z < -halfDepth - margin ||
-      playerLocalPos.z > halfDepth + margin ||
+      // Apply offset to z boundaries
+      playerLocalPos.z < -halfDepth - margin + zOffset ||
+      playerLocalPos.z > halfDepth + margin + zOffset ||
       this.group.position.y < floorTopY - 2;
     
     if (isOffTrain) {
@@ -2221,12 +2234,17 @@ export class Player {
     // Get world position of the floor center
     const floorWorldPos = new THREE.Vector3();
     floorMesh.getWorldPosition(floorWorldPos);
+
+    // Z offset constant to position player more "behind" on the train
+    const PLAYER_TRAIN_Z_OFFSET = 5;
+    // X offset constant to position player left/right on the train
+    const PLAYER_TRAIN_X_OFFSET = 0;
     
     // Teleport player to center of the floor with proper height
     this.group.position.set(
-      floorWorldPos.x,
+      floorWorldPos.x + PLAYER_TRAIN_X_OFFSET, // Add X offset to position player left/right
       floorTopY + 1.5, // Position player clearly above the floor
-      floorWorldPos.z
+      floorWorldPos.z + PLAYER_TRAIN_Z_OFFSET // Add Z offset to position player more "behind"
     );
     
     // Reset velocity

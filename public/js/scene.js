@@ -612,19 +612,44 @@ function createTrainSystem() {
           const worldPos = new THREE.Vector3();
           trainWagonFloor.getWorldPosition(worldPos);
           
-          // Create a physics body for the floor
-          const halfExtents = new CANNON.Vec3(size.x/2, size.y/2, size.z/2);
+          // Modified collider dimensions - longer but narrower
+          const lengthMultiplier = 2.5; // Extend length (z-axis)
+          const widthMultiplier = 0.7; // Reduce width (x-axis)
+          
+          // Create a modified physics body for the floor
+          const halfExtents = new CANNON.Vec3(
+            size.x/2 * widthMultiplier, 
+            size.y/2,  // Keep height the same
+            size.z/2 * lengthMultiplier // Make longer
+          );
           const shape = new CANNON.Box(halfExtents);
+          
+          // Calculate offset to shift collider toward the back of the train
+          // Direction vector depends on train's current direction
+          const trainDir = train.userData.lastDirection || 1;
+          const backwardOffset = trainDir * (size.z * (lengthMultiplier - 1) / 3);
+          
+          // Create quaternion from train's rotation to determine "back" direction
+          const trainQuat = new THREE.Quaternion();
+          train.getWorldQuaternion(trainQuat);
+          
+          // Calculate offset direction based on train's rotation
+          const offsetDir = new THREE.Vector3(0, 0, backwardOffset);
+          offsetDir.applyQuaternion(trainQuat);
+          
+          // Apply offset to position
+          const offsetPos = worldPos.clone().add(offsetDir);
           
           const trainFloorBody = new CANNON.Body({
             mass: 0, // Static for physics purposes, but we'll manually update position
-            position: new CANNON.Vec3(worldPos.x, worldPos.y, worldPos.z),
+            position: new CANNON.Vec3(offsetPos.x, worldPos.y, offsetPos.z),
             shape: shape
           });
           
           // Mark this body as a train floor for special handling
           trainFloorBody.isTrainFloor = true;
           trainFloorBody.trainMesh = trainWagonFloor;
+          trainFloorBody.offsetVector = offsetDir.clone(); // Store offset for updates
           
           // Add to physics world
           window.physics.world.addBody(trainFloorBody);
@@ -633,7 +658,15 @@ function createTrainSystem() {
           // Store for convenient access
           window.trainFloorBody = trainFloorBody;
           
-          console.log("Created physics body for train wagon floor");
+          console.log("Created modified physics body for train wagon floor", {
+            originalSize: {x: size.x, y: size.y, z: size.z},
+            modifiedSize: {
+              x: size.x * widthMultiplier, 
+              y: size.y, 
+              z: size.z * lengthMultiplier
+            },
+            offset: offsetDir
+          });
         }, 100);
       } else if (!trainWagonFloor) {
         console.warn("No trainwagonfloor mesh found in the train model!");
@@ -900,12 +933,32 @@ export function updateTrain(deltaTime) {
     const worldPos = new THREE.Vector3();
     window.trainWagonFloor.getWorldPosition(worldPos);
     
-    // Update physics body position
-    window.trainFloorBody.position.copy(worldPos);
-    
     // Get the world quaternion of the floor
     const worldQuat = new THREE.Quaternion();
     window.trainWagonFloor.getWorldQuaternion(worldQuat);
+    
+    // Apply stored offset if it exists, otherwise use current position
+    if (window.trainFloorBody.offsetVector) {
+      // Create a fresh copy of the offset vector
+      const currentOffset = window.trainFloorBody.offsetVector.clone();
+      
+      // Make sure the offset stays aligned with the train's current rotation
+      // This keeps the collider extending in the right direction as train turns
+      const adjustedOffset = currentOffset.clone().applyQuaternion(worldQuat);
+      
+      // Apply the offset to the position
+      const offsetPos = worldPos.clone().add(adjustedOffset);
+      
+      // Update physics body position with offset
+      window.trainFloorBody.position.set(
+        offsetPos.x,
+        worldPos.y,
+        offsetPos.z
+      );
+    } else {
+      // Fallback to original behavior if no offset is stored
+      window.trainFloorBody.position.copy(worldPos);
+    }
     
     // Update physics body rotation
     window.trainFloorBody.quaternion.set(
@@ -937,6 +990,13 @@ export function updateTrain(deltaTime) {
       });
     }
     
+    // Z-offset constant for positioning horses "behind" the scene
+    const HORSE_Z_OFFSET = -80; // Increased value to position horses more "behind"
+    // X-offset constant for positioning horses left/right of the train
+    const HORSE_X_OFFSET = 5; // Adjust to shift the entire horde left (-) or right (+)
+    // Rotation offset constant for adjusting horse horde's orientation
+    const HORSE_ROTATION_OFFSET = 0; // Adjust to rotate the entire horde (in radians)
+    
     // Current time for gallop animation
     const currentTime = Date.now() / 1000;
     
@@ -950,10 +1010,19 @@ export function updateTrain(deltaTime) {
       const worldQuat = new THREE.Quaternion();
       train.getWorldQuaternion(worldQuat);
       
+      // Create rotation offset quaternion
+      const rotOffset = new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0), // Y-axis rotation
+        HORSE_ROTATION_OFFSET
+      );
+      
+      // Combine train rotation with offset rotation
+      const combinedQuat = worldQuat.clone().multiply(rotOffset);
+      
       // Update each horse with an offset
       window.horses.forEach((horse, index) => {
         // Base offset from train
-        const baseOffset = new THREE.Vector3(6, 0, 2);
+        const baseOffset = new THREE.Vector3(6 + HORSE_X_OFFSET, 0, 2 + HORSE_Z_OFFSET);
         
         // Use the stored random offsets for natural positioning
         const randomX = horse.userData.randomOffsetX || 0;
@@ -990,7 +1059,7 @@ export function updateTrain(deltaTime) {
         );
         
         // Apply train's rotation to the offset vector
-        offsetDirection.applyQuaternion(worldQuat);
+        offsetDirection.applyQuaternion(combinedQuat);
         
         // Apply the offset to position the horse
         horse.position.copy(worldPos).add(offsetDirection);
@@ -1032,12 +1101,20 @@ export function updateTrain(deltaTime) {
         const gallopBounce = wave * amplitude;
         
         // Apply offsets to position the horse
-        horse.position.x += 6 + randomX;  // Base offset from train + random variation
-        horse.position.z += 2 + randomZ;  // Base offset from train + random variation
+        horse.position.x += 6 + randomX + HORSE_X_OFFSET;  // Base offset from train + random variation + X offset
+        horse.position.z += 2 + randomZ + HORSE_Z_OFFSET;  // Base offset from train + random variation + Z offset
         horse.position.y += randomY + gallopBounce;  // Height variation + gallop bounce
         
-        // Match the train's rotation directly
-        horse.quaternion.copy(train.quaternion);
+        // Create rotation with offset
+        const baseQuaternion = train.quaternion.clone();
+        const rotOffset = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(0, 1, 0), // Y-axis rotation
+          HORSE_ROTATION_OFFSET
+        );
+        const combinedQuat = baseQuaternion.multiply(rotOffset);
+        
+        // Match the train's rotation with the offset
+        horse.quaternion.copy(combinedQuat);
       });
     }
     
@@ -1312,6 +1389,11 @@ function loadHorseModel() {
     'models/horse2.glb'
   ];
   
+  // Z-offset constant for positioning horses "behind" the scene
+  const HORSE_BASE_Z_OFFSET = 15; // Base Z offset value (same as in updateTrain)
+  // X-offset constant for positioning horses left/right of the train
+  const HORSE_BASE_X_OFFSET = 0; // Base X offset value (same as in updateTrain)
+  
   // Create 6 horses alternating between the two models
   for (let i = 0; i < 6; i++) {
     // Get model index (0, 1, 0, 1, 0, 1)
@@ -1319,14 +1401,14 @@ function loadHorseModel() {
     const modelPath = horseModels[modelIndex];
     
     // Store random offsets for consistent positioning with more variation
-    // Create zigzag pattern with increased spacing
+    // Create zigzag pattern with increased spacing and Z offset
     const positions = [
-      { x: -5.0 + (Math.random() - 0.5) * 3, z: 1.0 + Math.random() * 3.0 },  // 0: front left
-      { x: 0.0 + (Math.random() - 0.5) * 3, z: 7.0 + Math.random() * 3.0 },   // 1: middle-back
-      { x: 5.0 + (Math.random() - 0.5) * 3, z: 12.0 + Math.random() * 3.0 },  // 2: far back right
-      { x: -3.0 + (Math.random() - 0.5) * 3, z: 4.0 + Math.random() * 3.0 },  // 3: middle left
-      { x: 4.0 + (Math.random() - 0.5) * 3, z: 3.0 + Math.random() * 3.0 },   // 4: front right
-      { x: 1.0 + (Math.random() - 0.5) * 3, z: 9.0 + Math.random() * 3.0 }    // 5: back middle
+      { x: -5.0 + (Math.random() - 0.5) * 3 + HORSE_BASE_X_OFFSET, z: 1.0 + Math.random() * 3.0 + HORSE_BASE_Z_OFFSET },  // 0: front left
+      { x: 0.0 + (Math.random() - 0.5) * 3 + HORSE_BASE_X_OFFSET, z: 7.0 + Math.random() * 3.0 + HORSE_BASE_Z_OFFSET },   // 1: middle-back
+      { x: 5.0 + (Math.random() - 0.5) * 3 + HORSE_BASE_X_OFFSET, z: 12.0 + Math.random() * 3.0 + HORSE_BASE_Z_OFFSET },  // 2: far back right
+      { x: -3.0 + (Math.random() - 0.5) * 3 + HORSE_BASE_X_OFFSET, z: 4.0 + Math.random() * 3.0 + HORSE_BASE_Z_OFFSET },  // 3: middle left
+      { x: 4.0 + (Math.random() - 0.5) * 3 + HORSE_BASE_X_OFFSET, z: 3.0 + Math.random() * 3.0 + HORSE_BASE_Z_OFFSET },   // 4: front right
+      { x: 1.0 + (Math.random() - 0.5) * 3 + HORSE_BASE_X_OFFSET, z: 9.0 + Math.random() * 3.0 + HORSE_BASE_Z_OFFSET }    // 5: back middle
     ];
     
     // Load the horse model
