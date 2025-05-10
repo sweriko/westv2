@@ -1325,7 +1325,7 @@ const TRAIN_CYCLE_TIME = Math.floor(TRAIN_TRACK_LENGTH / (TRAIN_SPEED * 60)); //
 
 // Time-based tracking
 const TRAIN_START_TIME = Date.now(); // Global reference time when train started
-let trainDirection = 1; // Current direction (1 = forward, -1 = backward)
+let trainDirection = -1; // Always moving right to left (-1)
 
 // Send train updates every 2 seconds
 const TRAIN_BROADCAST_INTERVAL = 2000;
@@ -1335,13 +1335,11 @@ setInterval(() => {
 
 /**
  * Get current train direction based on elapsed time
- * @returns {number} 1 for forward, -1 for backward
+ * @returns {number} -1 for right to left direction (always)
  */
 function getCurrentTrainDirection() {
-  const elapsedTime = Date.now() - TRAIN_START_TIME;
-  const cycleCount = Math.floor(elapsedTime / TRAIN_CYCLE_TIME);
-  // Direction changes every cycle
-  return cycleCount % 2 === 0 ? 1 : -1;
+  // Always return -1 (right to left)
+  return -1;
 }
 
 /**
@@ -1354,11 +1352,15 @@ function calculateTrainProgress() {
   const timeInCurrentCycle = elapsedTime % TRAIN_CYCLE_TIME;
   
   // Calculate progress within current cycle (0-1)
-  const cycleProgress = timeInCurrentCycle / TRAIN_CYCLE_TIME;
+  let cycleProgress = timeInCurrentCycle / TRAIN_CYCLE_TIME;
   
-  // If even cycle, progress from 0 to 1 (forward)
-  // If odd cycle, progress from 1 to 0 (backward)
-  return cycleCount % 2 === 0 ? cycleProgress : 1 - cycleProgress;
+  // If progress reaches 1, reset to 0 (right side)
+  if (cycleProgress >= 1) {
+    cycleProgress = 0;
+  }
+  
+  // Return 1 - progress to go from right (1) to left (0)
+  return 1 - cycleProgress;
 }
 
 /**

@@ -453,12 +453,12 @@ function createTrainSystem() {
   // Create a half-circle path around the town 
   const numPoints = 50; // More points for a smooth curve
   const points = [];
-  const trackElevation = 0.5; // Slightly elevated above ground
+  const trackElevation = 1.5; // Increased from 0.5 to 1.5 to raise the track
 
   // Use town dimensions to calculate the radius 
   // Add buffer to ensure the track is outside the town
   const townRadius = Math.max(window.townDimensions.width, window.townDimensions.length) / 2;
-  const trackRadius = townRadius + 150; // 150 units away from the edge of town
+  const trackRadius = townRadius + 200; // Increased from 150 to 280 units away from the edge of town
   
   // Create half circle arc points
   for (let i = 0; i < numPoints; i++) {
@@ -489,11 +489,8 @@ function createTrainSystem() {
     trainTrackLength += tempPoints[i].distanceTo(tempPoints[i-1]);
   }
   
-  // Visualize the path with a line - helps with debugging, can be removed later
-  const pathGeometry = new THREE.BufferGeometry().setFromPoints(trainPath.getPoints(200));
-  const pathMaterial = new THREE.LineBasicMaterial({ color: 0x888888 });
-  const pathLine = new THREE.Line(pathGeometry, pathMaterial);
-  scene.add(pathLine);
+  // Create realistic railroad tracks instead of simple line
+  createRealisticRailroadTracks(trainPath);
   
   // Load train model
   const loader = new THREE.GLTFLoader();
@@ -674,16 +671,355 @@ function createTrainSystem() {
       
       console.log('Train model loaded successfully');
     },
-    (xhr) => {
-      console.log(`Loading train: ${(xhr.loaded / xhr.total) * 100}% loaded`);
-    },
+    undefined,
     (error) => {
       console.error('Error loading train model:', error);
-      
-      // Fallback: create a simple train placeholder if model fails to load
+      // Create simple placeholder if loading fails
       createSimpleTrainPlaceholder();
     }
   );
+}
+
+/**
+ * Creates realistic railroad tracks with parallel rails and wooden ties
+ * @param {THREE.CatmullRomCurve3} path - The spline path for the tracks
+ */
+function createRealisticRailroadTracks(path) {
+  // Number of points to sample along the path
+  const numSamples = 300;
+  const pathPoints = path.getPoints(numSamples);
+  
+  // Track dimensions
+  const RAIL_HEIGHT = 0.15;      // Height of the rail
+  const RAIL_HEAD_WIDTH = 0.2;   // Width of rail head (top)
+  const RAIL_BASE_WIDTH = 0.25;  // Width of rail base (bottom)
+  const RAIL_WEB_WIDTH = 0.08;   // Width of rail web (middle)
+  const TRACK_GAUGE = 1.8;       // Distance between rails
+  const TIE_WIDTH = 3.0;         // Width of wooden ties
+  const TIE_HEIGHT = 0.2;        // Height of wooden ties
+  const TIE_DEPTH = 0.5;         // Depth (length) of wooden ties
+  const TIE_SPACING = 2.0;       // Distance between ties
+  
+  // Create materials
+  const railMaterial = new THREE.MeshStandardMaterial({
+    color: 0x707070,             // Grey metallic color
+    metalness: 0.9,
+    roughness: 0.3,
+    envMapIntensity: 1.0
+  });
+  
+  const tieMaterial = new THREE.MeshStandardMaterial({
+    color: 0x3d2817,             // Dark brown for wooden ties
+    metalness: 0.0,
+    roughness: 0.9,
+    bumpScale: 0.02
+  });
+  
+  // Create track group to hold all elements
+  const trackGroup = new THREE.Group();
+  
+  // Calculate the total track length
+  let totalTrackLength = 0;
+  for (let i = 1; i < pathPoints.length; i++) {
+    totalTrackLength += pathPoints[i].distanceTo(pathPoints[i-1]);
+  }
+  
+  // Pre-calculate number of ties based on total length and spacing
+  const estimatedTieCount = Math.floor(totalTrackLength / TIE_SPACING) + 1;
+  
+  // Create a more detailed tie geometry with beveled edges
+  const tieGeometry = createBeveledTieGeometry(TIE_WIDTH, TIE_HEIGHT, TIE_DEPTH, 0.03);
+  const tieMesh = new THREE.InstancedMesh(tieGeometry, tieMaterial, estimatedTieCount);
+  
+  // For dummy matrix storage
+  const dummyMatrix = new THREE.Matrix4();
+  
+  // Track tie count for the instanced mesh
+  let tieIndex = 0;
+  
+  // Create rails along the path
+  let accumulatedDistance = 0;
+  let nextTieDistance = 0;
+  
+  // Create a proper rail cross-section by extruding an I-beam shape
+  const railGeometry = createRailProfileGeometry(RAIL_HEIGHT, RAIL_HEAD_WIDTH, RAIL_BASE_WIDTH, RAIL_WEB_WIDTH, 1);
+  
+  // Estimate number of rail segments needed
+  const estimatedRailSegments = numSamples - 1;
+  const leftRailMesh = new THREE.InstancedMesh(railGeometry, railMaterial, estimatedRailSegments);
+  const rightRailMesh = new THREE.InstancedMesh(railGeometry, railMaterial, estimatedRailSegments);
+  
+  // Track rail segment count
+  let railIndex = 0;
+  
+  for (let i = 1; i < pathPoints.length; i++) {
+    const p1 = pathPoints[i-1];
+    const p2 = pathPoints[i];
+    
+    // Calculate segment length
+    const segmentLength = p1.distanceTo(p2);
+    
+    // Calculate t values for this segment within overall path
+    const t1 = path.getUtoTmapping(accumulatedDistance / totalTrackLength);
+    const t2 = path.getUtoTmapping((accumulatedDistance + segmentLength) / totalTrackLength);
+    
+    // Get exact tangent at the midpoint of this segment
+    const segmentT = (t1 + t2) / 2;
+    const exactDir = path.getTangentAt(segmentT).normalize();
+    const up = new THREE.Vector3(0, 1, 0);
+    const exactPerp = new THREE.Vector3().crossVectors(exactDir, up).normalize();
+    
+    // Create midpoint for segment
+    const midpoint = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+    
+    // Create transformation matrix for rail segments
+    // Scale the rail segments to the correct length
+    const railMatrix = new THREE.Matrix4().makeBasis(
+      exactPerp.clone().cross(exactDir),  // X perpendicular to track
+      up,                                 // Y up
+      exactDir                           // Z along track
+    );
+    
+    // Apply scaling to the segment length
+    const scaleMatrix = new THREE.Matrix4().makeScale(1, 1, segmentLength);
+    railMatrix.multiply(scaleMatrix);
+    
+    // Position the left rail
+    const leftRailPos = midpoint.clone().addScaledVector(exactPerp, TRACK_GAUGE / 2);
+    leftRailPos.y += RAIL_HEIGHT * 0.5 + 3.0; // Added 1.0 to raise rails above embankment
+    const leftMatrix = railMatrix.clone();
+    leftMatrix.setPosition(leftRailPos);
+    leftRailMesh.setMatrixAt(railIndex, leftMatrix);
+    
+    // Position the right rail
+    const rightRailPos = midpoint.clone().addScaledVector(exactPerp, -TRACK_GAUGE / 2);
+    rightRailPos.y += RAIL_HEIGHT * 0.5 + 3.0; // Added 1.0 to raise rails above embankment
+    const rightMatrix = railMatrix.clone();
+    rightMatrix.setPosition(rightRailPos);
+    rightRailMesh.setMatrixAt(railIndex, rightMatrix);
+    
+    // Increment rail segment index
+    railIndex++;
+    
+    // Add wooden ties at regular intervals
+    accumulatedDistance += segmentLength;
+    
+    // Place ties at regular intervals
+    while (accumulatedDistance >= nextTieDistance) {
+      // Only continue if we haven't exceeded our pre-allocated tie count
+      if (tieIndex >= estimatedTieCount) break;
+      
+      // Calculate position along the path for this tie
+      const t = (nextTieDistance - (accumulatedDistance - segmentLength)) / segmentLength;
+      const tiePosition = new THREE.Vector3().lerpVectors(p1, p2, t);
+      
+      // At this precise position on the curve, calculate the tangent
+      // This ensures ties are always perpendicular to the exact point on the curve
+      const tieTValue = path.getUtoTmapping(nextTieDistance / totalTrackLength);
+      const exactTieDir = path.getTangentAt(tieTValue).normalize();
+      
+      // Recalculate perpendicular to ensure it's exactly perpendicular to the curve at this point
+      const exactTiePerp = new THREE.Vector3().crossVectors(exactTieDir, up).normalize();
+      
+      // Create transformation matrix for this tie
+      // X along perpendicular (across track), Y up, Z along track
+      const tieMatrix = new THREE.Matrix4().makeBasis(
+        exactTiePerp,    // X axis perpendicular to track direction
+        up,              // Y axis pointing up
+        exactTieDir      // Z axis along exact track direction
+      );
+      
+      // Position slightly below the rail's bottom for correct alignment
+      tiePosition.y += 2.8; // Increased from -0.02 to 0.8 to position ties above embankment
+      
+      // Set position
+      tieMatrix.setPosition(tiePosition);
+      
+      // Set matrix for this instance
+      tieMesh.setMatrixAt(tieIndex, tieMatrix);
+      
+      // Increment tie index and set next tie distance
+      tieIndex++;
+      nextTieDistance += TIE_SPACING;
+    }
+  }
+  
+  // Update the instance matrices
+  leftRailMesh.count = railIndex;
+  leftRailMesh.instanceMatrix.needsUpdate = true;
+  
+  rightRailMesh.count = railIndex;
+  rightRailMesh.instanceMatrix.needsUpdate = true;
+  
+  tieMesh.count = tieIndex;
+  tieMesh.instanceMatrix.needsUpdate = true;
+  
+  // Set shadows for all meshes
+  leftRailMesh.castShadow = true;
+  leftRailMesh.receiveShadow = true;
+  rightRailMesh.castShadow = true;
+  rightRailMesh.receiveShadow = true;
+  tieMesh.castShadow = true;
+  tieMesh.receiveShadow = true;
+  
+  // Add everything to track group
+  trackGroup.add(leftRailMesh);
+  trackGroup.add(rightRailMesh);
+  trackGroup.add(tieMesh);
+  
+  // Add the entire track to the scene
+  scene.add(trackGroup);
+  
+  console.log(`Created railroad track with ${railIndex} rail segments and ${tieIndex} ties.`);
+}
+
+/**
+ * Creates a proper railway rail profile using extrusion
+ * @param {number} height - Total height of the rail
+ * @param {number} headWidth - Width of the top of the rail
+ * @param {number} baseWidth - Width of the bottom of the rail
+ * @param {number} webWidth - Width of the middle section of the rail
+ * @param {number} length - Length of the rail segment
+ * @returns {THREE.BufferGeometry} The rail geometry
+ */
+function createRailProfileGeometry(height, headWidth, baseWidth, webWidth, length) {
+  // Create the rail profile shape (I-beam cross-section)
+  // For a flat-lying rail, we'll define the profile in the XY plane
+  // so that when extruded along Z, it will be oriented correctly
+  const railShape = new THREE.Shape();
+  
+  // Calculate dimensions
+  const headHeight = height * 0.2; // Top 20% for the head
+  const baseHeight = height * 0.15; // Bottom 15% for the base
+  const webHeight = height - headHeight - baseHeight; // Middle section
+  
+  // Draw the profile on its side, so it will lie flat when extruded
+  // Start from left edge of base
+  railShape.moveTo(0, -baseWidth/2);
+  
+  // Draw base (bottom part)
+  railShape.lineTo(0, baseWidth/2);
+  railShape.lineTo(baseHeight, baseWidth/2);
+  
+  // Draw web connection to base
+  railShape.lineTo(baseHeight, webWidth/2);
+  
+  // Draw web (middle part)
+  railShape.lineTo(baseHeight + webHeight, webWidth/2);
+  
+  // Draw head (top part)
+  railShape.lineTo(baseHeight + webHeight, headWidth/2);
+  railShape.lineTo(height, headWidth/2);
+  railShape.lineTo(height, -headWidth/2);
+  railShape.lineTo(baseHeight + webHeight, -headWidth/2);
+  
+  // Draw web (middle part, other side)
+  railShape.lineTo(baseHeight + webHeight, -webWidth/2);
+  
+  // Draw web connection to base (other side)
+  railShape.lineTo(baseHeight, -webWidth/2);
+  
+  // Close the shape
+  railShape.lineTo(baseHeight, -baseWidth/2);
+  railShape.lineTo(0, -baseWidth/2);
+  
+  // Extrude settings
+  const extrudeSettings = {
+    steps: 1,
+    depth: length,
+    bevelEnabled: false
+  };
+  
+  // Create the extruded geometry
+  const geometry = new THREE.ExtrudeGeometry(railShape, extrudeSettings);
+  
+  // Center the geometry around origin
+  geometry.translate(-height/2, 0, -length/2);
+  
+  return geometry;
+}
+
+/**
+ * Creates a beveled wooden tie geometry
+ * @param {number} width - Width of the tie (across track)
+ * @param {number} height - Height of the tie
+ * @param {number} depth - Depth of the tie (along track)
+ * @param {number} bevelSize - Size of the beveled edge
+ * @returns {THREE.BufferGeometry} The tie geometry
+ */
+function createBeveledTieGeometry(width, height, depth, bevelSize) {
+  // Create a box with beveled edges
+  const geometry = new THREE.BoxGeometry(width, height, depth);
+  
+  // Get vertices and faces
+  geometry.computeVertexNormals();
+  
+  // Add subtle randomness to vertices to make it look more like wood
+  const positionAttribute = geometry.getAttribute('position');
+  const positions = positionAttribute.array;
+  
+  // Add random displacement to vertices except at the top face
+  // This makes it look like rough-hewn wood
+  for (let i = 0; i < positions.length; i += 3) {
+    const y = positions[i + 1];
+    
+    // Don't modify top face points (where y == height/2)
+    if (Math.abs(y - height/2) > 0.001) {
+      // Add small random displacements
+      positions[i] += (Math.random() - 0.5) * 0.03;     // x
+      positions[i + 2] += (Math.random() - 0.5) * 0.03; // z
+      
+      // Only modify y for side faces slightly
+      if (Math.abs(y) !== height/2) {
+        positions[i + 1] += (Math.random() - 0.5) * 0.01; // y (less displacement)
+      }
+    }
+  }
+  
+  // Update position attribute
+  positionAttribute.needsUpdate = true;
+  
+  // Add bevel using Bevel modifier (simulation)
+  // In Three.js we don't have direct bevel modifiers, 
+  // so we simulate by applying subdivision and then scaling inward at the edges
+  
+  // Use BufferGeometryUtils to create subdivided geometry
+  const subdivided = new THREE.BufferGeometry().copy(geometry);
+  
+  // Apply slight rounding to top edges
+  const edgeVertices = [];
+  const topY = height/2 - 0.001; // Just below the exact top
+  
+  // Mark vertices near the top edges
+  for (let i = 0; i < positions.length; i += 3) {
+    const y = positions[i + 1];
+    if (y > topY) {
+      const x = positions[i];
+      const z = positions[i + 2];
+      
+      // Check if at edge (within bevelSize of the edge)
+      const xEdge = Math.abs(Math.abs(x) - width/2) < bevelSize;
+      const zEdge = Math.abs(Math.abs(z) - depth/2) < bevelSize;
+      
+      if (xEdge || zEdge) {
+        // Push inward slightly
+        if (xEdge) {
+          positions[i] *= 0.97; // Scale x towards center
+        }
+        if (zEdge) {
+          positions[i + 2] *= 0.97; // Scale z towards center
+        }
+        
+        // Lower slightly
+        positions[i + 1] -= bevelSize * 0.7;
+      }
+    }
+  }
+  
+  // Update position attribute
+  positionAttribute.needsUpdate = true;
+  
+  return geometry;
 }
 
 /**
@@ -801,11 +1137,16 @@ function calculateTrainProgress() {
   const timeInCurrentCycle = elapsedTime % trainCycleTime;
   
   // Calculate progress within current cycle (0-1)
-  const cycleProgress = timeInCurrentCycle / trainCycleTime;
+  // Always go from right to left (1 to 0)
+  let cycleProgress = timeInCurrentCycle / trainCycleTime;
   
-  // If even cycle, progress from 0 to 1 (forward)
-  // If odd cycle, progress from 1 to 0 (backward)
-  return cycleCount % 2 === 0 ? cycleProgress : 1 - cycleProgress;
+  // If progress reaches 1, reset to 0 (right side)
+  if (cycleProgress >= 1) {
+    cycleProgress = 0;
+  }
+  
+  // Return 1 - progress to go from right (1) to left (0)
+  return 1 - cycleProgress;
 }
 
 /**
@@ -813,15 +1154,8 @@ function calculateTrainProgress() {
  * @returns {number} 1 for forward, -1 for backward
  */
 function getCurrentTrainDirection() {
-  if (!trainInitialized || !trainStartTime || !trainCycleTime) {
-    // Fall back to default
-    return trainDirection;
-  }
-  
-  const elapsedTime = Date.now() - trainStartTime;
-  const cycleCount = Math.floor(elapsedTime / trainCycleTime);
-  // Direction changes every cycle
-  return cycleCount % 2 === 0 ? 1 : -1;
+  // Always return -1 (right to left direction)
+  return -1;
 }
 
 /**
@@ -849,6 +1183,13 @@ export function updateTrain(deltaTime) {
   const prevPosition = train.position.clone();
   
   if (trainInitialized) {
+    // Check if we need to add railway embankment now that train is initialized
+    if (window.desertTerrain && window.trainPath && !window.embankmentInitialized) {
+      console.log("Train is initialized, adding railway embankment...");
+      window.desertTerrain.addRailwayEmbankment();
+      window.embankmentInitialized = true;
+    }
+    
     // Time-based train movement - calculate position based on global timer
     trainProgress = calculateTrainProgress();
     trainDirection = getCurrentTrainDirection();
@@ -861,21 +1202,12 @@ export function updateTrain(deltaTime) {
     const tangent = trainPath.getTangentAt(trainProgress).normalize();
     
     // Make the train face the direction of travel
-    if (trainDirection > 0) {
-      // Forward direction - directly use the tangent
-      const up = new THREE.Vector3(0, 1, 0);
-      train.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 0, 1), // default forward vector
-        tangent
-      );
-    } else {
-      // Backward direction - use the opposite tangent
-      const reverseTangent = tangent.clone().negate();
-      train.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 0, 1), // default forward vector
-        reverseTangent
-      );
-    }
+    // Always use backward direction (right to left)
+    const reverseTangent = tangent.clone().negate();
+    train.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1), // default forward vector
+      reverseTangent
+    );
     
     // Log only if verbose logging is enabled
     if (trainLogMessages && trainProgress % 0.1 < 0.001) {
@@ -883,17 +1215,13 @@ export function updateTrain(deltaTime) {
     }
   } else {
     // Original client-side train movement (fallback before server sync)
-    trainProgress += 0.0003 * trainDirection * deltaTime * 60;
+    // Always move from right to left at a constant speed
+    trainProgress -= 0.0003 * deltaTime * 60;
+    trainDirection = -1;
     
-    // Change direction when reaching either end
-    if (trainProgress >= 1) {
-      // Reached the end, turn around
-      trainDirection = -1;
+    // If train reaches the end, reset to beginning
+    if (trainProgress <= 0) {
       trainProgress = 1;
-    } else if (trainProgress <= 0) {
-      // Reached the start, turn around
-      trainDirection = 1;
-      trainProgress = 0;
     }
     
     // Get position on the path
@@ -903,21 +1231,12 @@ export function updateTrain(deltaTime) {
     // Orient the train to follow the curved path
     const tangent = trainPath.getTangentAt(trainProgress).normalize();
     
-    // Make the train face the direction of travel
-    if (trainDirection > 0) {
-      // Forward direction
-      train.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 0, 1), // default forward vector
-        tangent
-      );
-    } else {
-      // Backward direction
-      const reverseTangent = tangent.clone().negate();
-      train.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 0, 1), // default forward vector
-        reverseTangent
-      );
-    }
+    // Always backward direction (right to left)
+    const reverseTangent = tangent.clone().negate();
+    train.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1), // default forward vector
+      reverseTangent
+    );
   }
   
   // Update train velocity based on position change
@@ -991,9 +1310,9 @@ export function updateTrain(deltaTime) {
     }
     
     // Z-offset constant for positioning horses "behind" the scene
-    const HORSE_Z_OFFSET = -80; // Increased value to position horses more "behind"
+    const HORSE_Z_OFFSET = -120; // Increased value to position horses more "behind"
     // X-offset constant for positioning horses left/right of the train
-    const HORSE_X_OFFSET = 5; // Adjust to shift the entire horde left (-) or right (+)
+    const HORSE_X_OFFSET = 40; // Adjust to shift the entire horde left (-) or right (+)
     // Rotation offset constant for adjusting horse horde's orientation
     const HORSE_ROTATION_OFFSET = 0; // Adjust to rotate the entire horde (in radians)
     
@@ -1178,6 +1497,39 @@ export function setTrainInitialState(data) {
   }
   
   trainInitialized = true;
+  
+  // Set up a timer to add the railway embankment
+  if (window.desertTerrain && !window.embankmentInitialized) {
+    console.log("Setting up timer to add railway embankment...");
+    
+    // Try to add the embankment immediately
+    const embankmentAdded = window.desertTerrain.addRailwayEmbankment();
+    
+    // If not successful, set up repeated attempts
+    if (!embankmentAdded) {
+      window.embankmentTimer = setInterval(() => {
+        if (window.desertTerrain && window.trainPath) {
+          const success = window.desertTerrain.addRailwayEmbankment();
+          
+          if (success) {
+            console.log("Railway embankment successfully added after retries");
+            window.embankmentInitialized = true;
+            clearInterval(window.embankmentTimer);
+          }
+        }
+      }, 1000); // Try every second
+      
+      // Clear the interval after 30 seconds no matter what
+      setTimeout(() => {
+        if (window.embankmentTimer) {
+          clearInterval(window.embankmentTimer);
+          console.log("Stopped embankment retry timer after timeout");
+        }
+      }, 30000);
+    } else {
+      window.embankmentInitialized = true;
+    }
+  }
   
   // Disable verbose logging after 5 seconds
   setTimeout(() => {

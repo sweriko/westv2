@@ -158,6 +158,21 @@ export class DesertTerrain {
         // Add micro-detail noise generators
         this.microRipplesNoise = new PerlinNoise(Math.random() + 400);
         this.sandGrainsNoise = new PerlinNoise(Math.random() + 500);
+        
+        // Railway embankment config
+        this.railwayConfig = {
+            embankmentHeight: 4.0,      // Make it much more pronounced to ensure visibility (was 2.5)
+            flatWidth: 10.0,            // Increased from 5.0 to 10.0 for wider flat top
+            slopeWidth: 12.0,           // Increased from 8.0 to 12.0 for wider slopes
+            noiseScale: 0.02,           // Scale of noise to apply to embankment
+            noiseStrength: 0.2,         // Slight increase in noise variation (was 0.15)
+        };
+        
+        // Create noise generator for embankment details
+        this.embankmentNoise = new PerlinNoise(Math.random() + 600);
+        
+        // Flag to track if embankment has been added
+        this.embankmentAdded = false;
     }
     
     // Create directional dunes effect
@@ -210,15 +225,15 @@ export class DesertTerrain {
     isNearTrainTrack(x, z) {
         // Access global train path if available from scene.js
         if (window.trainPath) {
-            // Width of the flattened area on each side of the track
-            const trackWidth = 1.5; // Slightly wider to ensure the track is fully flattened
+            // Width of the flattened area for the track surface only
+            const trackWidth = 1.2; // Reduced from 1.5 to focus on just the track surface
             
             // Create a vector for the current point
             const pointVector = new THREE.Vector3(x, 0, z);
             
             // Find the closest point on the curve to our point
             // Get enough points from the curve for accuracy
-            const curvePoints = window.trainPath.getPoints(200);
+            const curvePoints = window.trainPath.getPoints(500);
             let closestDist = Infinity;
             
             // Find the closest point on the curve
@@ -229,7 +244,7 @@ export class DesertTerrain {
                 }
             }
             
-            // Check if the point is within track width
+            // Check if the point is within track width - now more specific to the track surface
             return closestDist <= trackWidth;
         }
         
@@ -238,8 +253,8 @@ export class DesertTerrain {
         const trackStart = window.TRAIN_TRACK_START || new THREE.Vector3(0, 0, -1000);
         const trackEnd = window.TRAIN_TRACK_END || new THREE.Vector3(0, 0, 1000);
         
-        // Width of the flattened area on each side of the track
-        const trackWidth = 1.0;
+        // Width of the flattened area just for the track
+        const trackWidth = 0.8; // Reduced from 1.0 to be more specific to track
         
         // Create a line segment representing the track
         const trackVector = new THREE.Vector3().subVectors(trackEnd, trackStart).normalize();
@@ -267,11 +282,11 @@ export class DesertTerrain {
         // Calculate distance from town center
         const distFromTown = Math.sqrt(x * x + z * z);
         
-        // Check if point is near train track
-        const isOnTrack = this.isNearTrainTrack(x, z);
+        // Check if point is near train track but exclude points that would be part of the embankment
+        const isOnTrackSurface = this.isNearTrainTrack(x, z);
         
-        // If near train track, return 0 to make it flat
-        if (isOnTrack) {
+        // Only flatten the actual track surface, not the embankment area
+        if (isOnTrackSurface) {
             return 0;
         }
         
@@ -322,65 +337,105 @@ export class DesertTerrain {
             // Calculate distance from center for edge blending
             const distFromCenter = Math.sqrt(x * x + z * z);
             
-            // Calculate town blend factor (0 = flat town area, 1 = full desert)
-            const townBlend = this.getTownBlendFactor(x, z);
+            // First check if this is part of the railway embankment for maximum precision
+            const embankmentHeight = this.getRailwayEmbankmentHeight(x, z);
             
-            // Base terrain
-            let height = this.baseNoise.noise(x * this.config.noiseScale.base, z * this.config.noiseScale.base) * this.config.heightScale.base;
+            // Initialize height that will be adjusted with different terrain elements
+            let height;
             
-            // Add directional dunes with smoothing
-            let duneHeight = this.getDirectionalDuneHeight(x, z);
-            
-            // Smooth transitions between dunes for more natural silhouettes
-            if (this.config.dunes.smoothing) {
-                // Apply additional smoothing to dune transitions
-                const smoothingNoise = this.baseNoise.noise(
-                    x * this.config.noiseScale.dunes * 2,
-                    z * this.config.noiseScale.dunes * 2
-                );
+            // If this point is part of the embankment, it gets special treatment
+            if (embankmentHeight > 0) {
+                // Use embankment height as the base, but still allow some desert features to blend in
+                // This will create a more realistic looking embankment that isn't perfectly smooth
+                const townBlend = this.getTownBlendFactor(x, z);
                 
-                // Use noise to slightly adjust dune height in a natural way
-                duneHeight *= (0.85 + smoothingNoise * 0.3);
+                // Base terrain with reduced influence
+                const baseTerrainHeight = this.baseNoise.noise(
+                    x * this.config.noiseScale.base, 
+                    z * this.config.noiseScale.base
+                ) * this.config.heightScale.base * 0.3; // Reduced influence of base terrain
+                
+                // Start with embankment height
+                height = embankmentHeight + baseTerrainHeight;
+                
+                // Add minimal dune detail for texture
+                const duneDetail = this.getDirectionalDuneHeight(x, z) * 0.1;
+                height += duneDetail * townBlend;
+                
+                // Add micro detail for texture
+                const microDetail = this.detailNoise.noise(
+                    x * this.config.noiseScale.detail,
+                    z * this.config.noiseScale.detail
+                ) * this.config.heightScale.detail * 0.2;
+                
+                height += microDetail;
+            } 
+            else if (this.isNearTrainTrack(x, z)) {
+                // For the actual track, make it completely flat
+                height = 0.1;
             }
-            
-            // Apply town blend factor to terrain height
-            height += duneHeight * townBlend;
-            
-            // Add small ripples to dunes (more pronounced farther from town)
-            const detailHeight = this.detailNoise.noise(x * this.config.noiseScale.detail, z * this.config.noiseScale.detail) 
-                * this.config.heightScale.detail;
-            height += detailHeight * Math.min(1, duneHeight / 20) * townBlend;
-            
-            // Add micro-ripples from wind patterns - aligned with wind direction
-            const windDirection = this.config.duneDirection;
-            const alignedX = x * Math.cos(windDirection) + z * Math.sin(windDirection);
-            const alignedZ = -x * Math.sin(windDirection) + z * Math.cos(windDirection);
-            
-            // More pronounced micro-ripples
-            const microRipples = this.microRipplesNoise.noise(
-                alignedX * this.config.noiseScale.microRipples,
-                alignedZ * this.config.noiseScale.microRipples * 5 // More stretching for pronounced directional ripples
-            ) * this.config.heightScale.microRipples;
-            
-            // Create additional small ripple detail for more complex patterns
-            const secondaryRipples = this.microRipplesNoise.noise(
-                alignedX * this.config.noiseScale.microRipples * 2,
-                alignedZ * this.config.noiseScale.microRipples * 7
-            ) * this.config.heightScale.microRipples * 0.4;
-            
-            // Add sand grain detail for very close-up detail
-            const sandGrains = this.sandGrainsNoise.noise(
-                x * this.config.noiseScale.sandGrains,
-                z * this.config.noiseScale.sandGrains
-            ) * this.config.heightScale.sandGrains;
-            
-            // Apply micro-detail based on distance from town (more detail in desert areas)
-            height += (microRipples + secondaryRipples + sandGrains) * townBlend;
-            
-            // Add occasional flat areas (dried lake beds)
-            const flatArea = this.baseNoise.noise(x * this.config.noiseScale.flat + 500, z * this.config.noiseScale.flat + 500);
-            if (flatArea > 0.6 && townBlend > 0.8) {
-                height *= 0.2;
+            else {
+                // Regular desert terrain generation
+                // Calculate town blend factor (0 = flat town area, 1 = full desert)
+                const townBlend = this.getTownBlendFactor(x, z);
+                
+                // Base terrain
+                height = this.baseNoise.noise(x * this.config.noiseScale.base, z * this.config.noiseScale.base) * this.config.heightScale.base;
+                
+                // Add directional dunes with smoothing
+                let duneHeight = this.getDirectionalDuneHeight(x, z);
+                
+                // Smooth transitions between dunes for more natural silhouettes
+                if (this.config.dunes.smoothing) {
+                    // Apply additional smoothing to dune transitions
+                    const smoothingNoise = this.baseNoise.noise(
+                        x * this.config.noiseScale.dunes * 2,
+                        z * this.config.noiseScale.dunes * 2
+                    );
+                    
+                    // Use noise to slightly adjust dune height in a natural way
+                    duneHeight *= (0.85 + smoothingNoise * 0.3);
+                }
+                
+                // Apply town blend factor to terrain height
+                height += duneHeight * townBlend;
+                
+                // Add small ripples to dunes (more pronounced farther from town)
+                const detailHeight = this.detailNoise.noise(x * this.config.noiseScale.detail, z * this.config.noiseScale.detail) 
+                    * this.config.heightScale.detail;
+                height += detailHeight * Math.min(1, duneHeight / 20) * townBlend;
+                
+                // Add micro-ripples from wind patterns - aligned with wind direction
+                const windDirection = this.config.duneDirection;
+                const alignedX = x * Math.cos(windDirection) + z * Math.sin(windDirection);
+                const alignedZ = -x * Math.sin(windDirection) + z * Math.cos(windDirection);
+                
+                // More pronounced micro-ripples
+                const microRipples = this.microRipplesNoise.noise(
+                    alignedX * this.config.noiseScale.microRipples,
+                    alignedZ * this.config.noiseScale.microRipples * 5 // More stretching for pronounced directional ripples
+                ) * this.config.heightScale.microRipples;
+                
+                // Create additional small ripple detail for more complex patterns
+                const secondaryRipples = this.microRipplesNoise.noise(
+                    alignedX * this.config.noiseScale.microRipples * 2,
+                    alignedZ * this.config.noiseScale.microRipples * 7
+                ) * this.config.heightScale.microRipples * 0.4;
+                
+                // Add sand grain detail for very close-up detail
+                const sandGrains = this.sandGrainsNoise.noise(
+                    x * this.config.noiseScale.sandGrains,
+                    z * this.config.noiseScale.sandGrains
+                ) * this.config.heightScale.sandGrains;
+                
+                // Apply micro-detail based on distance from town (more detail in desert areas)
+                height += (microRipples + secondaryRipples + sandGrains) * townBlend;
+                
+                // Add occasional flat areas (dried lake beds)
+                const flatArea = this.baseNoise.noise(x * this.config.noiseScale.flat + 500, z * this.config.noiseScale.flat + 500);
+                if (flatArea > 0.6 && townBlend > 0.8) {
+                    height *= 0.2;
+                }
             }
             
             // EDGE FIX - Improved edge handling for horizon blending
@@ -444,7 +499,20 @@ export class DesertTerrain {
             }
             
             // Add micro-ripple highlights and shadows
-            const microDetail = microRipples / this.config.heightScale.microRipples;
+            // Since microRipples might not be defined for all paths in our terrain generation,
+            // we need to calculate it here for coloring
+            const windDirection = this.config.duneDirection;
+            const alignedX = x * Math.cos(windDirection) + z * Math.sin(windDirection);
+            const alignedZ = -x * Math.sin(windDirection) + z * Math.cos(windDirection);
+            
+            // Calculate microRipples specifically for coloring
+            const microRipplesForColor = this.microRipplesNoise.noise(
+                alignedX * this.config.noiseScale.microRipples,
+                alignedZ * this.config.noiseScale.microRipples * 5
+            ) * this.config.heightScale.microRipples;
+            
+            const microDetail = microRipplesForColor / this.config.heightScale.microRipples;
+            
             if (microDetail > 0.3) {
                 // Add highlights to ripple peaks
                 finalColor.lerp(this.config.sandColors[4], (microDetail - 0.3) * 0.2);
@@ -876,7 +944,359 @@ export class DesertTerrain {
         // Add shrubs
         this.addShrubs();
         
+        // We'll call addRailwayEmbankment later when the train path is ready
+        
         console.log("Desert terrain generation complete");
+    }
+    
+    // Method that can be called from outside after train path is initialized
+    addRailwayEmbankment() {
+        if (this.embankmentAdded) {
+            console.log("Railway embankment already added, skipping");
+            return;
+        }
+        
+        if (!window.trainPath) {
+            console.log("Train path still not available. Need to wait for train initialization.");
+            return false;
+        }
+        
+        console.log("Adding railway embankment now that train path is available...");
+        
+        // Create the embankment mesh
+        this.addRailwayEmbankmentMesh();
+        
+        // Update terrain for embankment
+        this.updateTerrainForEmbankment();
+        
+        this.embankmentAdded = true;
+        console.log("Railway embankment successfully added");
+        return true;
+    }
+    
+    // Add a dedicated mesh for the railway embankment to ensure it's clearly visible
+    addRailwayEmbankmentMesh() {
+        // Only proceed if we have a train path
+        if (!window.trainPath) {
+            console.log("No train path available, skipping embankment mesh creation");
+            return;
+        }
+        
+        console.log("Creating dedicated railway embankment mesh...");
+        
+        // Get many points along the path for smooth curves
+        const numSegments = 500; // Significantly increase segments for better resolution
+        const trackPoints = window.trainPath.getPoints(numSegments);
+        
+        // Width parameters
+        const flatWidth = this.railwayConfig.flatWidth;
+        const slopeWidth = this.railwayConfig.slopeWidth;
+        const totalWidth = flatWidth + slopeWidth * 2;
+        const maxHeight = this.railwayConfig.embankmentHeight;
+        
+        // Create geometry for the embankment - using BufferGeometry for better performance
+        const embankmentGeometry = new THREE.BufferGeometry();
+        
+        // Array to store all vertices and faces
+        const positions = [];
+        const normals = [];
+        const colors = [];
+        const indices = [];
+        
+        // Embankment color - exactly match the base sand color
+        const embankmentColor = new THREE.Color(0xec9e5c); // Changed to match desert base sand color
+        
+        // Create arrays to hold left and right side vertices for the entire embankment
+        const leftOuterVertices = [];
+        const leftInnerVertices = [];
+        const rightInnerVertices = [];
+        const rightOuterVertices = [];
+        
+        // Calculate all vertices for entire embankment first
+        for (let i = 0; i < trackPoints.length; i++) {
+            // Current track point
+            const trackPoint = trackPoints[i];
+            
+            // Calculate direction and perpendicular vectors
+            let trackDir;
+            if (i < trackPoints.length - 1) {
+                // Use forward difference for all but last point
+                trackDir = new THREE.Vector3().subVectors(trackPoints[i+1], trackPoint).normalize();
+            } else {
+                // Use backward difference for last point
+                trackDir = new THREE.Vector3().subVectors(trackPoint, trackPoints[i-1]).normalize();
+            }
+            
+            // Vector perpendicular to track and pointing up
+            const up = new THREE.Vector3(0, 1, 0);
+            const trackPerp = new THREE.Vector3().crossVectors(up, trackDir).normalize();
+            
+            // Create the four corners of the embankment cross section
+            // Left outer (ground level)
+            const leftOuter = new THREE.Vector3().copy(trackPoint)
+                .addScaledVector(trackPerp, totalWidth / 2);
+            leftOuter.y = 0;
+            
+            // Left inner (top of embankment)
+            const leftInner = new THREE.Vector3().copy(trackPoint)
+                .addScaledVector(trackPerp, flatWidth / 2);
+            leftInner.y = maxHeight;
+            
+            // Right inner (top of embankment)
+            const rightInner = new THREE.Vector3().copy(trackPoint)
+                .addScaledVector(trackPerp, -flatWidth / 2);
+            rightInner.y = maxHeight;
+            
+            // Right outer (ground level)
+            const rightOuter = new THREE.Vector3().copy(trackPoint)
+                .addScaledVector(trackPerp, -totalWidth / 2);
+            rightOuter.y = 0;
+            
+            // Store vertices
+            leftOuterVertices.push(leftOuter);
+            leftInnerVertices.push(leftInner);
+            rightInnerVertices.push(rightInner);
+            rightOuterVertices.push(rightOuter);
+        }
+        
+        // Create triangles for the continuous embankment
+        for (let i = 0; i < trackPoints.length - 1; i++) {
+            // Get the current vertices
+            const lo1 = leftOuterVertices[i];
+            const li1 = leftInnerVertices[i];
+            const ri1 = rightInnerVertices[i];
+            const ro1 = rightOuterVertices[i];
+            
+            // Get the next vertices
+            const lo2 = leftOuterVertices[i + 1];
+            const li2 = leftInnerVertices[i + 1];
+            const ri2 = rightInnerVertices[i + 1];
+            const ro2 = rightOuterVertices[i + 1];
+            
+            // Calculate indices for this segment
+            const baseIndex = i * 4;
+            
+            // Add the vertices for this segment
+            // Left outer
+            positions.push(lo1.x, lo1.y, lo1.z);
+            // Left inner
+            positions.push(li1.x, li1.y, li1.z);
+            // Right inner
+            positions.push(ri1.x, ri1.y, ri1.z);
+            // Right outer
+            positions.push(ro1.x, ro1.y, ro1.z);
+            
+            // Next set - this creates a continuous strip
+            if (i < trackPoints.length - 2) {
+                // Left outer
+                positions.push(lo2.x, lo2.y, lo2.z);
+                // Left inner
+                positions.push(li2.x, li2.y, li2.z);
+                // Right inner
+                positions.push(ri2.x, ri2.y, ri2.z);
+                // Right outer
+                positions.push(ro2.x, ro2.y, ro2.z);
+                
+                // Calculate normals for each vertex
+                // For simplicity, just use up vector for all
+                for (let j = 0; j < 8; j++) {
+                    normals.push(0, 1, 0);
+                    colors.push(embankmentColor.r, embankmentColor.g, embankmentColor.b);
+                }
+                
+                // Create triangles - this part is critical to correctly connect segments
+                // Left slope (2 triangles)
+                indices.push(baseIndex, baseIndex + 4, baseIndex + 1); // lo1, lo2, li1
+                indices.push(baseIndex + 1, baseIndex + 4, baseIndex + 5); // li1, lo2, li2
+                
+                // Top flat section (2 triangles)
+                indices.push(baseIndex + 1, baseIndex + 5, baseIndex + 2); // li1, li2, ri1
+                indices.push(baseIndex + 2, baseIndex + 5, baseIndex + 6); // ri1, li2, ri2
+                
+                // Right slope (2 triangles)
+                indices.push(baseIndex + 2, baseIndex + 6, baseIndex + 3); // ri1, ri2, ro1
+                indices.push(baseIndex + 3, baseIndex + 6, baseIndex + 7); // ro1, ri2, ro2
+            }
+        }
+        
+        // Add the final normals and colors for the initial vertices
+        for (let i = 0; i < 4; i++) {
+            normals.push(0, 1, 0);
+            colors.push(embankmentColor.r, embankmentColor.g, embankmentColor.b);
+        }
+        
+        // Set the buffers in the geometry
+        embankmentGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        embankmentGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+        embankmentGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        embankmentGeometry.setIndex(indices);
+        
+        // Compute normals for proper lighting
+        embankmentGeometry.computeVertexNormals();
+        
+        // Create a material for the embankment
+        const embankmentMaterial = new THREE.MeshStandardMaterial({
+            vertexColors: true,
+            roughness: 1.0,      // Increased from 0.8 to 1.0
+            metalness: 0.0,      // Decreased from 0.1 to 0.0
+            side: THREE.DoubleSide, // Show both sides of faces
+        });
+        
+        // Create the mesh and add it to the scene
+        this.embankmentMesh = new THREE.Mesh(embankmentGeometry, embankmentMaterial);
+        this.embankmentMesh.castShadow = true;
+        this.embankmentMesh.receiveShadow = true;
+        
+        // Position slightly above terrain to prevent z-fighting
+        this.embankmentMesh.position.y = 0.05;
+        
+        this.scene.add(this.embankmentMesh);
+        
+        console.log(`Railway embankment mesh created with continuous curved geometry (${positions.length/3} vertices, ${indices.length/3} triangles)`);
+    }
+    
+    // Add a method to update the terrain mesh specifically for the embankment
+    updateTerrainForEmbankment() {
+        if (!this.terrainMesh) return;
+        
+        console.log("Explicitly updating terrain mesh for railway embankment...");
+        
+        // Get the position attribute from the geometry
+        const position = this.terrainMesh.geometry.attributes.position;
+        const vertices = position.array;
+        
+        // Get the color attribute from the geometry for colorizing the embankment
+        const colors = this.terrainMesh.geometry.attributes.color;
+        
+        // Define embankment color - exactly match the base sand color
+        const embankmentColor = new THREE.Color(0xec9e5c); // Changed to match desert base sand color
+        
+        // Update the vertices directly
+        let embankmentFound = false;
+        let verticesModified = 0;
+        for (let i = 0; i < vertices.length; i += 3) {
+            const x = vertices[i];
+            const z = vertices[i + 2];
+            
+            // Get the embankment height at this point
+            const embankmentHeight = this.getRailwayEmbankmentHeight(x, z);
+            
+            if (embankmentHeight > 0) {
+                embankmentFound = true;
+                verticesModified++;
+                
+                // Set the vertex height to the maximum of current height and embankment height
+                // Use a more forceful approach to ensure the embankment is visible
+                const currentHeight = vertices[i + 1];
+                vertices[i + 1] = Math.max(currentHeight, embankmentHeight);
+                
+                // Adjust the color to make the embankment more distinctive
+                if (colors && colors.array) {
+                    // Calculate how "embankment-like" this point is (1.0 = center of embankment, 0.0 = edge)
+                    const totalWidth = this.railwayConfig.flatWidth + this.railwayConfig.slopeWidth * 2;
+                    const pointVector = new THREE.Vector3(x, 0, z);
+                    const curvePoints = window.trainPath.getPoints(500);
+                    let closestDist = Infinity;
+                    
+                    // Find the closest point on the curve
+                    for (let j = 0; j < curvePoints.length; j++) {
+                        const dist = pointVector.distanceTo(curvePoints[j]);
+                        if (dist < closestDist) {
+                            closestDist = dist;
+                        }
+                    }
+                    
+                    // Calculate a blend factor based on distance from track center
+                    const embankmentFactor = 1.0 - (closestDist / totalWidth);
+                    
+                    // Get the original color
+                    const colorIdx = i;
+                    const origR = colors.array[colorIdx];
+                    const origG = colors.array[colorIdx + 1];
+                    const origB = colors.array[colorIdx + 2];
+                    const origColor = new THREE.Color(origR, origG, origB);
+                    
+                    // Blend between original color and embankment color
+                    const blendedColor = origColor.clone().lerp(embankmentColor, embankmentFactor * 0.1);
+                    
+                    // Update the color buffer
+                    colors.array[colorIdx] = blendedColor.r;
+                    colors.array[colorIdx + 1] = blendedColor.g;
+                    colors.array[colorIdx + 2] = blendedColor.b;
+                }
+            }
+        }
+        
+        // Mark the position buffer as needing an update
+        position.needsUpdate = true;
+        
+        // If we have a color buffer, mark it as needing an update
+        if (colors) colors.needsUpdate = true;
+        
+        // Update the normals to reflect the new surface shape
+        this.terrainMesh.geometry.computeVertexNormals();
+        
+        console.log(`Terrain mesh updated for embankment. Found: ${embankmentFound}, Modified vertices: ${verticesModified}`);
+    }
+    
+    // Calculate the railway embankment height at a point
+    getRailwayEmbankmentHeight(x, z) {
+        // Access global train path if available
+        if (!window.trainPath) return 0;
+        
+        // Create a vector for the current point
+        const pointVector = new THREE.Vector3(x, 0, z);
+        
+        // Use a cached path for performance
+        if (!this._cachedTrainPathPoints || this._cachedTrainPathPoints.length === 0) {
+            this._cachedTrainPathPoints = window.trainPath.getPoints(500);
+            console.log("Cached train path points for embankment calculation");
+        }
+        
+        // Find the closest point and distance on the curve
+        let closestDist = Infinity;
+        
+        for (let i = 0; i < this._cachedTrainPathPoints.length; i++) {
+            const dist = pointVector.distanceTo(this._cachedTrainPathPoints[i]);
+            if (dist < closestDist) {
+                closestDist = dist;
+            }
+        }
+        
+        // Early exit if we're far from the track
+        const totalWidth = this.railwayConfig.flatWidth + this.railwayConfig.slopeWidth * 2;
+        if (closestDist > totalWidth) return 0;
+        
+        // Calculate embankment profile
+        let embankmentHeight = 0;
+        
+        if (closestDist <= this.railwayConfig.flatWidth / 2) {
+            // Flat top of embankment
+            embankmentHeight = this.railwayConfig.embankmentHeight;
+        } else {
+            // Sloped sides of embankment
+            const slopeDistance = closestDist - (this.railwayConfig.flatWidth / 2);
+            const slopeProgress = 1 - Math.min(1, slopeDistance / this.railwayConfig.slopeWidth);
+            
+            // Smooth curve for the embankment sides - use cosine curve for natural slope
+            const smoothedSlope = Math.cos((1 - slopeProgress) * Math.PI / 2);
+            embankmentHeight = this.railwayConfig.embankmentHeight * smoothedSlope;
+        }
+        
+        // Add some noise variation to the embankment
+        if (embankmentHeight > 0) {
+            // Apply noise to make the embankment more natural
+            const noiseValue = this.embankmentNoise.noise(
+                x * this.railwayConfig.noiseScale, 
+                z * this.railwayConfig.noiseScale,
+                closestDist * 0.1  // Add variation based on distance from track
+            );
+            
+            // Apply noise subtly to maintain the embankment shape while adding natural variation
+            embankmentHeight *= (1 + (noiseValue - 0.5) * this.railwayConfig.noiseStrength);
+        }
+        
+        return embankmentHeight;
     }
     
     // Fast, analytic height query – matches exactly what we used in generateTerrain()
@@ -924,8 +1344,16 @@ export class DesertTerrain {
             }
         }
         
-        // Flatten areas near train tracks
-        if (this.isNearTrainTrack(x, z)) {
+        // Get embankment height
+        const embankmentHeight = this.getRailwayEmbankmentHeight(x, z);
+        
+        // Blend embankment with terrain (embankment rises from desert)
+        if (embankmentHeight > 0) {
+            // If embankment is present, use the maximum height between the two
+            // This ensures the embankment protrudes naturally from the desert
+            height = Math.max(height, embankmentHeight);
+        } else if (this.isNearTrainTrack(x, z)) {
+            // For the actual track, flatten it
             height = 0.1; // Flat height for train tracks
         }
         
