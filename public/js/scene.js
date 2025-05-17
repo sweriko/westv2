@@ -610,8 +610,8 @@ function createTrainSystem() {
           trainWagonFloor.getWorldPosition(worldPos);
           
           // Modified collider dimensions - longer but narrower
-          const lengthMultiplier = 2.5; // Extend length (z-axis)
-          const widthMultiplier = 0.7; // Reduce width (x-axis)
+          const lengthMultiplier = 4.5; // Extend length (z-axis)
+          const widthMultiplier = 2; // Reduce width (x-axis)
           
           // Create a modified physics body for the floor
           const halfExtents = new CANNON.Vec3(

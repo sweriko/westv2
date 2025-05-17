@@ -13,7 +13,7 @@ import { Viewmodel } from './viewmodel.js';
 import { initPlayerIdentity, verifyIdentityWithServer } from './playerIdentity.js';
 import logger from './logger.js';
 // Removed FlyingEagle import
-import { initChat, handleChatMessage, addSystemMessage } from './chat.js';
+// Chat system has been removed// import { initChat, handleChatMessage, addSystemMessage } from './chat.js';
 import './viewmodel-config.js';
 import { HorseSystem } from './horseSystem.js';
 
@@ -602,18 +602,6 @@ async function init() {
       }
     };
     
-    // Initialize chat system
-    initChat(networkManager);
-    
-    // Set up chat message handler
-    networkManager.onChatMessage = (senderId, username, message) => {
-      // Ignore messages from ourselves to prevent duplicates
-      if (senderId === localPlayer.id) return;
-      
-      // Only handle messages from other players
-      handleChatMessage({ username, message });
-    };
-
     // Listen for skin permission updates
     networkManager.handleMessage = (originalHandleMessage => {
       return function(message) {
@@ -1462,116 +1450,10 @@ function applyViewportAdjustments() {
 }
 
 /**
- * Creates weapon indicator UI for desktop
+ * Desktop weapon indicators have been removed
  */
 function createDesktopWeaponIndicators() {
-  if (isMobileDevice()) return; // Mobile has its own indicators
-  
-  // Add styles for weapon indicators
-  const style = document.createElement('style');
-  style.textContent = `
-    .desktop-weapon-indicator {
-      position: fixed;
-      left: 20px;
-      width: 40px;
-      height: 40px;
-      background-color: rgba(0, 0, 0, 0.6);
-      border: 2px solid rgba(255, 255, 255, 0.5);
-      border-radius: 5px;
-      margin-bottom: 5px;
-      opacity: 0.7;
-      transition: opacity 0.3s, border-color 0.3s, box-shadow 0.3s;
-      cursor: pointer;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-    }
-    .desktop-weapon-indicator:hover {
-      opacity: 1;
-    }
-    .desktop-weapon-indicator.active {
-      border-color: #ffcc00 !important;
-      box-shadow: 0 0 10px #ffcc00;
-      opacity: 1;
-    }
-    #revolver-indicator-desktop {
-      bottom: 150px;
-    }
-    #shotgun-indicator-desktop {
-      bottom: 120px;
-    }
-    .weapon-number {
-      position: absolute;
-      top: -8px;
-      right: -8px;
-      background-color: rgba(0, 0, 0, 0.7);
-      color: white;
-      font-size: 12px;
-      padding: 2px 5px;
-      border-radius: 10px;
-      font-family: 'Courier New', monospace;
-    }
-  `;
-  document.head.appendChild(style);
-  
-  // Create container for both indicators
-  const container = document.createElement('div');
-  container.id = 'desktop-weapon-indicators';
-  
-  // Create revolver indicator
-  const revolverIndicator = document.createElement('div');
-  revolverIndicator.id = 'revolver-indicator-desktop';
-  revolverIndicator.className = 'desktop-weapon-indicator active';
-  
-  // Add revolver icon (same as mobile)
-  const revolverImg = document.createElement('img');
-  revolverImg.src = 'models/revolverindicator.png';
-  revolverImg.style.width = '80%';
-  revolverImg.style.height = '80%';
-  revolverImg.style.objectFit = 'contain';
-  revolverIndicator.appendChild(revolverImg);
-  
-  // Add number indicator
-  const revolverNum = document.createElement('div');
-  revolverNum.className = 'weapon-number';
-  revolverNum.textContent = '1';
-  revolverIndicator.appendChild(revolverNum);
-  
-  // Create shotgun indicator
-  const shotgunIndicator = document.createElement('div');
-  shotgunIndicator.id = 'shotgun-indicator-desktop';
-  shotgunIndicator.className = 'desktop-weapon-indicator';
-  
-  // Add shotgun icon (same as mobile)
-  const shotgunImg = document.createElement('img');
-  shotgunImg.src = 'models/shotgunindicator.png';
-  shotgunImg.style.width = '80%';
-  shotgunImg.style.height = '80%';
-  shotgunImg.style.objectFit = 'contain';
-  shotgunIndicator.appendChild(shotgunImg);
-  
-  // Add number indicator
-  const shotgunNum = document.createElement('div');
-  shotgunNum.className = 'weapon-number';
-  shotgunNum.textContent = '2';
-  shotgunIndicator.appendChild(shotgunNum);
-  
-  // Add click handlers
-  revolverIndicator.addEventListener('click', () => {
-    if (window.localPlayer) {
-      window.localPlayer.switchWeapon('revolver');
-    }
-  });
-  
-  shotgunIndicator.addEventListener('click', () => {
-    if (window.localPlayer) {
-      window.localPlayer.switchWeapon('shotgun');
-    }
-  });
-  
-  // Add to DOM
-  document.body.appendChild(revolverIndicator);
-  document.body.appendChild(shotgunIndicator);
+  // Functionality removed
 }
 
 // Call init() to start the application

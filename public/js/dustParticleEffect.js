@@ -273,7 +273,7 @@ export class DustParticleEffect {
                 
                 // Position offsets - high and aligned with train direction
                 const offsetX = (Math.random() - 0.5) * 0.3;
-                const offsetY = 10.0 + (Math.random() - 0.5) * 0.3;
+                const offsetY = 11.0 + (Math.random() - 0.5) * 0.3;
                 
                 // Apply offsets in train's coordinate system
                 // First apply the specific fixed offsets
@@ -287,7 +287,7 @@ export class DustParticleEffect {
                 offsetPosition.y += offsetY;
                 
                 // Apply forward offset (Z) along train direction
-                offsetPosition.addScaledVector(trainForwardDir, 10.0);
+                offsetPosition.addScaledVector(trainForwardDir, 22.0);
                 
                 // Add random variation
                 offsetPosition.x += (Math.random() - 0.5) * 0.3;
@@ -305,24 +305,25 @@ export class DustParticleEffect {
                 // Start slightly larger
                 smokeMesh.scale.set(0.08, 0.08, 0.08); // Increased initial size
                 
-                // Direction is mainly upward with slight influence from train direction
+                // Direction is mainly upward with much higher initial velocity
+                // and stronger overall upward movement
                 const smokeDir = new THREE.Vector3(
-                    (Math.random() - 0.5) * 0.4 + trainForwardDir.x * 0.1, // Add slight train direction influence
-                    1 + Math.random() * 0.6,                              // Strong upward movement
-                    (Math.random() - 0.5) * 0.4 + trainForwardDir.z * 0.1  // Add slight train direction influence
+                    (Math.random() - 0.5) * 0.3 + trainForwardDir.x * 0.1, // Slight train direction influence
+                    1.6 + Math.random() * 0.8,                            // Much stronger upward movement
+                    (Math.random() - 0.5) * 0.3 + trainForwardDir.z * 0.1  // Slight train direction influence
                 );
                 smokeDir.normalize();
                 
-                // Calculate random speed (slightly faster)
-                const speed = 0.4 + Math.random() * 0.5;
+                // Calculate random speed (much faster initial movement to mimic curvature of a smoke emitter)
+                const speed = 1.2 + Math.random() * 0.8; // Greatly increased from 0.4 + random * 0.5
                 
                 // Add the particle to the system with MUCH larger max size
                 system.particles.push({
                     mesh: smokeMesh,
                     velocity: smokeDir.multiplyScalar(speed),
                     age: 0,
-                    lifespan: 3.0 + Math.random() * 1.5, // 3.0-4.5 second lifespan (longer)
-                    maxSize: 5.0 + Math.random() * 3.0, // MUCH larger max size (5.0-8.0)
+                    lifespan: 3.0 + Math.random() * 1.5, // 3.0-4.5 second lifespan
+                    maxSize: 15.0 + Math.random() * 5.0, // MUCH larger max size (at least 3x previous size)
                     rotation: new THREE.Vector3(
                         (Math.random() - 0.5) * 0.4, // Slower rotation
                         (Math.random() - 0.5) * 0.4,
@@ -367,7 +368,19 @@ export class DustParticleEffect {
                     
                     // Update position
                     particle.mesh.position.x += particle.velocity.x * clampedDelta;
-                    particle.mesh.position.y += particle.velocity.y * clampedDelta;
+                    
+                    // Apply drastic initial upward boost during first second for train smoke
+                    if (particle.isTrainSmoke && particle.age < 1.0) {
+                        // Calculate initial boost factor that diminishes over the first second
+                        const initialBoostFactor = Math.max(0, 1.0 - particle.age) * 8.0; // MUCH stronger effect (increased from 3.0 to 8.0)
+                        
+                        // Apply boosted Y velocity with added drastic upward movement
+                        particle.mesh.position.y += (particle.velocity.y + initialBoostFactor) * clampedDelta;
+                    } else {
+                        // Normal Y movement after first second
+                        particle.mesh.position.y += particle.velocity.y * clampedDelta;
+                    }
+                    
                     particle.mesh.position.z += particle.velocity.z * clampedDelta;
                     
                     // Update rotation
@@ -377,20 +390,24 @@ export class DustParticleEffect {
                     
                     let scale;
                     if (particle.isTrainSmoke) {
-                        // Train smoke scale animation - start small and grow to a very large size
-                        if (lifeRatio < 0.25) {
-                            // Quick initial expansion
-                            const growthProgress = lifeRatio / 0.25;
-                            const easedGrowth = growthProgress * growthProgress; // Quadratic easing for smoother growth
-                            scale = easedGrowth * particle.maxSize * 0.5; // Reach 50% of max size
+                        // Train smoke scale animation - exponential growth instead of linear
+                        // Start small and grow to a very large size
+                        if (lifeRatio < 0.3) {
+                            // Very fast initial expansion with exponential curve
+                            const growthProgress = lifeRatio / 0.3;
+                            // Use cubic easing for exponential growth
+                            const easedGrowth = growthProgress * growthProgress * growthProgress;
+                            scale = easedGrowth * particle.maxSize * 0.4; // Reach 40% of max size quickly
                         } else if (lifeRatio < 0.7) {
-                            // Continue expanding
-                            const additionalGrowth = (lifeRatio - 0.25) / 0.45 * 0.5; // Remaining 50%
-                            scale = particle.maxSize * (0.5 + additionalGrowth);
+                            // Continue expanding with exponential curve
+                            const growthProgress = (lifeRatio - 0.3) / 0.4;
+                            const easedGrowth = Math.pow(growthProgress, 1.8); // Exponential growth factor
+                            scale = particle.maxSize * (0.4 + easedGrowth * 0.5); // Add another 50% growth
                         } else {
-                            // Maintain size with slight expansion at the end
-                            const endExpansion = ((lifeRatio - 0.7) / 0.3) * 0.1; // Extra 10% expansion at the end
-                            scale = particle.maxSize * (1.0 + endExpansion);
+                            // Final expansion stage with continued exponential growth
+                            const growthProgress = (lifeRatio - 0.7) / 0.3;
+                            const easedGrowth = Math.pow(growthProgress, 1.5); // Slightly less aggressive exponential
+                            scale = particle.maxSize * (0.9 + easedGrowth * 0.1); // Final 10% growth
                         }
                         
                         // Fade out opacity near the end of life
