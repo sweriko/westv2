@@ -1,4 +1,4 @@
-A western extraction shooter for the browser.
+A western browser game demo.
 
 - v0 code (main branch). playtest it here: [beta.westwelt.com](https://beta.westwelt.com/)
 - latest code (WIP v1 Beta), [here](https://github.com/sweriko/westwelt-v1)
